@@ -1,0 +1,236 @@
+name: Go / Dependency, Build & Test
+
+# Counterpart of the GitLab Go module: Go:Dependency:Download -> build + test.
+# The module cache is resolved once; build and test then run in parallel against
+# it, both hard-dependent on that resolution.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Path to the Go module root. Monorepo children set this."
+      build-command:
+        required: false
+        type: string
+        default: "go build -trimpath -o bin/ ./..."
+        description: "Build command."
+      test-command:
+        required: false
+        type: string
+        default: "go test ./... -v 2>&1 | go-junit-report -set-exit-code > test-report/junit.xml"
+        description: "Unit test command. Must write JUnit XML into test-report/."
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the unit test job."
+      build-env:
+        required: false
+        type: string
+        default: ""
+        description: "Newline-separated KEY=VALUE pairs exported into build and test."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  TEST_REPORT_DIR: test-report
+  GOPATH: ${{ github.workspace }}/.go-cache
+  GOFLAGS: -mod=readonly
+
+jobs:
+  dependency:
+    name: "Go: Dependency Download"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Compute Module Cache Key
+        id: key
+        run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Module Cache
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .go-cache
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: go-
+
+      - name: Download Modules
+        run: go mod download
+
+      - name: Save Module Cache
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .go-cache
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Publish Dependency Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🐹 Go modules"
+            echo ""
+            echo "Cache key \`${{ steps.key.outputs.key }}\` (${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss — populated' }})."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  build:
+    name: "Go: Build"
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Export Build Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r KEY VAL; do
+            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
+            KEY="${KEY%"${KEY##*[![:space:]]}"}"
+            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
+          done <<< "${BUILD_ENV}"
+
+      - name: Restore Module Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .go-cache
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: go-
+
+      - name: Build
+        run: ${{ inputs.build-command }}
+
+      - name: Upload Binaries
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-binaries
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/bin/
+          if-no-files-found: ignore
+          retention-days: 7
+          include-hidden-files: true
+
+      - name: Publish Build Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📦 Go build"
+            echo ""
+            if [[ -d bin ]]; then
+              echo "| Binary | Size |"
+              echo "|---|---|"
+              for F in bin/*; do
+                [[ -f "${F}" ]] || continue
+                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
+              done
+            else
+              echo "No binaries were produced."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  test:
+    name: "Go: Unit Test"
+    if: ${{ inputs.run-tests }}
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Export Test Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r KEY VAL; do
+            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
+            KEY="${KEY%"${KEY##*[![:space:]]}"}"
+            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
+          done <<< "${BUILD_ENV}"
+
+      - name: Restore Module Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .go-cache
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: go-
+
+      - name: Run Unit Tests
+        run: |
+          set -euo pipefail
+          mkdir -p "${TEST_REPORT_DIR}"
+          ${{ inputs.test-command }}
+
+      - name: Upload Test Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-test-reports
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Report
+        if: always()
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
+        with:
+          report_paths: '${{ inputs.project-path || vars.PROJECT_PATH || ''.'' }}/test-report/**/*.xml'
+          token: ${{ github.token }}
+          check_name: 'Go Unit Test Results'
+          job_summary: true
+          job_summary_text: '### 🧪 Go test execution report'
+          detailed_summary: true
+          include_passed: true
+          fail_on_failure: true
+          require_tests: false

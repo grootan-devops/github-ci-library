@@ -1,0 +1,94 @@
+name: Python / Lint
+
+# Counterpart of the GitLab Python:Lint:Ruff / :MyPy / :ISort / :PyCodeStyle jobs.
+# One matrix leg per linter so all four run in parallel and each names itself.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Path to the Python project root. Monorepo children set this."
+      linters:
+        required: false
+        type: string
+        default: '["ruff","mypy","isort","pycodestyle"]'
+        description: "JSON array of linters to run in parallel."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
+
+jobs:
+  lint:
+    name: "Python Lint: ${{ matrix.linter }}"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        linter: ${{ fromJSON(inputs.linters) }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Restore uv Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .uv-cache
+          key: py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) }}
+          restore-keys: py-
+
+      - name: Sync Dependencies
+        run: uv sync --frozen --no-install-project --no-install-workspace
+
+      - name: Run ${{ matrix.linter }}
+        env:
+          LINTER: ${{ matrix.linter }}
+        run: |
+          set -euo pipefail
+          if ! uv run "${LINTER}" --version >/dev/null 2>&1; then
+            echo "::error title=${LINTER}::Not available. Add it to the project's dev dependencies."
+            exit 1
+          fi
+          case "${LINTER}" in
+            ruff)        uv run ruff check . ;;
+            mypy)        uv run mypy . ;;
+            isort)       uv run isort --check-only . ;;
+            pycodestyle) uv run pycodestyle --show-source . ;;
+            *)
+              echo "::error title=Lint::Unknown linter '${LINTER}'."
+              exit 1
+              ;;
+          esac
+
+      - name: Publish Lint Summary
+        if: always()
+        env:
+          LINTER: ${{ matrix.linter }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🐍 Python lint: ${LINTER}"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Passed." ;;
+              failure) echo "❌ Failed. See the job log for the offending files." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

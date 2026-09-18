@@ -1,0 +1,317 @@
+name: Release / Publish & Notify
+
+# Counterpart of the GitLab Release:Upload -> Release -> Release:Notification:Teams
+# chain.
+#
+# The release is assembled from the artifacts the pre-merge run produced, not
+# from a fresh build: the scan reports attached here describe the exact bytes
+# that were promoted.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: "Release tag, from init.yml."
+      upstream-run-id:
+        required: false
+        type: string
+        default: ""
+        description: "Run that built the candidate, from init.yml. Its artifacts become the release assets."
+      additional-artifacts:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated extra files or directories to attach. Directories are tarred."
+      draft:
+        required: false
+        type: boolean
+        default: false
+        description: "Create the release as a draft."
+      prerelease:
+        required: false
+        type: boolean
+        default: false
+        description: "Mark the release as a prerelease."
+      notify:
+        required: false
+        type: boolean
+        default: true
+        description: "Send the Microsoft Teams Adaptive Card notification."
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md
+  RELEASE_CHANGELOG_CARD_FILE_NAME: RELEASE_CHANGELOG_CARD.json
+  RELEASE_MIGRATION_FILE_NAME: RELEASE_MIGRATION.md
+  CONSOLIDATED_README_FILE_NAME: CONSOLIDATED_README.md
+  CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME: CONSOLIDATED_RELEASE_CHANGELOG.md
+  TRIVY_SCAN_REPORT_FILE_NAME: trivy_scan_report.tar.gz
+  TEST_REPORT_DIR: test-report
+
+jobs:
+  collect:
+    name: "Release: Collect Artifacts"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Download This Run's Artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_artifacts
+          merge-multiple: true
+
+      - name: Download Candidate Run's Artifacts
+        if: ${{ inputs.upstream-run-id != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          UPSTREAM_RUN_ID: ${{ inputs.upstream-run-id }}
+        run: |
+          set -euo pipefail
+          echo "📥 Restoring verification artifacts from run ${UPSTREAM_RUN_ID}..."
+          mkdir -p _artifacts
+          if gh run download "${UPSTREAM_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --dir _upstream 2>/dev/null; then
+            find _upstream -mindepth 1 -maxdepth 1 -type d -exec sh -c 'cp -a "$1"/. _artifacts/ 2>/dev/null || true' _ {} \;
+            rm -rf _upstream
+            echo "✅ Restored $(find _artifacts -type f | wc -l | tr -d ' ') files from the candidate run."
+          else
+            echo "::warning title=Release::Could not download artifacts from run ${UPSTREAM_RUN_ID}. The release will carry only this run's artifacts."
+          fi
+
+      - name: Consolidate Release Notes & Assets
+        env:
+          TAG: ${{ inputs.tag }}
+          ADDITIONAL_RELEASE_ARTIFACT: ${{ inputs.additional-artifacts }}
+        run: |
+          set -euo pipefail
+          if [[ -d _artifacts ]]; then
+            cp -a _artifacts/. . 2>/dev/null || true
+          fi
+
+          mkdir -p _release_assets
+
+          IMAGE_README=IMAGE_README.md
+          CHART_README=CHART_README.md
+          TF_README=TF_README.md
+
+          for FILE in IMAGE_INFO.md IMAGE_CVE.md image_trivy_scan_report.md; do
+            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${IMAGE_README}"
+          done
+          for FILE in CHART_INFO.md CHART_CVE.md; do
+            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${CHART_README}"
+          done
+          for FILE in TF_CVE.md; do
+            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${TF_README}"
+          done
+
+          : > "${CONSOLIDATED_README_FILE_NAME}"
+          for FILE in "${IMAGE_README}" "${CHART_README}" "${TF_README}" LICENSE_CVE.md SBOM_CVE.md; do
+            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${CONSOLIDATED_README_FILE_NAME}"
+          done
+
+          : > "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}"
+          for FILE in "${RELEASE_CHANGELOG_FILE_NAME}" "${RELEASE_MIGRATION_FILE_NAME}" "${CONSOLIDATED_README_FILE_NAME}"; do
+            if [[ -f "${FILE}" && -s "${FILE}" ]]; then
+              {
+                printf '\n'
+                cat "${FILE}"
+                printf '\n'
+              } >> "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}"
+            fi
+          done
+
+          if [[ ! -s "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}" ]]; then
+            echo "::warning title=Release::No changelog, migration guide or scan report was available. The release notes will be minimal."
+            echo "Release ${TAG}" > "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}"
+          fi
+
+          stage() {
+            if [[ -f "${1}" ]]; then
+              cp "${1}" _release_assets/
+              echo "  + ${1}"
+            fi
+          }
+
+          shopt -s nullglob
+          TRIVY_REPORTS=( ./*_trivy_scan_report.* )
+          shopt -u nullglob
+          if [[ ${#TRIVY_REPORTS[@]} -gt 0 ]]; then
+            tar -czf "${TRIVY_SCAN_REPORT_FILE_NAME}" "${TRIVY_REPORTS[@]}"
+            stage "${TRIVY_SCAN_REPORT_FILE_NAME}"
+          fi
+
+          stage installed_pkgs.txt
+          stage sbom.cdx.json
+          stage "${RELEASE_MIGRATION_FILE_NAME}"
+          stage "${RELEASE_CHANGELOG_FILE_NAME}"
+
+          shopt -s nullglob
+          for CHART_TGZ in ./*.tgz; do
+            cp "${CHART_TGZ}" _release_assets/
+            echo "  + ${CHART_TGZ}"
+          done
+          shopt -u nullglob
+
+          if [[ -d "${TEST_REPORT_DIR}" ]]; then
+            tar -czf "${TEST_REPORT_DIR}.tar.gz" "${TEST_REPORT_DIR}"
+            stage "${TEST_REPORT_DIR}.tar.gz"
+          fi
+
+          for ITEM in ${ADDITIONAL_RELEASE_ARTIFACT}; do
+            if [[ -f "${ITEM}" ]]; then
+              stage "${ITEM}"
+            elif [[ -d "${ITEM}" ]]; then
+              TAR_FILE="$(basename "${ITEM}").tar.gz"
+              tar -czf "${TAR_FILE}" -C "$(dirname "${ITEM}")" "$(basename "${ITEM}")"
+              stage "${TAR_FILE}"
+            else
+              echo "::warning title=Release::Additional artifact '${ITEM}' does not exist."
+            fi
+          done
+
+          echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') release assets."
+
+      - name: Publish Collection Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📥 Release payload"
+            echo ""
+            if [[ -d _release_assets ]]; then
+              echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') asset(s) for the release."
+            else
+              echo "⚠️ No assets were staged."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Release Payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-payload
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_release_assets/
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/CONSOLIDATED_RELEASE_CHANGELOG.md
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_CHANGELOG_CARD.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  publish:
+    name: "Release: Publish"
+    needs: collect
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download Release Payload
+        uses: actions/download-artifact@v8
+        with:
+          name: release-payload
+          path: payload
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v2
+        with:
+          tag_name: ${{ inputs.tag }}
+          name: Release ${{ inputs.tag }}
+          body_path: payload/CONSOLIDATED_RELEASE_CHANGELOG.md
+          files: payload/_release_assets/*
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          target_commitish: ${{ github.sha }}
+          fail_on_unmatched_files: false
+
+      - name: Publish Release Summary
+        if: always()
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## 🚀 Release ${TAG}"
+            echo ""
+            echo "[View the release](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
+            echo ""
+            if compgen -G "payload/_release_assets/*" > /dev/null; then
+              echo "| Asset | Size |"
+              echo "|---|---|"
+              for F in payload/_release_assets/*; do
+                [[ -f "${F}" ]] || continue
+                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
+              done
+            else
+              echo "_No assets were attached._"
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  notify:
+    name: "Release: Notify Teams"
+    if: ${{ inputs.notify }}
+    needs: publish
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download Release Payload
+        uses: actions/download-artifact@v8
+        with:
+          name: release-payload
+          path: payload
+
+      - name: Send Teams Adaptive Card
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL: ${{ secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL }}
+          SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          RELEASE_CHANGELOG_CARD_FILE_NAME: payload/RELEASE_CHANGELOG_CARD.json
+          RELEASE_CHANGELOG_FILE_NAME: payload/_release_assets/RELEASE_CHANGELOG.md
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/teams-notify.sh"
+
+      - name: Upload Notification Payload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: teams-notification
+          path: message.json
+          if-no-files-found: ignore
+          retention-days: 7

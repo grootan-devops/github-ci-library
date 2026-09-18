@@ -1,0 +1,147 @@
+name: Quality / SonarQube
+
+# Counterpart of the GitLab Sonarqube job. Runs in the SonarSource scanner image
+# and waits on the quality gate, so a failing gate fails the run.
+
+on:
+  workflow_call:
+    inputs:
+      project-version:
+        required: false
+        type: string
+        default: ""
+        description: "Version reported to SonarQube, from init.yml's tag."
+      project-key:
+        required: false
+        type: string
+        default: ""
+        description: "SonarQube project key. Defaults to vars.SONAR_PROJECT_KEY, then owner_repo."
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this; the key is suffixed with it."
+      wait-for-quality-gate:
+        required: false
+        type: boolean
+        default: true
+        description: "Fail the job when the quality gate fails."
+
+jobs:
+  sonarqube:
+    name: "Quality: SonarQube"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    container:
+      image: ${{ vars.IMAGE_REGISTRY }}/${{ vars.SONAR_SCANNER_IMAGE }}
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    env:
+      SONAR_USER_HOME: ${{ github.workspace }}/.sonar
+      SONAR_SCANNER_OPTS: -XX:MaxRAMPercentage=90.0 -XX:InitialRAMPercentage=90.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      # Sonar attributes issues to authors and measures new code against a
+      # baseline, so it needs the whole history, not a shallow clone.
+      - name: Checkout Full History
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download Test & Coverage Reports
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "*-test-reports"
+          merge-multiple: true
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+      - name: Cache Sonar Analysis Data
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .sonar
+          key: sonar-${{ github.repository_id }}
+          restore-keys: sonar-
+
+      - name: Validate SonarQube Configuration
+        env:
+          SONAR_URL: ${{ vars.SONAR_URL }}
+          SONARQUBE_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          [[ -n "${SONAR_URL}" ]] || MISSING+=("vars.SONAR_URL")
+          [[ -n "${SONARQUBE_TOKEN}" ]] || MISSING+=("secrets.SONARQUBE_TOKEN")
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "::error title=SonarQube::Missing configuration: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - name: Run Analysis & Quality Gate
+        env:
+          SONAR_URL: ${{ vars.SONAR_URL }}
+          SONAR_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
+          PROJECT_KEY_INPUT: ${{ inputs.project-key }}
+          VAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          PROJECT_VERSION: ${{ inputs.project-version }}
+          SUBPATH: ${{ inputs.project-path }}
+          WAIT: ${{ inputs.wait-for-quality-gate }}
+        run: |
+          set -euo pipefail
+
+          PROJECT_KEY="${PROJECT_KEY_INPUT:-${VAR_PROJECT_KEY:-${GITHUB_REPOSITORY//\//_}}}"
+          if [[ -n "${SUBPATH}" && "${SUBPATH}" != "." ]]; then
+            SLUG="$(tr -c 'a-zA-Z0-9_.:-' '-' <<<"${SUBPATH}" | sed 's/-\+/-/g;s/^-//;s/-$//')"
+            PROJECT_KEY="${PROJECT_KEY}_${SLUG}"
+          fi
+          echo "Analysing as project key '${PROJECT_KEY}'."
+
+          SCANNER_ARGS=(
+            "-Dsonar.projectKey=${PROJECT_KEY}"
+            "-Dsonar.host.url=${SONAR_URL}"
+            "-Dsonar.token=${SONAR_TOKEN}"
+            "-Dsonar.qualitygate.wait=${WAIT}"
+            "-Dsonar.links.ci=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions"
+            "-Dsonar.links.scm=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          )
+          [[ -n "${PROJECT_VERSION}" ]] && SCANNER_ARGS+=("-Dsonar.projectVersion=${PROJECT_VERSION}")
+          [[ -f sonar.properties ]] && SCANNER_ARGS+=("-Dproject.settings=sonar.properties")
+
+          sonar-scanner "${SCANNER_ARGS[@]}"
+          echo "SONAR_PROJECT_KEY=${PROJECT_KEY}" >> "${GITHUB_ENV}"
+
+      - name: Save Sonar Analysis Cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v6
+        with:
+          path: .sonar
+          key: sonar-${{ github.repository_id }}
+
+      - name: Publish Quality Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+          DASHBOARD: ${{ vars.SONAR_EXTERNAL_URL || vars.SONAR_URL }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🔍 SonarQube"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Analysis complete and the quality gate passed." ;;
+              failure) echo "❌ Analysis failed or the quality gate was not met." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            if [[ -n "${DASHBOARD}" && -n "${SONAR_PROJECT_KEY:-}" ]]; then
+              echo ""
+              echo "[Open the dashboard](${DASHBOARD}/dashboard?id=${SONAR_PROJECT_KEY})"
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

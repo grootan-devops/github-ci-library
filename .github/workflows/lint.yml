@@ -1,0 +1,154 @@
+name: Lint / Config & Documentation
+
+# Counterpart of the GitLab `lint` stage: Docker:Lint, YAML:Lint, Chart:Values:Lint,
+# Changelog:Lint and Migration:Lint. Each linter is its own job so they run in
+# parallel and the run graph names whichever one failed.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+      lint-yaml-files:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated YAML globs. Empty lints every tracked YAML file."
+      lint-md-files:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated markdown globs. Empty lints every tracked markdown file."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+  DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+  HADOLINT_IGNORE: ${{ vars.HADOLINT_IGNORE }}
+  MD_LINT_IGNORE_RULE: ${{ vars.MD_LINT_IGNORE_RULE }}
+  CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+  MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+
+jobs:
+  lint:
+    name: "Lint: ${{ matrix.name }}"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    # fail-fast off: a linting run should report every problem at once, not stop
+    # at whichever linter happened to finish first.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Dockerfile
+            script: docker-lint.sh
+            subject: dockerfile
+          - name: YAML
+            script: yaml-lint.sh
+            subject: yaml
+          - name: Chart Values
+            script: yaml-lint.sh
+            subject: chart-values
+          - name: Changelog
+            script: markdown-lint.sh
+            subject: changelog
+          - name: Migration Guide
+            script: markdown-lint.sh
+            subject: migration
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Resolve Lint Target
+        id: target
+        env:
+          SUBJECT: ${{ matrix.subject }}
+          INPUT_YAML_FILES: ${{ inputs.lint-yaml-files }}
+          INPUT_MD_FILES: ${{ inputs.lint-md-files }}
+        run: |
+          set -euo pipefail
+
+          SKIP=false
+          case "${SUBJECT}" in
+            dockerfile)
+              [[ -f "${DOCKERFILE}" ]] || SKIP=true
+              ;;
+            chart-values)
+              if [[ -f "${CHART_DIR}/values.yaml" ]]; then
+                echo "LINT_YAML_FILES=${CHART_DIR}/values.yaml" >> "${GITHUB_ENV}"
+              else
+                SKIP=true
+              fi
+              ;;
+            yaml)
+              echo "LINT_YAML_FILES=${INPUT_YAML_FILES}" >> "${GITHUB_ENV}"
+              ;;
+            changelog)
+              if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
+                echo "LINT_MD_FILES=${INPUT_MD_FILES:-${CHANGELOG_FILE_NAME}}" >> "${GITHUB_ENV}"
+              else
+                SKIP=true
+              fi
+              ;;
+            migration)
+              if [[ -f "${MIGRATION_FILE_NAME}" ]]; then
+                echo "LINT_MD_FILES=${MIGRATION_FILE_NAME}" >> "${GITHUB_ENV}"
+              else
+                SKIP=true
+              fi
+              ;;
+          esac
+
+          echo "skip=${SKIP}" >> "${GITHUB_OUTPUT}"
+          if [[ "${SKIP}" == "true" ]]; then
+            echo "Nothing to lint for '${SUBJECT}'."
+          fi
+
+      - name: Run ${{ matrix.name }} Linter
+        if: ${{ steps.target.outputs.skip != 'true' }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/${{ matrix.script }}"
+
+      - name: Publish Lint Summary
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          SKIPPED: ${{ steps.target.outputs.skip }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🧹 Lint: ${NAME}"
+            echo ""
+            if [[ "${SKIPPED}" == "true" ]]; then
+              echo "⏭️ Nothing to lint — subject not present in this repository."
+            else
+              case "${OUTCOME}" in
+                success) echo "✅ Passed." ;;
+                failure) echo "❌ Failed. See the job log for the exact rule and line." ;;
+                *)       echo "Status: ${OUTCOME}" ;;
+              esac
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

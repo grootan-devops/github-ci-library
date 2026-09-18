@@ -1,0 +1,443 @@
+name: Image / Docker Build, Push & Promote
+
+# Counterpart of the GitLab Docker:Lint, Image:Build, Image:Push and
+# Image:Promote jobs.
+#
+# Unlike every other workflow in this library, the build job does not run inside
+# the organisation build container: building an image needs the daemon/buildkit
+# on the runner itself. The lint job does use the container, since hadolint is
+# already installed there.
+#
+# Every organisation base image is passed to the build as a build argument, so a
+# packaging Dockerfile pins nothing itself — bumping a base image is a change to
+# one organisation variable, not to every Dockerfile.
+
+on:
+  workflow_call:
+    inputs:
+      image-tag:
+        required: true
+        type: string
+        description: "Tag to publish, from init.yml's image-push-tag."
+      image-repository:
+        required: true
+        type: string
+        description: "Repository to push to, from init.yml's image-push-repository."
+      is-release:
+        required: false
+        type: boolean
+        default: false
+        description: "true on a production release: promote the scanned candidate by digest instead of rebuilding."
+      release-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Production tag to promote to, from init.yml's tag."
+      candidate-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Exact candidate tag to promote, from init.yml."
+      image-dev-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Candidate repository to promote from, from init.yml."
+      build-args:
+        required: false
+        type: string
+        default: ""
+        description: "Extra newline-separated KEY=VALUE build arguments, appended to the organisation defaults."
+      build-context:
+        required: false
+        type: string
+        default: ""
+        description: "Build context. Defaults to the project path."
+      target:
+        required: false
+        type: string
+        default: ""
+        description: "Dockerfile stage to build."
+      save-tar:
+        required: false
+        type: boolean
+        default: true
+        description: "Export the built image as an artifact so the scan reads the exact bytes offline."
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+      lint:
+        required: false
+        type: boolean
+        default: true
+        description: "Run hadolint against the Dockerfile."
+      test:
+        required: false
+        type: boolean
+        default: false
+        description: "Run a smoke test inside the built image (GitLab's .Image:Test)."
+      test-script:
+        required: false
+        type: string
+        default: "ci_image_test.sh"
+        description: "Script executed inside the image, relative to test-path."
+      test-path:
+        required: false
+        type: string
+        default: ""
+        description: "Directory mounted into the image at /tmp. Defaults to the project path."
+      test-shell:
+        required: false
+        type: string
+        default: "bash"
+        description: "Entrypoint used to run the test script."
+
+    outputs:
+      image-ref-digest:
+        description: "Digest-pinned reference of the published image"
+        value: ${{ jobs.build.outputs.IMAGE_REF_DIGEST }}
+      image-digest:
+        description: "Digest of the published image"
+        value: ${{ jobs.build.outputs.IMAGE_DIGEST }}
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+  REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+  IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
+  IMAGE_TAR_FILE_NAME: image.tar.gz
+
+jobs:
+  lint:
+    name: "Image: Dockerfile Lint"
+    if: ${{ inputs.lint }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Lint Dockerfile
+        env:
+          HADOLINT_IGNORE: ${{ vars.HADOLINT_IGNORE }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/docker-lint.sh"
+
+  build:
+    name: "Image: Build & Push"
+    needs: lint
+    # A failing lint must block the build, but a *skipped* lint (the caller set
+    # lint: false) must not — and GitHub skips a dependent job whose dependency
+    # was skipped unless the condition tolerates it explicitly.
+    if: ${{ !cancelled() && !inputs.is-release && needs.lint.result != 'failure' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    outputs:
+      IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
+      IMAGE_REF_DIGEST: ${{ steps.ref.outputs.IMAGE_REF_DIGEST }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Set Up Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v3
+        with:
+          driver-opts: image=moby/buildkit:v0.29.0
+
+      - name: Propagate Runner Host Entries To BuildKit
+        env:
+          BUILDER_NAME: ${{ steps.buildx.outputs.name }}
+        run: |
+          set -euo pipefail
+          CONTAINER="buildx_buildkit_${BUILDER_NAME}0"
+          if ! docker inspect "${CONTAINER}" > /dev/null 2>&1; then
+            echo "::notice title=BuildKit hosts::${CONTAINER} not running; skipping host propagation"
+            exit 0
+          fi
+          while read -r IP HOSTS; do
+            case "${IP}" in '' | '#'* | 127.0.0.1 | ::1) continue ;; esac
+            for HOST in ${HOSTS}; do
+              case "${HOST}" in '#'*) break ;; esac
+              echo "Adding ${IP} ${HOST}"
+              docker exec -u 0 "${CONTAINER}" \
+                sh -c "grep -qE '[[:space:]]${HOST}([[:space:]]|\$)' /etc/hosts || echo '${IP} ${HOST}' >> /etc/hosts"
+            done
+          done < /etc/hosts
+          docker exec "${CONTAINER}" cat /etc/hosts
+
+      - name: Authenticate To Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
+        with:
+          registry: ${{ vars.IMAGE_REGISTRY }}
+          username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+
+      - name: Assemble Base Image Build Arguments
+        id: args
+        env:
+          EXTRA_BUILD_ARGS: ${{ inputs.build-args }}
+          VERSION: ${{ inputs.image-tag }}
+          REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          MICRO_ROOT_BASE_IMAGE: ${{ vars.MICRO_ROOT_BASE_IMAGE }}
+          NGINX_MICRO_BASE_IMAGE: ${{ vars.NGINX_MICRO_BASE_IMAGE }}
+          PYTHON_312_MICRO_BASE_IMAGE: ${{ vars.PYTHON_312_MICRO_BASE_IMAGE }}
+          NODE_JS_24_MICRO_BASE_IMAGE: ${{ vars.NODE_JS_24_MICRO_BASE_IMAGE }}
+          JAVA_25_MICRO_BASE_IMAGE: ${{ vars.JAVA_25_MICRO_BASE_IMAGE }}
+        run: |
+          set -euo pipefail
+          {
+            echo "args<<BUILD_ARGS_EOF"
+            echo "VERSION=${VERSION}"
+            echo "MICRO_ROOT_BASE_IMAGE=${REGISTRY}/${MICRO_ROOT_BASE_IMAGE}"
+            echo "NGINX_MICRO_BASE_IMAGE=${REGISTRY}/${NGINX_MICRO_BASE_IMAGE}"
+            echo "PYTHON_312_MICRO_BASE_IMAGE=${REGISTRY}/${PYTHON_312_MICRO_BASE_IMAGE}"
+            echo "NODE_JS_24_MICRO_BASE_IMAGE=${REGISTRY}/${NODE_JS_24_MICRO_BASE_IMAGE}"
+            echo "JAVA_25_MICRO_BASE_IMAGE=${REGISTRY}/${JAVA_25_MICRO_BASE_IMAGE}"
+            echo "JAVA25_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
+            echo "GO_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
+            echo "TOOLKIT_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
+            echo "BUILDAH_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
+            if [[ -n "${EXTRA_BUILD_ARGS}" ]]; then
+              printf '%s\n' "${EXTRA_BUILD_ARGS}"
+            fi
+            echo "BUILD_ARGS_EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build & Push Image
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6
+        with:
+          context: ${{ inputs.build-context || inputs.project-path || vars.PROJECT_PATH || '.' }}
+          file: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ vars.DOCKERFILE || 'Dockerfile' }}
+          target: ${{ inputs.target }}
+          push: true
+          tags: ${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:${{ inputs.image-tag }}
+          build-args: ${{ steps.args.outputs.args }}
+          provenance: false
+          labels: |
+            org.opencontainers.image.version=${{ inputs.image-tag }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.ref.name=${{ github.ref_name }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: |
+            type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ github.ref_name }}
+            type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ github.event.repository.default_branch }}
+          cache-to: type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ github.ref_name }},mode=max
+
+      - name: Publish Digest-Pinned Reference
+        id: ref
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          REPO: ${{ inputs.image-repository }}
+        run: |
+          set -euo pipefail
+          REF="${REGISTRY_HOST}/${REPO}@${DIGEST}"
+          echo "IMAGE_REF_DIGEST=${REF}" >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "### 🐳 Container Image"
+            echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| **Tag** | \`${REGISTRY_HOST}/${REPO}:${{ inputs.image-tag }}\` |"
+            echo "| **Digest** | \`${DIGEST}\` |"
+            echo "| **Pinned reference** | \`${REF}\` |"
+            echo ""
+          } > "${IMAGE_INFO_FILE_NAME}"
+          cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Export Image Tar For Offline Scanning
+        if: ${{ inputs.save-tar }}
+        env:
+          REF: ${{ steps.ref.outputs.IMAGE_REF_DIGEST }}
+        run: |
+          set -euo pipefail
+          docker pull "${REF}"
+          docker save "${REF}" | gzip > "${IMAGE_TAR_FILE_NAME}"
+
+      - name: Upload Image Tar
+        if: ${{ inputs.save-tar && !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-tar
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/image.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload Image Info
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-info
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  test:
+    name: "Image: Smoke Test"
+    needs: build
+    if: ${{ !cancelled() && inputs.test && !inputs.is-release && needs.build.result == 'success' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Authenticate To Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
+        with:
+          registry: ${{ vars.IMAGE_REGISTRY }}
+          username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+
+      - name: Run Smoke Test Inside The Image
+        env:
+          IMAGE_REF: ${{ needs.build.outputs.IMAGE_REF_DIGEST }}
+          TEST_SCRIPT: ${{ inputs.test-script }}
+          TEST_PATH: ${{ inputs.test-path }}
+          TEST_SHELL: ${{ inputs.test-shell }}
+        run: |
+          set -euo pipefail
+          MOUNT="${TEST_PATH:-.}"
+
+          if [[ ! -f "${MOUNT}/${TEST_SCRIPT}" ]]; then
+            echo "::error title=Image test::${MOUNT}/${TEST_SCRIPT} not found. Provide the script, or set test: false."
+            exit 1
+          fi
+
+          docker run --rm -a STDOUT -a STDERR \
+            -v "${PWD}/${MOUNT}:/tmp/image-test:ro" \
+            --entrypoint "${TEST_SHELL}" \
+            "${IMAGE_REF}" -c "cd /tmp/image-test && ./${TEST_SCRIPT}"
+
+      - name: Publish Smoke Test Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🧪 Image smoke test"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Passed inside the built image." ;;
+              failure) echo "❌ Failed inside the built image. See the job log." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  promote:
+    name: "Image: Promote"
+    if: ${{ inputs.is-release }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Promote Candidate Image To Production
+        env:
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          TAG: ${{ inputs.release-tag }}
+          CANDIDATE_TAG: ${{ inputs.candidate-tag }}
+          DEV_REPOSITORY: ${{ inputs.image-dev-repository }}
+          PROD_REPOSITORY: ${{ inputs.image-repository }}
+        run: |
+          set -euo pipefail
+          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
+
+          DEV_IMAGE="${REGISTRY_HOST}/${DEV_REPOSITORY}"
+          PROD_IMAGE="${REGISTRY_HOST}/${PROD_REPOSITORY}"
+          SOURCE=""
+
+          if [[ -n "${CANDIDATE_TAG}" ]] && crane manifest "${DEV_IMAGE}:${CANDIDATE_TAG}" >/dev/null 2>&1; then
+            SOURCE="${DEV_IMAGE}:${CANDIDATE_TAG}"
+          else
+            RC_TAG="$(crane ls "${DEV_IMAGE}" 2>/dev/null | grep -E "^${TAG//./\\.}-" | sort -V | tail -n1 || true)"
+            if [[ -n "${RC_TAG}" ]] && crane manifest "${DEV_IMAGE}:${RC_TAG}" >/dev/null 2>&1; then
+              SOURCE="${DEV_IMAGE}:${RC_TAG}"
+            elif crane manifest "${DEV_IMAGE}:${TAG}" >/dev/null 2>&1; then
+              SOURCE="${DEV_IMAGE}:${TAG}"
+            fi
+          fi
+
+          if [[ -z "${SOURCE}" ]]; then
+            echo "::error title=Image promote::No candidate image found in ${DEV_IMAGE} for ${TAG}. Nothing was scanned that could be promoted."
+            exit 1
+          fi
+
+          SOURCE_DIGEST="$(crane digest "${SOURCE}")"
+          echo "📦 Promoting ${SOURCE} (${SOURCE_DIGEST}) to ${PROD_IMAGE}:${TAG}"
+
+          crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}"
+
+          crane tag "${PROD_IMAGE}:${TAG}" latest
+          MAJOR="$(grep -Eo '^[0-9]+' <<<"${TAG}" || true)"
+          MINOR="$(grep -Eo '^[0-9]+\.[0-9]+' <<<"${TAG}" || true)"
+          [[ -n "${MAJOR}" ]] && crane tag "${PROD_IMAGE}:${TAG}" "${MAJOR}"
+          [[ -n "${MINOR}" ]] && crane tag "${PROD_IMAGE}:${TAG}" "${MINOR}"
+
+          PROD_DIGEST="$(crane digest "${PROD_IMAGE}:${TAG}")"
+          {
+            echo "### 🐳 Container Image"
+            echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| **Promoted from** | \`${SOURCE}\` |"
+            echo "| **Released as** | \`${PROD_IMAGE}:${TAG}\` |"
+            echo "| **Aliases** | \`latest\`${MAJOR:+, \`${MAJOR}\`}${MINOR:+, \`${MINOR}\`} |"
+            echo "| **Digest** | \`${PROD_DIGEST}\` |"
+            echo ""
+          } > "${IMAGE_INFO_FILE_NAME}"
+          cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Image Info
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-info
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
+          if-no-files-found: ignore
+          retention-days: 7

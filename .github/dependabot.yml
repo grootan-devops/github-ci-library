@@ -1,0 +1,39 @@
+# Dependabot configuration for the ci-library repository itself.
+#
+# This library pins every third-party action to a commit SHA with a version
+# comment. Bumping 25 workflows by hand is how `actions/setup-java` ended up
+# pinned to two different majors at once, so Dependabot owns it instead.
+#
+# Consumer repositories need their own .github/dependabot.yml -- this file is
+# not inherited. See docs/dependabot.md for a copy-paste starting point.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    # One pull request for all of them: the workflows must stay on matching
+    # versions, so reviewing them together is the point.
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "chore(actions)"
+    labels:
+      - dependencies
+      - github-actions
+    # Majors of the toolkit actions change their inputs; take those deliberately.
+    ignore:
+      - dependency-name: actions/checkout
+        update-types: ["version-update:semver-major"]
+      - dependency-name: actions/cache
+        update-types: ["version-update:semver-major"]
+      - dependency-name: actions/upload-artifact
+        update-types: ["version-update:semver-major"]
+      - dependency-name: actions/download-artifact
+        update-types: ["version-update:semver-major"]

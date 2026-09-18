@@ -1,0 +1,142 @@
+name: Mono / Changed Project Discovery
+
+# Counterpart of the GitLab monorepo parent pipeline (mono/.gitlab-ci.yml and
+# common/.mono.gitlab-ci.yml).
+#
+# GitHub Actions has no child pipelines: a reusable workflow cannot be invoked
+# from a matrix. So instead of triggering children, this workflow answers the
+# question the parent pipeline existed to answer — which projects changed — and
+# returns a matrix the caller fans its own jobs out over.
+#
+#   discover:
+#     uses: <org>/ci-library/.github/workflows/mono.yml@<ref>
+#   build:
+#     needs: discover
+#     if: ${{ needs.discover.outputs.any-changed == 'true' }}
+#     strategy:
+#       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
+#     uses: <org>/ci-library/.github/workflows/python-build.yml@<ref>
+#     with:
+#       project-path: ${{ matrix.path }}
+
+on:
+  workflow_call:
+    inputs:
+      projects:
+        required: false
+        type: string
+        default: ""
+        description: >-
+          JSON array of child projects, e.g.
+          [{"name":"api","path":"services/api"},{"name":"web","path":"services/web"}].
+          Defaults to vars.MONO_PROJECTS.
+      always-run-all:
+        required: false
+        type: boolean
+        default: false
+        description: "Return every project regardless of what changed. Release runs should set this."
+
+    outputs:
+      matrix:
+        description: "strategy.matrix object covering the changed projects"
+        value: ${{ jobs.discover.outputs.MATRIX }}
+      any-changed:
+        description: "true when at least one project changed"
+        value: ${{ jobs.discover.outputs.ANY_CHANGED }}
+      changed-count:
+        description: "Number of projects selected"
+        value: ${{ jobs.discover.outputs.CHANGED_COUNT }}
+
+jobs:
+  discover:
+    name: "Mono: Discover Changed Projects"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    outputs:
+      MATRIX: ${{ steps.discover.outputs.MATRIX }}
+      ANY_CHANGED: ${{ steps.discover.outputs.ANY_CHANGED }}
+      CHANGED_COUNT: ${{ steps.discover.outputs.CHANGED_COUNT }}
+
+    steps:
+      - name: Checkout Full History
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Discover Changed Projects
+        id: discover
+        env:
+          PROJECTS_INPUT: ${{ inputs.projects }}
+          PROJECTS_VAR: ${{ vars.MONO_PROJECTS }}
+          ALWAYS_RUN_ALL: ${{ inputs.always-run-all }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+
+          PROJECTS="${PROJECTS_INPUT:-${PROJECTS_VAR:-}}"
+          if [[ -z "${PROJECTS}" ]]; then
+            echo "::error title=Monorepo::No projects declared. Set the 'projects' input or vars.MONO_PROJECTS to a JSON array of {name, path} objects."
+            exit 1
+          fi
+          if ! jq -e 'type == "array" and length > 0' <<<"${PROJECTS}" >/dev/null 2>&1; then
+            echo "::error title=Monorepo::'projects' is not a non-empty JSON array."
+            exit 1
+          fi
+
+          if [[ "${ALWAYS_RUN_ALL}" == "true" ]]; then
+            echo "always-run-all is set — selecting every project."
+            SELECTED="${PROJECTS}"
+          else
+            if [[ -n "${BASE_SHA}" ]]; then
+              COMPARE_BASE="${BASE_SHA}"
+            else
+              COMPARE_BASE="$(git rev-parse HEAD~1 2>/dev/null || true)"
+            fi
+
+            if [[ -z "${COMPARE_BASE}" ]]; then
+              echo "::warning title=Monorepo::No comparison base (first commit?). Selecting every project."
+              SELECTED="${PROJECTS}"
+            else
+              CHANGED_FILES="$(git diff --name-only "${COMPARE_BASE}" HEAD)"
+              echo "Comparing against ${COMPARE_BASE} — $(wc -l <<<"${CHANGED_FILES}" | tr -d ' ') changed files."
+
+              SELECTED="$(jq -c --arg files "${CHANGED_FILES}" '
+                ($files | split("\n")) as $changed
+                | map(select(
+                    .path as $p
+                    | ($changed | any(startswith($p + "/") or . == $p))
+                  ))
+              ' <<<"${PROJECTS}")"
+            fi
+          fi
+
+          COUNT="$(jq 'length' <<<"${SELECTED}")"
+          MATRIX="$(jq -c '{include: .}' <<<"${SELECTED}")"
+          ANY_CHANGED=false
+          [[ "${COUNT}" -gt 0 ]] && ANY_CHANGED=true
+
+          {
+            echo "MATRIX=${MATRIX}"
+            echo "ANY_CHANGED=${ANY_CHANGED}"
+            echo "CHANGED_COUNT=${COUNT}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo "### 📦 Monorepo: changed projects"
+            echo ""
+            if [[ "${COUNT}" -eq 0 ]]; then
+              echo "No project changed — downstream jobs will not run."
+            else
+              echo "| Project | Path |"
+              echo "|---|---|"
+              jq -r '.[] | "| **\(.name)** | `\(.path)` |"' <<<"${SELECTED}"
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

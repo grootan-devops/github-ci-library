@@ -1,0 +1,63 @@
+name: Notify / Microsoft Teams
+
+# Standalone counterpart of the GitLab Release:Notification:Teams job, for
+# callers that want the Adaptive Card without the rest of the release chain.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: "Version the card announces."
+      changelog-artifact:
+        required: false
+        type: string
+        default: ""
+        description: "Artifact holding RELEASE_CHANGELOG.md / RELEASE_CHANGELOG_CARD.json."
+
+jobs:
+  notify:
+    name: "Notify: Teams"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download Changelog Artifact
+        if: ${{ inputs.changelog-artifact != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.changelog-artifact }}
+          path: .
+
+      - name: Send Teams Adaptive Card
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL: ${{ secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL }}
+          SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/teams-notify.sh"
+
+      - name: Upload Notification Payload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: teams-notification
+          path: message.json
+          if-no-files-found: ignore
+          retention-days: 7

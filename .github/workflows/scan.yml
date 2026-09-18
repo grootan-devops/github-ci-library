@@ -1,0 +1,265 @@
+name: Scan / Trivy Security, Config, SBOM & License
+
+# Counterpart of the GitLab `.scan-script` template and the Image:Scan,
+# Chart:Scan, Terraform:Scan, License:Scan and SBOM:Scan jobs that extend it.
+#
+# The engine itself lives in scripts/trivy-scan.sh — one implementation, shared
+# by every scan type and covered by shellcheck, instead of a copy per workflow.
+#
+# Suppressions live in the project's ignored-cves.yml, keyed by scan type, and
+# each entry needs a substantive reason. A suppression for a finding that is no
+# longer present fails the scan, so the file cannot rot.
+
+on:
+  workflow_call:
+    inputs:
+      scan-type:
+        required: true
+        type: string
+        description: "image | config | license | sbom"
+      config-type:
+        required: false
+        type: string
+        default: ""
+        description: "chart | terraform. Required when scan-type is config."
+      image-ref:
+        required: false
+        type: string
+        default: ""
+        description: "Exact image reference to scan, ideally repo@sha256:... Preferred over tag lookup."
+      image-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Production image repository, from init.yml. Used when no image-ref is given."
+      target-version:
+        required: false
+        type: string
+        default: ""
+        description: "Tag or version to resolve when neither an image tar nor image-ref is present."
+      scan-path:
+        required: false
+        type: string
+        default: ""
+        description: "Directory to scan for config scans. Defaults to the chart directory."
+      image-artifact:
+        required: false
+        type: string
+        default: ""
+        description: "Artifact holding an image tar to scan offline, instead of pulling from the registry."
+      sbom-artifact:
+        required: false
+        type: string
+        default: ""
+        description: "Artifact holding the CycloneDX SBOM to scan."
+      helm-values:
+        required: false
+        type: string
+        default: ""
+        description: "Inline YAML overriding chart values while rendering for a config scan."
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+      fail-on-warnings:
+        required: false
+        type: boolean
+        default: false
+        description: >-
+          Fail the job on warning-only findings (unfixable vulnerabilities,
+          justified suppressions). Mirrors GitLab's allow_failure on exit code 2,
+          which lets warnings be visible without blocking the pipeline.
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+  SCAN_TYPE: ${{ inputs.scan-type }}
+  CONFIG_TYPE: ${{ inputs.config-type }}
+  IMAGE_REF: ${{ inputs.image-ref }}
+  IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+  TARGET_VERSION: ${{ inputs.target-version }}
+  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+  IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX || '/dev' }}
+  SKIP_CVE_SCAN: ${{ vars.SKIP_CVE_SCAN || 'false' }}
+  TRIVY_TIMEOUT: ${{ vars.TRIVY_TIMEOUT || '60m' }}
+  TRIVY_IGNORE_CONFIG_FILE: ${{ vars.TRIVY_IGNORE_CONFIG_FILE || 'ignored-cves.yml' }}
+  TRIVY_IGNORED_LICENSE_CLASSIFICATIONS: ${{ vars.TRIVY_IGNORED_LICENSE_CLASSIFICATIONS || 'notice,permissive,unencumbered' }}
+  # KSV-0011 CPU limit, KSV-0014 read-only root FS, KSV-0015/0016 requests,
+  # KSV-0018 memory limit, KSV-0110/0113 default namespace, KSV-0125 registry.
+  # These are set by the platform at deploy time, not by the chart under scan.
+  TRIVY_IGNORE_CVES: ${{ vars.TRIVY_IGNORE_CVES || 'KSV-0011 KSV-0014 KSV-0015 KSV-0016 KSV-0018 KSV-0110 KSV-0113 KSV-0125' }}
+  TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
+  TRIVY_HOST: ${{ vars.TRIVY_HOST }}
+  IMAGE_TAR_FILE_NAME: image.tar.gz
+  SBOM_FILE: sbom.cdx.json
+
+jobs:
+  scan:
+    name: "Scan: ${{ inputs.scan-type }}${{ inputs.config-type && format(' ({0})', inputs.config-type) || '' }}"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Validate Scan Request
+        run: |
+          set -euo pipefail
+          case "${SCAN_TYPE}" in
+            image|config|license|sbom) ;;
+            *)
+              echo "::error title=Scan::Invalid scan-type '${SCAN_TYPE}'. Expected image, config, license or sbom."
+              exit 1
+              ;;
+          esac
+          if [[ "${SCAN_TYPE}" == "config" && -z "${CONFIG_TYPE}" ]]; then
+            echo "::error title=Scan::config-type is required when scan-type is 'config'. Expected chart or terraform."
+            exit 1
+          fi
+
+      - name: Restore Trivy Database Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .trivycache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Download Image Tar
+        if: ${{ inputs.image-artifact != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.image-artifact }}
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+      - name: Download SBOM
+        if: ${{ inputs.sbom-artifact != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.sbom-artifact }}
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+      - name: Authenticate To Registry
+        if: ${{ inputs.scan-type == 'image' && inputs.image-artifact == '' }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.docker
+          AUTH="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_PASSWORD}" | base64 -w0)"
+          jq -n --arg reg "${IMAGE_REGISTRY}" --arg auth "${AUTH}" \
+            '{auths: {($reg): {auth: $auth}}}' > ~/.docker/config.json
+
+      - name: Render Chart For Config Scan
+        if: ${{ inputs.scan-type == 'config' && inputs.config-type == 'chart' }}
+        env:
+          HELM_TEST_VALUES: ${{ inputs.helm-values }}
+          SCAN_PATH_INPUT: ${{ inputs.scan-path }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SCAN_PATH="${SCAN_PATH_INPUT:-${CHART_DIR}}"
+
+          if [[ -n "${IMAGE_REGISTRY}" ]]; then
+            printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${IMAGE_REGISTRY}" --username "${REGISTRY_USERNAME}" --password-stdin
+          fi
+          helm dependency update "${SCAN_PATH}/"
+
+          if [[ -z "${HELM_TEST_VALUES}" ]]; then
+            helm template debug "${SCAN_PATH}" -f "${SCAN_PATH}/values.yaml" > /dev/null
+          else
+            OVERRIDE="${PWD}/_scan_override.yaml"
+            printf '%s' "${HELM_TEST_VALUES}" > "${OVERRIDE}"
+            helm template debug "${SCAN_PATH}" -f "${SCAN_PATH}/values.yaml" -f "${OVERRIDE}" > /dev/null
+            echo "TRIVY_HELM_VALUES_FILE=${OVERRIDE}" >> "${GITHUB_ENV}"
+          fi
+          echo "IAC_SCAN_PATH=${SCAN_PATH}" >> "${GITHUB_ENV}"
+
+      - name: Resolve Scan Path & Report Name
+        run: |
+          set -euo pipefail
+          case "${SCAN_TYPE}" in
+            image)   PREFIX="image" ;;
+            sbom)    PREFIX="sbom" ;;
+            license) PREFIX="license" ;;
+            config)  PREFIX="${CONFIG_TYPE}" ;;
+          esac
+          echo "TRIVY_SCAN_REPORT_NAME=${PREFIX}_trivy_scan_report" >> "${GITHUB_ENV}"
+
+          if [[ "${SCAN_TYPE}" == "config" && "${CONFIG_TYPE}" == "terraform" ]]; then
+            echo "IAC_SCAN_PATH=${{ inputs.scan-path || '.' }}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Run Trivy Scan
+        id: scan
+        env:
+          TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
+          TRIVY_JUNIT_TEMPLATE_FILE: ${{ github.workspace }}/.ci-library/templates/trivy-junit.tpl
+          FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+        run: |
+          set -uo pipefail
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/trivy-scan.sh"
+          RESULT=$?
+
+          case "${RESULT}" in
+            0) echo "Scan clean." ;;
+            2)
+              if [[ "${FAIL_ON_WARNINGS}" == "true" ]]; then
+                echo "::error title=Scan::Warnings present and fail-on-warnings is enabled."
+                exit 1
+              fi
+              echo "::warning title=Scan::Completed with warnings only. See the job summary."
+              ;;
+            *) exit "${RESULT}" ;;
+          esac
+
+      - name: Upload Scan Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scan-${{ inputs.scan-type }}${{ inputs.config-type && format('-{0}', inputs.config-type) || '' }}-reports
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/*_trivy_scan_report.json
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/*_trivy_scan_report.md
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/*_trivy_scan_report.junit
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_CVE.md
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/CHART_CVE.md
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/TF_CVE.md
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/LICENSE_CVE.md
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/SBOM_CVE.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Findings As Checks
+        if: ${{ !cancelled() }}
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
+        with:
+          report_paths: '${{ inputs.project-path || vars.PROJECT_PATH || ''.'' }}/*_trivy_scan_report.junit'
+          token: ${{ github.token }}
+          check_name: 'Trivy ${{ inputs.scan-type }} findings'
+          job_summary: false
+          annotate_only: true
+          fail_on_failure: false
+          require_tests: false

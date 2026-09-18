@@ -1,0 +1,119 @@
+name: CI · PR Verification
+
+# The library's own pipeline, the counterpart of ci-templates/.gitlab-ci.yml.
+# It dogfoods its own reusable workflows: the same lint and release guards every
+# consuming project gets, applied to the library itself.
+
+on:
+  pull_request:
+    branches: [master, main]
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  version:
+    name: "Version: Resolve"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    outputs:
+      TAG: ${{ steps.read.outputs.TAG }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Read VERSION
+        id: read
+        run: |
+          set -euo pipefail
+          if [[ ! -s VERSION ]]; then
+            echo "::error title=Version::VERSION file is missing or empty."
+            exit 1
+          fi
+          TAG="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "${TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=Version::'${TAG}' is not a semantic version."
+            exit 1
+          fi
+          echo "TAG=${TAG}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### 🏷️ Library version"
+            echo ""
+            echo "Releasing as \`${TAG}\` on merge."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # actionlint and shellcheck ship in the organisation build container.
+  self-lint:
+    name: "Self Lint: ${{ matrix.tool }}"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [actionlint, shellcheck]
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Run ${{ matrix.tool }}
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          set -euo pipefail
+          case "${TOOL}" in
+            actionlint)  actionlint -color ;;
+            shellcheck)  shellcheck scripts/*.sh ;;
+          esac
+
+      - name: Publish Self Lint Summary
+        if: always()
+        env:
+          TOOL: ${{ matrix.tool }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🔧 Self lint: ${TOOL}"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Passed." ;;
+              failure) echo "❌ Failed. See the job log." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  lint:
+    name: Lint
+    uses: ./.github/workflows/lint.yml
+    secrets: inherit
+    with:
+      lint-yaml-files: ".github/workflows/*.yml .yamllint.yml"
+
+  check:
+    name: Release Guards
+    needs: version
+    uses: ./.github/workflows/check.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.TAG }}

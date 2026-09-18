@@ -1,0 +1,236 @@
+name: Java / Dependency, Build & Test
+
+# Counterpart of the GitLab Java module: Java:Dependency:Download ->
+# Java:Build + Java:Test:Unit, on the organisation's JDK build container.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Path to the Maven project root. Monorepo children set this."
+      build-command:
+        required: false
+        type: string
+        default: "mvn -B -o package -DskipTests"
+        description: "Build command. Offline by default — dependencies come from the shared cache."
+      test-command:
+        required: false
+        type: string
+        default: "mvn -B -o test"
+        description: "Unit test command. Surefire writes JUnit XML itself."
+      test-report-glob:
+        required: false
+        type: string
+        default: "target/surefire-reports/*.xml"
+        description: "JUnit XML produced by the test command, relative to project-path."
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the unit test job."
+      build-env:
+        required: false
+        type: string
+        default: ""
+        description: "Newline-separated KEY=VALUE pairs exported into build and test."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  MAVEN_OPTS: -Djava.awt.headless=true -Dmaven.repo.local=${{ github.workspace }}/.m2/repository
+
+jobs:
+  dependency:
+    name: "Java: Dependency Download"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Compute Dependency Cache Key
+        id: key
+        run: echo "key=m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Maven Repository
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: m2-
+
+      - name: Resolve Dependencies
+        run: mvn -B dependency:go-offline -q
+
+      - name: Save Maven Repository
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .m2
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Publish Dependency Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### ☕ Java dependencies"
+            echo ""
+            echo "Cache key \`${{ steps.key.outputs.key }}\` (${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss — populated' }})."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  build:
+    name: "Java: Build"
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Export Build Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r KEY VAL; do
+            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
+            KEY="${KEY%"${KEY##*[![:space:]]}"}"
+            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
+          done <<< "${BUILD_ENV}"
+
+      - name: Restore Maven Repository
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: m2-
+
+      - name: Build
+        run: ${{ inputs.build-command }}
+
+      - name: Upload Artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: java-artifacts
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/target/*.jar
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/target/*.war
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Build Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📦 Java build"
+            echo ""
+            if compgen -G "target/*.jar" > /dev/null || compgen -G "target/*.war" > /dev/null; then
+              echo "| Artifact | Size |"
+              echo "|---|---|"
+              for F in target/*.jar target/*.war; do
+                [[ -f "${F}" ]] || continue
+                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
+              done
+            else
+              echo "No JAR or WAR artifacts were produced."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  test:
+    name: "Java: Unit Test"
+    if: ${{ inputs.run-tests }}
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      checks: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Export Test Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r KEY VAL; do
+            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
+            KEY="${KEY%"${KEY##*[![:space:]]}"}"
+            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
+          done <<< "${BUILD_ENV}"
+
+      - name: Restore Maven Repository
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: m2-
+
+      - name: Run Unit Tests
+        run: ${{ inputs.test-command }}
+
+      - name: Upload Test Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: java-test-reports
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Report
+        if: always()
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
+        with:
+          report_paths: '${{ inputs.project-path || vars.PROJECT_PATH || ''.'' }}/${{ inputs.test-report-glob }}'
+          token: ${{ github.token }}
+          check_name: 'Java Unit Test Results'
+          job_summary: true
+          job_summary_text: '### 🧪 Java test execution report'
+          detailed_summary: true
+          include_passed: true
+          fail_on_failure: true
+          require_tests: false

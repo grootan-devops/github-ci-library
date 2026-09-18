@@ -1,0 +1,252 @@
+name: Node / Dependency, Build & Test
+
+# Counterpart of the GitLab Node module: Node:Dependency:Download ->
+# Node:Build + Node:Test:Unit.
+#
+# There is deliberately no production-install job. The packaging Dockerfile installs
+# offline from the bind-mounted npm cache, so a separate job re-running the same
+# `npm ci --omit=dev` proves nothing the image build does not, and a dependency
+# directory is never an artifact.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Path to the Node project root. Monorepo children set this."
+      build-command:
+        required: false
+        type: string
+        default: "npm run build"
+        description: "Build command."
+      test-command:
+        required: false
+        type: string
+        default: "npm test"
+        description: "Unit test command. Must write JUnit XML into test-report/."
+      build-artifact-path:
+        required: false
+        type: string
+        default: "dist"
+        description: "Directory produced by the build command."
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the unit test job."
+      build-env:
+        required: false
+        type: string
+        default: ""
+        description: "Newline-separated KEY=VALUE pairs exported into build and test."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  TEST_REPORT_DIR: test-report
+  npm_config_cache: ${{ github.workspace }}/.npm
+
+jobs:
+  dependency:
+    name: "Node: Dependency Download"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Compute Dependency Cache Key
+        id: key
+        run: echo "key=node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path || vars.PROJECT_PATH || '.')) }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore npm Cache
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .npm
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: node-
+
+      - name: Download Dependencies
+        run: npm ci --include=dev --prefer-offline --no-audit --no-fund
+
+      - name: Save npm Cache
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .npm
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Publish Dependency Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📗 Node dependencies"
+            echo ""
+            echo "Cache key \`${{ steps.key.outputs.key }}\` (${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss — populated' }})."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  build:
+    name: "Node: Build"
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Export Build Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r KEY VAL; do
+            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
+            KEY="${KEY%"${KEY##*[![:space:]]}"}"
+            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
+          done <<< "${BUILD_ENV}"
+
+      - name: Restore npm Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .npm
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: node-
+
+      - name: Install Dependencies
+        run: npm ci --include=dev --prefer-offline --no-audit --no-fund
+
+      - name: Build
+        run: ${{ inputs.build-command }}
+
+      - name: Upload Build Output
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-dist
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ inputs.build-artifact-path }}/
+          if-no-files-found: ignore
+          retention-days: 7
+          include-hidden-files: true
+
+      - name: Publish Build Summary
+        if: always()
+        env:
+          OUT_DIR: ${{ inputs.build-artifact-path }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📦 Node build"
+            echo ""
+            if [[ -d "${OUT_DIR}" ]]; then
+              echo "Output \`${OUT_DIR}/\` — $(du -sh "${OUT_DIR}" | cut -f1) across $(find "${OUT_DIR}" -type f | wc -l | tr -d ' ') files."
+            else
+              echo "No build output at \`${OUT_DIR}/\`."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  test:
+    name: "Node: Unit Test"
+    if: ${{ inputs.run-tests }}
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    env:
+      NODE_ENV: test
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Export Test Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r KEY VAL; do
+            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
+            KEY="${KEY%"${KEY##*[![:space:]]}"}"
+            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
+          done <<< "${BUILD_ENV}"
+
+      - name: Restore npm Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .npm
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: node-
+
+      - name: Install Dependencies
+        run: npm ci --include=dev --prefer-offline --no-audit --no-fund
+
+      - name: Run Unit Tests
+        run: |
+          set -euo pipefail
+          mkdir -p "${TEST_REPORT_DIR}" coverage
+          ${{ inputs.test-command }}
+
+      - name: Upload Test & Coverage Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-test-reports
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/coverage/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Report
+        if: always()
+        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
+        with:
+          report_paths: '${{ inputs.project-path || vars.PROJECT_PATH || ''.'' }}/test-report/**/*.xml'
+          token: ${{ github.token }}
+          check_name: 'Node Unit Test Results'
+          job_summary: true
+          job_summary_text: '### 🧪 Node test execution report'
+          detailed_summary: true
+          include_passed: true
+          fail_on_failure: true
+          require_tests: false
+          exclude_sources: '/node_modules/,/dist/,/coverage/'

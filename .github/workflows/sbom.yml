@@ -1,0 +1,192 @@
+name: SBOM / Generate & Scan
+
+# Counterpart of the GitLab SBOM:Generate -> SBOM:Scan pair. Generation and the
+# vulnerability scan of the generated document are separate jobs, so a scan
+# failure is distinguishable from a generation failure and the SBOM is published
+# as an artifact either way.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+      scan:
+        required: false
+        type: boolean
+        default: true
+        description: "Scan the generated SBOM for vulnerabilities."
+      fail-on-warnings:
+        required: false
+        type: boolean
+        default: false
+        description: "Fail on warning-only findings. Mirrors GitLab's allow_failure on exit code 2."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  SBOM_FILE: sbom.cdx.json
+  TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
+
+jobs:
+  generate:
+    name: "SBOM: Generate"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Restore Trivy Database Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .trivycache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Restore Maven Repository
+        if: ${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) != '' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) }}
+          restore-keys: m2-
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          set -euo pipefail
+
+          if [[ -f pom.xml ]]; then
+            if [[ -d "${GITHUB_WORKSPACE}/.m2/repository" ]]; then
+              mkdir -p ~/.m2
+              ln -sfn "${GITHUB_WORKSPACE}/.m2/repository" ~/.m2/repository
+            else
+              echo "::warning title=SBOM::Maven cache did not restore — resolving inline. Run the Java dependency job first to avoid this."
+              mvn dependency:go-offline -q -B -DskipTests || mvn dependency:resolve -q -B -DskipTests || true
+            fi
+          fi
+
+          trivy fs --format cyclonedx --output "${SBOM_FILE}" \
+            --skip-version-check --skip-db-update --skip-java-db-update .
+
+      - name: Upload SBOM
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish SBOM Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📄 SBOM"
+            echo ""
+            if [[ -f "${SBOM_FILE}" ]]; then
+              COMPONENTS="$(jq '.components | length' "${SBOM_FILE}" 2>/dev/null || echo '?')"
+              echo "Generated \`${SBOM_FILE}\` — ${COMPONENTS} components, $(du -h "${SBOM_FILE}" | cut -f1)."
+            else
+              echo "❌ No SBOM was produced."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # Deliberately not a nested `uses: ./.github/workflows/scan.yml`: a relative
+  # reusable-workflow path resolves against the caller's repository, not this
+  # library's, so it would break for every consumer. The scan engine is shared
+  # as a script instead.
+  scan:
+    name: "SBOM: Scan"
+    if: ${{ inputs.scan }}
+    needs: generate
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    env:
+      SCAN_TYPE: sbom
+      TRIVY_SCAN_REPORT_NAME: sbom_trivy_scan_report
+      TRIVY_HOST: ${{ vars.TRIVY_HOST }}
+      TRIVY_TIMEOUT: ${{ vars.TRIVY_TIMEOUT || '60m' }}
+      TRIVY_IGNORE_CONFIG_FILE: ${{ vars.TRIVY_IGNORE_CONFIG_FILE || 'ignored-cves.yml' }}
+      SKIP_CVE_SCAN: ${{ vars.SKIP_CVE_SCAN || 'false' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download SBOM
+        uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+      - name: Restore Trivy Database Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .trivycache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Scan SBOM
+        env:
+          TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
+          TRIVY_JUNIT_TEMPLATE_FILE: ${{ github.workspace }}/.ci-library/templates/trivy-junit.tpl
+          FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+        run: |
+          set -uo pipefail
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/trivy-scan.sh"
+          RESULT=$?
+          case "${RESULT}" in
+            0) echo "Scan clean." ;;
+            2)
+              if [[ "${FAIL_ON_WARNINGS}" == "true" ]]; then
+                echo "::error title=SBOM scan::Warnings present and fail-on-warnings is enabled."
+                exit 1
+              fi
+              echo "::warning title=SBOM scan::Completed with warnings only. See the job summary."
+              ;;
+            *) exit "${RESULT}" ;;
+          esac
+
+      - name: Upload Scan Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scan-sbom-reports
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/sbom_trivy_scan_report.*
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/SBOM_CVE.md
+          if-no-files-found: ignore
+          retention-days: 7

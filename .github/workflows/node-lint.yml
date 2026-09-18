@@ -1,0 +1,117 @@
+name: Node / Lint
+
+# Counterpart of the GitLab Node:Lint job. Biome is the single source of truth
+# for formatting and linting, so the project must declare biome.json.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Path to the Node project root. Monorepo children set this."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  npm_config_cache: ${{ github.workspace }}/.npm
+  BIOME_REPORT: biome-report.txt
+
+jobs:
+  lint:
+    name: "Node Lint: biome"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Verify Biome Configuration
+        run: |
+          set -euo pipefail
+          if [[ -f biome.json ]]; then
+            echo "biome.json found."
+            exit 0
+          fi
+          echo "::error title=Biome::biome.json not found in ${PROJECT_PATH}. Create it at the project root."
+          {
+            echo "### 📗 Node lint: biome"
+            echo ""
+            echo "❌ \`biome.json\` is missing. Create it at the project root:"
+            echo ""
+            echo '```json'
+            echo '{'
+            # shellcheck disable=SC2016 # $schema is a JSON key, not a shell variable
+            echo '  "$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",'
+            echo '  "formatter": { "lineWidth": 320 },'
+            echo '  "files": {'
+            echo '    "includes": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.json", "**/*.html", "**/*.css", "**/*.scss", "!!node_modules", "!!dist", "!!coverage"]'
+            echo '  }'
+            echo '}'
+            echo '```'
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit 1
+
+      - name: Restore npm Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .npm
+          key: node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path || vars.PROJECT_PATH || '.')) }}
+          restore-keys: node-
+
+      - name: Run Biome
+        id: biome
+        run: |
+          set -uo pipefail
+          biome check --max-diagnostics=none > "${BIOME_REPORT}" 2>&1
+          BIOME_EXIT=$?
+          cat "${BIOME_REPORT}"
+          exit ${BIOME_EXIT}
+
+      - name: Publish Lint Summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.biome.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📗 Node lint: biome"
+            echo ""
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ Passed."
+            elif [[ -s "${BIOME_REPORT}" ]]; then
+              echo "❌ Failed."
+              echo ""
+              echo "<details><summary>Biome diagnostics</summary>"
+              echo ""
+              echo '```'
+              tail -c 60000 "${BIOME_REPORT}"
+              echo '```'
+              echo ""
+              echo "</details>"
+            else
+              echo "Status: ${OUTCOME}"
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Biome Report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-biome-report
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/biome-report.txt
+          if-no-files-found: ignore
+          retention-days: 7

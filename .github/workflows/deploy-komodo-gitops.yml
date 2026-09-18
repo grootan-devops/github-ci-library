@@ -1,0 +1,325 @@
+name: Deploy / GitOps Komodo Synchronization
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: "Target environment (dev, staging, prod)"
+      gitops-repo:
+        required: true
+        type: string
+        description: "GitOps repository name (e.g. <org>/<repo>-gitops-compose)"
+      gitops-branch:
+        required: true
+        type: string
+        description: "GitOps branch to update"
+      gitops-compose-file:
+        required: false
+        type: string
+        default: "docker-compose.yml"
+        description: "Path to docker-compose.yml file inside the GitOps repository"
+      gitops-service-image-yq-path:
+        required: true
+        type: string
+        description: "yq path to the service image in docker-compose.yml (e.g. .services.app.image)"
+      komodo-server:
+        required: false
+        type: string
+        default: ""
+        description: "Komodo server URL (e.g. https://komodo.example.com). Defaults to vars.KOMODO_SERVER."
+      komodo-stack-name:
+        required: true
+        type: string
+        description: "Komodo stack name to redeploy"
+      image-tag:
+        required: true
+        type: string
+        description: "Container image tag to deploy"
+      dev-repository-suffix:
+        required: false
+        type: string
+        default: "/dev"
+        description: "Appended verbatim to a repository path for development artifacts, e.g. \"/dev\" gives <repository>/dev. Set to \"\" to publish candidates and releases to the same repository."
+      image-repository:
+        required: true
+        type: string
+        description: "Base container image repository. Images are always read from <image-repository>/dev."
+      build-env:
+        required: false
+        default: ""
+        type: string
+        description: "Newline-separated KEY=VALUE pairs of environment variables to export"
+
+    secrets:
+      IMAGE_REGISTRY_USERNAME:
+        required: true
+        description: "Registry username used to verify the image."
+      IMAGE_REGISTRY_PASSWORD:
+        required: true
+        description: "Registry password or token used to verify the image."
+      KOMODO_API_KEY:
+        required: false
+        description: "Komodo API key used to trigger the stack redeploy (defaults to secrets.KOMODO_API_KEY)."
+      KOMODO_API_SECRET:
+        required: false
+        description: "Komodo API secret used to trigger the stack redeploy (defaults to secrets.KOMODO_API_SECRET)."
+      GITOPS_TOKEN:
+        required: false
+        description: "Token for the GitOps repository. Falls back to GITHUB_TOKEN."
+
+jobs:
+  komodo-deploy:
+    name: Sync Komodo Stack
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Validate Deployment Configuration
+        env:
+          GITOPS_REPO: ${{ inputs.gitops-repo }}
+          GITOPS_BRANCH: ${{ inputs.gitops-branch }}
+          COMPOSE_FILE: ${{ inputs.gitops-compose-file }}
+          YQ_PATH: ${{ inputs.gitops-service-image-yq-path }}
+          KOMODO_SERVER: ${{ inputs.komodo-server || vars.KOMODO_SERVER || '' }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          KOMODO_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
+          KOMODO_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          [[ -z "${GITOPS_REPO}" ]] && MISSING+=("gitops-repo")
+          [[ -z "${GITOPS_BRANCH}" ]] && MISSING+=("gitops-branch")
+          [[ -z "${COMPOSE_FILE}" ]] && MISSING+=("gitops-compose-file")
+          [[ -z "${YQ_PATH}" ]] && MISSING+=("gitops-service-image-yq-path")
+          [[ -z "${KOMODO_SERVER}" ]] && MISSING+=("komodo-server (or vars.KOMODO_SERVER)")
+          [[ -z "${STACK_NAME}" ]] && MISSING+=("komodo-stack-name")
+          [[ -z "${KOMODO_KEY}" ]] && MISSING+=("KOMODO_API_KEY secret")
+          [[ -z "${KOMODO_SECRET}" ]] && MISSING+=("KOMODO_API_SECRET secret")
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "::error::[HARD FAILURE] Missing mandatory deployment configuration: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Export Custom Environment Variables
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: |
+          set -euo pipefail
+          while IFS='=' read -r key val; do
+            key="${key#"${key%%[![:space:]]*}"}"
+            key="${key%"${key##*[![:space:]]}"}"
+            [[ -z "${key}" || "${key}" =~ ^# ]] && continue
+            printf '%s=%s\n' "${key}" "${val}" >> "${GITHUB_ENV}"
+          done <<< "${BUILD_ENV}"
+
+      - name: Validate Container Image in Registry
+        env:
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_REPO: ${{ inputs.image-repository }}
+          DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
+            printf '%s' "${REGISTRY_PASSWORD}" | docker login "${REGISTRY_HOST}" -u "${REGISTRY_USERNAME}" --password-stdin
+          fi
+
+          TARGET_REPO="${IMAGE_REPO}${DEV_SUFFIX}"
+          if [[ -n "${TARGET_REPO}" ]]; then
+            FULL_IMAGE="${REGISTRY_HOST}/${TARGET_REPO}:${IMAGE_TAG}"
+            echo "Validating image '${FULL_IMAGE}'..."
+            if docker manifest inspect "${FULL_IMAGE}" >/dev/null 2>&1; then
+              echo "✅ Container image '${FULL_IMAGE}' verified in registry."
+            else
+              echo "::warning::Container image '${FULL_IMAGE}' could not be verified in registry. Proceeding with deployment."
+            fi
+          fi
+
+      - name: Mutate GitOps Compose Configuration
+        id: gitops_commit
+        env:
+          GITOPS_REPO: ${{ inputs.gitops-repo }}
+          GITOPS_BRANCH: ${{ inputs.gitops-branch }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          COMPOSE_FILE: ${{ inputs.gitops-compose-file }}
+          YQ_PATH: ${{ inputs.gitops-service-image-yq-path }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPO: ${{ inputs.image-repository }}
+          DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          REPO_DIR="_gitops_worktree"
+          rm -rf "${REPO_DIR}"
+
+          TARGET_REPO="${IMAGE_REPO}${DEV_SUFFIX}"
+          NEW_IMAGE="${REGISTRY_HOST}/${TARGET_REPO}:${IMAGE_TAG}"
+
+          echo "Cloning GitOps repo '${GITOPS_REPO}' (branch: ${GITOPS_BRANCH})..."
+          AUTH_URL="https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git"
+          git clone --depth 1 --branch "${GITOPS_BRANCH}" "${AUTH_URL}" "${REPO_DIR}"
+
+          TARGET_COMPOSE="${REPO_DIR}/${COMPOSE_FILE}"
+          if [[ ! -f "${TARGET_COMPOSE}" ]]; then
+            echo "::error::Compose file '${COMPOSE_FILE}' not found in GitOps repository."
+            exit 1
+          fi
+
+          CURRENT_IMAGE="$(yq -r "${YQ_PATH}" "${TARGET_COMPOSE}" 2>/dev/null || echo "")"
+          echo "Current image: ${CURRENT_IMAGE:-<empty>}"
+          echo "New image:     ${NEW_IMAGE}"
+
+          yq -i "${YQ_PATH} = \"${NEW_IMAGE}\"" "${TARGET_COMPOSE}"
+
+          COMMIT_SHA=""
+          if git -C "${REPO_DIR}" diff --quiet; then
+            echo "No changes detected in ${COMPOSE_FILE}. Image is already up to date."
+            COMMIT_SHA="$(git -C "${REPO_DIR}" rev-parse HEAD)"
+          else
+            echo "Changes detected:"
+            git -C "${REPO_DIR}" diff "${COMPOSE_FILE}"
+
+            git -C "${REPO_DIR}" config user.name "github-actions[bot]"
+            git -C "${REPO_DIR}" config user.email "github-actions[bot]@users.noreply.github.com"
+            git -C "${REPO_DIR}" add "${COMPOSE_FILE}"
+            git -C "${REPO_DIR}" commit -m "chore(gitops): update ${STACK_NAME} image to ${NEW_IMAGE} [skip ci]"
+            git -C "${REPO_DIR}" push origin "${BRANCH}"
+            COMMIT_SHA="$(git -C "${REPO_DIR}" rev-parse HEAD)"
+            echo "Pushed GitOps commit ${COMMIT_SHA} to ${BRANCH}."
+          fi
+
+          echo "commit_sha=${COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
+          echo "NEW_IMAGE_REF=${NEW_IMAGE}" >> "${GITHUB_ENV}"
+
+      - name: Trigger Komodo Stack Deployment
+        id: trigger_komodo
+        env:
+          KOMODO_SERVER: ${{ inputs.komodo-server || vars.KOMODO_SERVER || '' }}
+          KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
+          KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${KOMODO_API_KEY:-}" || -z "${KOMODO_API_SECRET:-}" ]]; then
+            echo "::error::KOMODO_API_KEY and KOMODO_API_SECRET are required to trigger deployment."
+            exit 1
+          fi
+
+          echo "Triggering redeployment for Komodo stack '${STACK_NAME}'..."
+
+          BODY_FILE="${RUNNER_TEMP}/komodo-update-stack.json"
+          HTTP_CODE="$(curl -sSL --location \
+            --output "${BODY_FILE}" --write-out '%{http_code}' \
+            --request POST "${KOMODO_SERVER}/api/v1/update-stack" \
+            --header "Content-Type: application/json" \
+            --header "x-api-key: ${KOMODO_API_KEY}" \
+            --header "x-api-secret: ${KOMODO_API_SECRET}" \
+            --data "{\"name\": \"${STACK_NAME}\"}")"
+
+          RESPONSE="$(cat "${BODY_FILE}" 2>/dev/null || echo "")"
+          echo "Komodo update-stack response (HTTP ${HTTP_CODE}): ${RESPONSE}"
+
+          if [[ ! "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
+            echo "::error::Komodo rejected the redeployment request for stack '${STACK_NAME}' (HTTP ${HTTP_CODE})."
+            exit 1
+          fi
+
+          EXEC_ID="$(jq -r '.execution_id // .id // .data.execution_id // empty' <<<"${RESPONSE}" 2>/dev/null || echo "")"
+          if [[ -z "${EXEC_ID}" ]]; then
+            echo "::notice::Komodo accepted the request (HTTP ${HTTP_CODE}) without an execution id; it will be treated as asynchronous."
+          fi
+
+          echo "execution_id=${EXEC_ID}" >> "${GITHUB_OUTPUT}"
+
+      - name: Poll Komodo Execution Status
+        id: poll_komodo
+        env:
+          KOMODO_SERVER: ${{ inputs.komodo-server || vars.KOMODO_SERVER || '' }}
+          KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
+          KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          EXEC_ID: ${{ steps.trigger_komodo.outputs.execution_id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${EXEC_ID}" ]]; then
+            echo "⚠️ Komodo accepted the request without an execution ID; completion cannot be verified."
+            echo "status=ACCEPTED_ASYNC" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          SYNC_TIMEOUT=300
+          echo "Tracking Komodo execution: ${EXEC_ID} (timeout: ${SYNC_TIMEOUT}s)..."
+          START_TIME=$(date +%s)
+          POLL_INTERVAL=10
+          STATUS="UNKNOWN"
+
+          while true; do
+            STATUS_RESP=$(curl -fsSL --location \
+              --request GET "${KOMODO_SERVER}/api/v1/execution/${EXEC_ID}" \
+              --header "x-api-key: ${KOMODO_API_KEY}" \
+              --header "x-api-secret: ${KOMODO_API_SECRET}" 2>/dev/null || echo "{}")
+
+            STATUS=$(echo "${STATUS_RESP}" | jq -r '.status // .data.status // empty' 2>/dev/null || echo "UNKNOWN")
+            echo "Deployment status: ${STATUS}"
+
+            case "${STATUS}" in
+              SUCCESS|success|Completed|completed)
+                echo "✅ Komodo stack '${STACK_NAME}' deployed successfully."
+                echo "status=SUCCESS" >> "${GITHUB_OUTPUT}"
+                break
+                ;;
+              FAILED|failed|Error|error)
+                echo "::error::Komodo deployment failed. Response: ${STATUS_RESP}"
+                echo "status=FAILED" >> "${GITHUB_OUTPUT}"
+                exit 1
+                ;;
+              *)
+                CURRENT_TIME=$(date +%s)
+                ELAPSED=$((CURRENT_TIME - START_TIME))
+                if [[ ${ELAPSED} -ge ${SYNC_TIMEOUT} ]]; then
+                  echo "::error::Komodo deployment timed out after ${SYNC_TIMEOUT}s."
+                  echo "status=TIMEOUT" >> "${GITHUB_OUTPUT}"
+                  exit 1
+                fi
+                echo "Waiting ${POLL_INTERVAL}s... (${ELAPSED}s elapsed)"
+                sleep "${POLL_INTERVAL}"
+                ;;
+            esac
+          done
+
+      - name: Publish Komodo Deployment Summary
+        if: always()
+        run: |
+          {
+            echo "## 🦎 Komodo GitOps Deployment Summary"
+            echo ""
+            echo "| Property | Value |"
+            echo "| :--- | :--- |"
+            echo "| **Environment** | \`${{ inputs.environment }}\` |"
+            echo "| **Stack Name** | \`${{ inputs.komodo-stack-name }}\` |"
+            echo "| **Deployed Image** | \`${{ env.NEW_IMAGE_REF || inputs.image-tag }}\` |"
+            echo "| **GitOps Repository** | \`${{ inputs.gitops-repo }}\` |"
+            echo "| **GitOps Commit** | \`${{ steps.gitops_commit.outputs.commit_sha || 'N/A' }}\` |"
+            echo "| **Komodo Execution ID** | \`${{ steps.trigger_komodo.outputs.execution_id || 'N/A' }}\` |"
+            echo "| **Deployment Verdict** | **${{ steps.poll_komodo.outputs.status || job.status }}** |"
+          } >> "${GITHUB_STEP_SUMMARY}"

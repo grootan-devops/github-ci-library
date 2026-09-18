@@ -1,0 +1,91 @@
+name: Trivy / Warm Database Cache
+
+# Counterpart of the GitLab Trivy:Cache:Warm job. Downloads the policy and Java
+# databases once per run so every downstream scan restores them instead of each
+# pulling them independently.
+
+on:
+  workflow_call:
+    inputs:
+      enable-java-db:
+        required: false
+        type: string
+        default: "auto"
+        description: "auto | true | false. auto downloads the Java DB only when pom.xml is present."
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
+
+jobs:
+  warm:
+    name: "Trivy: Warm Cache"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Restore Trivy Database Cache
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .trivycache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Warm Policy & Java Databases
+        env:
+          ENABLE_JAVA_DB: ${{ inputs.enable-java-db }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p .trivy-checks-warm
+          trivy config --skip-version-check .trivy-checks-warm || true
+          rmdir .trivy-checks-warm 2>/dev/null || true
+
+          WANT_JAVA="${ENABLE_JAVA_DB}"
+          if [[ "${WANT_JAVA}" == "auto" ]]; then
+            if [[ -f pom.xml ]]; then WANT_JAVA=true; else WANT_JAVA=false; fi
+          fi
+
+          if [[ "${WANT_JAVA}" == "true" ]]; then
+            echo "Warming trivy-java-db for downstream image and SBOM scans..."
+            trivy image --download-java-db-only --skip-version-check
+          else
+            echo "No pom.xml and enable-java-db is not true — skipping trivy-java-db."
+          fi
+
+      - name: Save Trivy Database Cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v6
+        with:
+          path: .trivycache
+          key: trivy-db-${{ github.run_id }}
+
+      - name: Publish Cache Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🗄️ Trivy database cache"
+            echo ""
+            echo "Warmed into \`trivy-db-${GITHUB_RUN_ID}\` — $(du -sh .trivycache 2>/dev/null | cut -f1 || echo 'empty')."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

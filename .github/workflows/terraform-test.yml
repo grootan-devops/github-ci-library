@@ -1,0 +1,141 @@
+name: Terraform / Module Test
+
+# Counterpart of the GitLab Terraform:Module:Test and
+# Terraform:Module:Test:Destroy jobs. The destroy job runs only when the test
+# job fails, so a test that provisioned real infrastructure and then blew up
+# does not leave it behind.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+      test-timeout:
+        required: false
+        type: string
+        default: "1h"
+        description: "go test timeout for the module test suite."
+      destroy-on-failure:
+        required: false
+        type: boolean
+        default: true
+        description: "Run terraform destroy when the test job fails."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  TF_LOG_FILE_NAME: tf_test.log
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+jobs:
+  test:
+    name: "Terraform: Module Test"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Run Module Test Suite
+        env:
+          TF_TEST_TIMEOUT: ${{ inputs.test-timeout }}
+        run: |
+          set -euo pipefail
+          cd tests
+          go test -v -timeout "${TF_TEST_TIMEOUT}" 2>&1 | tee "${TF_LOG_FILE_NAME}"
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: terraform-test-artifacts
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/tests/tf_test.log
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test_output.tf
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/terraform.tfstate
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/terraform.tfstate.backup
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🌍 Terraform module test"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Passed." ;;
+              failure) echo "❌ Failed — the destroy job will tear down anything the test provisioned." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  destroy:
+    name: "Terraform: Test Teardown"
+    needs: test
+    # Only on failure: a passing test tears down its own fixtures. This exists so
+    # a crashed test cannot strand real infrastructure.
+    if: ${{ failure() && inputs.destroy-on-failure }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Download Test State
+        uses: actions/download-artifact@v8
+        with:
+          name: terraform-test-artifacts
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+
+      - name: Destroy Test Infrastructure
+        run: |
+          set -euo pipefail
+          terraform init -input=false -no-color
+          terraform destroy -auto-approve -input=false -no-color
+
+      - name: Publish Teardown Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🧹 Terraform test teardown"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Test infrastructure destroyed." ;;
+              failure) echo "❌ Teardown failed — check for orphaned infrastructure manually." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

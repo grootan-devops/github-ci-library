@@ -1,0 +1,396 @@
+name: Check / Release Prerequisites
+
+# Counterpart of the GitLab `check` stage: Tag:Tag Existence,
+# Changelog:Check Existence, Migration:Check Existence, Chart:Check Existence,
+# Chart:Check:Dependency and Image:Check Existence.
+#
+# Every guard is its own job, so they start together, fail independently and
+# name themselves in the run graph. A guard whose subject does not exist in the
+# repository skips itself — there is no list of checks to keep in sync.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: "Release tag being guarded, from init.yml's `tag` output."
+      chart-name:
+        required: false
+        type: string
+        default: ""
+        description: "Chart name, from init.yml. Empty disables the chart guards."
+      chart-version:
+        required: false
+        type: string
+        default: ""
+        description: "Chart version to guard, from init.yml."
+      chart-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Production chart repository, from init.yml."
+      image-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Image tag to guard, from init.yml. Empty disables the image guard."
+      image-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Production image repository, from init.yml."
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+  CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+  MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+  RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md
+  RELEASE_CHANGELOG_CARD_FILE_NAME: RELEASE_CHANGELOG_CARD.json
+  RELEASE_MIGRATION_FILE_NAME: RELEASE_MIGRATION.md
+  REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+  CI_LIBRARY_REPO: ${{ vars.CI_LIBRARY_REPO }}
+
+jobs:
+  # ---------------------------------------------------------------- git tag
+  tag-existence:
+    name: "Check: Git Tag"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Verify Tag Is Available
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if ! REMOTE_TAGS="$(git ls-remote --tags --refs origin 2>&1)"; then
+            echo "::error title=Git tag::Could not list remote tags. Refusing to report a tag as available without checking."
+            echo "${REMOTE_TAGS}" >&2
+            exit 1
+          fi
+
+          MATCH="$(grep -E "refs/tags/v?${TAG//./\\.}$" <<< "${REMOTE_TAGS}" || true)"
+          if [[ -n "${MATCH}" ]]; then
+            EXISTING_SHA="$(awk '{print $1}' <<< "${MATCH}" | head -n1)"
+            if [[ "${EXISTING_SHA}" == "${GITHUB_SHA}" ]]; then
+              echo "::notice::Git tag '${TAG}' already points at this commit. Treating this as a re-run of its own release."
+              { echo "### 🏷️ Git tag"; echo; echo "✅ \`${TAG}\` already points at this commit — re-run of its own release."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+            echo "::error title=Git tag::Tag '${TAG}' already exists, pointing at ${EXISTING_SHA}. Bump the version in your chart or manifest."
+            { echo "### 🏷️ Git tag"; echo; echo "❌ \`${TAG}\` is taken by \`${EXISTING_SHA:0:7}\`. Bump the version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+          echo "Git tag '${TAG}' is available."
+          { echo "### 🏷️ Git tag"; echo; echo "✅ \`${TAG}\` is available."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+
+  # -------------------------------------------------------------- changelog
+  changelog-existence:
+    name: "Check: Changelog"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Verify Changelog Entry & Render Release Notes
+        env:
+          RELEASE_VERSION: ${{ inputs.tag }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/changelog-check.sh"
+
+      - name: Upload Release Notes
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-changelog
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_CHANGELOG.md
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_CHANGELOG_CARD.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # -------------------------------------------------------------- migration
+  migration-existence:
+    name: "Check: Migration Guide"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Verify Migration Guide & Extract Section
+        env:
+          RELEASE_VERSION: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/migration-check.sh"
+
+      - name: Upload Migration Notes
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-migration
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_MIGRATION.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ------------------------------------------------------------ chart guards
+  chart-existence:
+    name: "Check: Chart Not Published"
+    if: ${{ inputs.chart-name != '' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Verify Chart Version Is Available
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+          CHART_VERSION: ${{ inputs.chart-version }}
+          CHART_REPOSITORY: ${{ inputs.chart-repository }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CHART_VERSION}" ]]; then
+            if [[ -f "${PROJECT_PATH}/${CHART_DIR}/Chart.yaml" ]]; then
+              echo "Local chart present; nothing published to collide with."
+              { echo "### ⎈ Chart version"; echo; echo "✅ Working-tree chart present, no published version to collide with."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+              exit 0
+            fi
+            echo "::error title=Chart::No chart-version supplied and no chart at ${PROJECT_PATH}/${CHART_DIR}/Chart.yaml."
+            exit 1
+          fi
+
+          if [[ ! "${CHART_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::notice::Chart version '${CHART_VERSION}' is a candidate build. Skipping the collision check."
+            { echo "### ⎈ Chart version"; echo; echo "✅ \`${CHART_VERSION}\` is a candidate build — collision check skipped."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
+
+          TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}/${CHART_NAME}"
+          if helm show chart "${TARGET}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
+            EXISTS="true"
+          elif helm show chart "oci://${REGISTRY_HOST}/${CHART_REPOSITORY}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
+            EXISTS="true"
+            TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}"
+          else
+            EXISTS="false"
+          fi
+
+          if [[ "${EXISTS}" == "true" ]]; then
+            echo "::error title=Chart::Version '${CHART_VERSION}' already exists at ${TARGET}. Bump the chart version."
+            { echo "### ⎈ Chart version"; echo; echo "❌ \`${TARGET}:${CHART_VERSION}\` is already published. Bump the chart version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "Chart version '${CHART_VERSION}' is available at ${TARGET}."
+          { echo "### ⎈ Chart version"; echo; echo "✅ \`${TARGET}:${CHART_VERSION}\` is available."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+
+  chart-dependency:
+    name: "Check: Chart Dependencies"
+    if: ${{ inputs.chart-name != '' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Reject Development Chart Dependencies
+        env:
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
+          CHART_REPOSITORY: ${{ inputs.chart-repository }}
+        run: |
+          set -euo pipefail
+          CHART_FILE="${PROJECT_PATH}/${CHART_DIR}/Chart.yaml"
+
+          if [[ ! -f "${CHART_FILE}" ]]; then
+            echo "No chart at ${CHART_FILE}; nothing to check."
+            exit 0
+          fi
+
+          DEV_PATH="${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}"
+          # shellcheck disable=SC2016 # $dev is a yq variable, not a shell one
+          OFFENDERS="$(yq -r --arg dev "${DEV_PATH}" \
+            '.dependencies[]? | select((.repository // "") | test($dev)) | "\(.name) -> \(.repository)"' \
+            "${CHART_FILE}" 2>/dev/null || true)"
+
+          if [[ -n "${OFFENDERS}" ]]; then
+            echo "::error title=Chart dependency::A dependency resolves to the development repository '${DEV_PATH}'. Only stable releases may be depended on."
+            echo "${OFFENDERS}"
+            {
+              echo "### ⎈ Chart dependencies"
+              echo ""
+              echo "❌ These dependencies point at the development repository \`${DEV_PATH}\`:"
+              echo ""
+              echo '```'
+              echo "${OFFENDERS}"
+              echo '```'
+              echo ""
+              echo "Depend on published stable versions instead."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+          echo "All chart dependencies resolve to stable repositories."
+          { echo "### ⎈ Chart dependencies"; echo; echo "✅ All dependencies resolve to stable repositories."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ------------------------------------------------------------ image guard
+  image-existence:
+    name: "Check: Image Not Published"
+    if: ${{ inputs.image-tag != '' && inputs.image-repository != '' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    steps:
+      - name: Verify Image Tag Is Available
+        env:
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${IMAGE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::notice::Image tag '${IMAGE_TAG}' is a candidate build. Skipping the collision check."
+            { echo "### 🐳 Image tag"; echo; echo "✅ \`${IMAGE_TAG}\` is a candidate build — collision check skipped."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
+
+          TARGET="${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+          if crane manifest "${TARGET}" >/dev/null 2>&1; then
+            echo "::error title=Image::'${TARGET}' already exists in the production repository. Bump the application version."
+            { echo "### 🐳 Image tag"; echo; echo "❌ \`${TARGET}\` is already published. Bump the application version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+          echo "Container image tag '${IMAGE_TAG}' is available."
+          { echo "### 🐳 Image tag"; echo; echo "✅ \`${TARGET}\` is available."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+
+  # ----------------------------------------------------------------- verdict
+  verdict:
+    name: "Check: Verdict"
+    if: always()
+    needs:
+      - tag-existence
+      - changelog-existence
+      - migration-existence
+      - chart-existence
+      - chart-dependency
+      - image-existence
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Consolidate Guard Results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## 🚦 Release Prerequisites"
+            echo ""
+            echo "| Guard | Result |"
+            echo "|---|:--:|"
+            jq -r 'to_entries[]
+              | .key as $name
+              | (.value.result) as $r
+              | "| **\($name)** | " + (
+                  if   $r == "success"   then "✅ passed"
+                  elif $r == "failure"   then "❌ failed"
+                  elif $r == "cancelled" then "🚫 cancelled"
+                  else "⏭️ not applicable" end
+                ) + " |"' <<< "${RESULTS}"
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          FAILED="$(jq -r 'to_entries[] | select(.value.result == "failure") | .key' <<< "${RESULTS}" | paste -sd' ' -)"
+          if [[ -n "${FAILED}" ]]; then
+            echo "::error title=Release prerequisites::Not met. Failed guards: ${FAILED}. Open each failed job for the exact remedy."
+            exit 1
+          fi
+          echo "All applicable guards passed."

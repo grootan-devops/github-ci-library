@@ -1,0 +1,8 @@
+# `github.job_workflow_sha` is a documented github-context property (the commit
+# SHA of the reusable workflow file itself). The library uses it to check out its
+# own scripts at exactly the ref the caller pinned. actionlint's built-in context
+# schema has not caught up with it.
+paths:
+  ".github/workflows/**.yml":
+    ignore:
+      - 'property "job_workflow_sha" is not defined'

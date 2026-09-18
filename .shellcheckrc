@@ -1,0 +1,6 @@
+# The shared scripts are ports of the GitLab job templates; their behaviour is
+# deliberate where shellcheck's style advice would change it.
+severity=warning
+
+# SC2329: cleanup() is invoked through `trap cleanup EXIT`, not by name.
+disable=SC2329

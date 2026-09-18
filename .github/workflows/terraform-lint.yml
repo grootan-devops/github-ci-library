@@ -1,0 +1,191 @@
+name: Terraform / Init, Validate & Lint
+
+# Counterpart of the GitLab Terraform:Init, Terraform:Validate, Terraform:Lint
+# and Terraform:Check:README jobs. Init runs once; validate, tflint and the docs
+# check then run in parallel against the initialised working directory.
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: ""
+        description: "Project root. Monorepo children set this."
+      state-name:
+        required: false
+        type: string
+        default: ""
+        description: "Workspace key prefix component for the backend configuration."
+      check-docs:
+        required: false
+        type: boolean
+        default: true
+        description: "Fail when a generated README.md is out of date."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+jobs:
+  init:
+    name: "Terraform: Init"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Compute Provider Cache Key
+        id: key
+        run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Provider Cache
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: tf-
+
+      - name: Terraform Init
+        env:
+          TF_STATE_NAME: ${{ inputs.state-name }}
+        run: |
+          set -euo pipefail
+          SLUG="${GITHUB_REPOSITORY//\//_}"
+          terraform init -input=false -no-color -reconfigure \
+            -backend-config="workspace_key_prefix=${SLUG}/${TF_STATE_NAME}"
+
+      - name: Publish Init Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🌍 Terraform init"
+            echo ""
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ Backend initialised; providers cached for the checks."
+            else
+              echo "❌ \`terraform init\` failed — check the backend configuration and credentials."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Save Provider Cache
+        if: ${{ !cancelled() }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+          key: ${{ steps.key.outputs.key }}
+
+  check:
+    name: "Terraform: ${{ matrix.name }}"
+    needs: init
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Validate
+            check: validate
+          - name: TFLint
+            check: tflint
+          - name: Documentation
+            check: docs
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      credentials:
+        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        if: ${{ matrix.check == 'docs' }}
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.CI_LIBRARY_REPO }}
+          ref: ${{ github.job_workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Restore Provider Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+          key: ${{ needs.init.outputs.cache-key }}
+          restore-keys: tf-
+
+      - name: Run ${{ matrix.name }}
+        env:
+          CHECK: ${{ matrix.check }}
+          CHECK_DOCS: ${{ inputs.check-docs }}
+        run: |
+          set -euo pipefail
+          case "${CHECK}" in
+            validate)
+              terraform validate
+              terraform fmt -recursive -check .
+              ;;
+            tflint)
+              tflint --chdir . --recursive --filter=tests/** --call-module-type=all
+              ;;
+            docs)
+              if [[ "${CHECK_DOCS}" != "true" ]]; then
+                echo "Documentation check disabled by the caller."
+                exit 0
+              fi
+              bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform-docs-check.sh"
+              ;;
+          esac
+
+      - name: Publish Check Summary
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          CHECK: ${{ matrix.check }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [[ "${CHECK}" == "docs" ]]; then
+            exit 0
+          fi
+          {
+            echo "### 🌍 Terraform: ${NAME}"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Passed." ;;
+              failure) echo "❌ Failed. See the job log." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
