@@ -6,7 +6,7 @@ name: Init / Environment & Version Discovery
 #
 # Configure once at organisation or repository level (Settings -> Variables):
 #   vars.IMAGE_REGISTRY            e.g. registry.domain.local
-#   vars.IMAGE_REPOSITORY          e.g. zentre/order-backend
+#   vars.IMAGE_REPOSITORY          e.g. myapp/order-backend
 #   vars.CHART_REPOSITORY          e.g. helm
 #   vars.CI_LIBRARY_REPO           e.g. devops/ci-library
 #

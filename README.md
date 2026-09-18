@@ -431,7 +431,7 @@ flowchart LR
 | `is-release` | `true` | promote vs build routing |
 | `version-suffix` | `-42.891` | diagnostics |
 | `image-tag` / `image-push-tag` | `1.4.0` / `1.4.0-42.891` | `docker`, `buildah` |
-| `image-repository` / `image-dev-repository` / `image-push-repository` | `zentre/order-backend[/dev]` | `docker`, `check`, promote |
+| `image-repository` / `image-dev-repository` / `image-push-repository` | `myapp/order-backend[/dev]` | `docker`, `check`, promote |
 | `chart-name` / `chart-version` / `chart-app-version` / `chart-push-version` | `order-backend` / `1.4.0` / `1.4.0-42.891` | `chart` |
 | `chart-repository` / `chart-dev-repository` / `chart-push-repository` | `helm[/dev]` | `chart`, `check` |
 | `ignore-chart` / `ignore-docker` | `false` | conditional job gating |
@@ -931,7 +931,7 @@ wherever possible.
 | Variable | Description |
 |---|---|
 | `IMAGE_REGISTRY` | Container and chart registry host, e.g. `registry.domain.local`. |
-| `IMAGE_REPOSITORY` | Image repository path, e.g. `zentre/order-backend`. |
+| `IMAGE_REPOSITORY` | Image repository path, e.g. `myapp/order-backend`. |
 | `CI_LIBRARY_REPO` | This repository, e.g. `devops/ci-library`. Jobs check out its `scripts/` at the exact ref you pinned. |
 | `TOOLKIT_BUILD_IMAGE` | Default build container, e.g. `devops/build-containers/bt-container:3.2.1`. |
 
