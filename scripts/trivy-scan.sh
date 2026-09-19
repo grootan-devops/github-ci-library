@@ -34,7 +34,14 @@ set -uo pipefail
 : "${TF_CVE_INFO_FILE_NAME:=TF_CVE.md}"
 : "${LICENSE_INFO_FILE_NAME:=LICENSE_CVE.md}"
 : "${SBOM_CVE_INFO_FILE_NAME:=SBOM_CVE.md}"
-: "${IMAGE_DEV_REPOSITORY_SUFFIX:=/dev}"
+: "${IMAGE_DEV_REPOSITORY_SUFFIX:=}"
+
+if [[ -z "${IMAGE_DEV_REPOSITORY_SUFFIX}" ]]; then
+  case "${IMAGE_REGISTRY:-}" in
+    docker.io|index.docker.io|registry-1.docker.io) IMAGE_DEV_REPOSITORY_SUFFIX="-dev" ;;
+    *) IMAGE_DEV_REPOSITORY_SUFFIX="/dev" ;;
+  esac
+fi
 : "${TARGET_VERSION:=}"
 : "${RELEASE_VERSION:=}"
 : "${IMAGE_REGISTRY:=}"

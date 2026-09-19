@@ -80,7 +80,7 @@ env:
   IMAGE_REPOSITORY: ${{ inputs.image-repository }}
   TARGET_VERSION: ${{ inputs.target-version }}
   IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-  IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX || '/dev' }}
+  IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
   SKIP_CVE_SCAN: ${{ vars.SKIP_CVE_SCAN || 'false' }}
   TRIVY_TIMEOUT: ${{ vars.TRIVY_TIMEOUT || '60m' }}
   TRIVY_IGNORE_CONFIG_FILE: ${{ vars.TRIVY_IGNORE_CONFIG_FILE || 'ignored-cves.yml' }}

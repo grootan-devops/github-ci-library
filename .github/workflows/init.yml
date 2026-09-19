@@ -147,7 +147,7 @@ jobs:
       REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
       IMAGE_REPOSITORY_INPUT: ${{ vars.IMAGE_REPOSITORY }}
       CHART_REPOSITORY_INPUT: ${{ vars.CHART_REPOSITORY || 'helm' }}
-      IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX || '/dev' }}
+      IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
       CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
       RELEASE_VERSION_SUFFIX: ${{ vars.RELEASE_VERSION_SUFFIX }}
       MASTER_BRANCH_REGEX: ${{ vars.MASTER_BRANCH_REGEX || '^(.*/)?master$' }}
@@ -345,7 +345,14 @@ jobs:
           fi
 
           IMAGE_REPO="${IMAGE_REPOSITORY_INPUT}"
-          IMAGE_DEV_REPO="${IMAGE_REPO}${IMAGE_DEV_REPOSITORY_SUFFIX}"
+          IMAGE_DEV_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX}"
+          if [[ -z "${IMAGE_DEV_SUFFIX}" ]]; then
+            case "${REGISTRY_HOST}" in
+              docker.io|index.docker.io|registry-1.docker.io) IMAGE_DEV_SUFFIX="-dev" ;;
+              *) IMAGE_DEV_SUFFIX="/dev" ;;
+            esac
+          fi
+          IMAGE_DEV_REPO="${IMAGE_REPO}${IMAGE_DEV_SUFFIX}"
           CHART_REPO="${CHART_REPOSITORY_INPUT}"
           CHART_DEV_REPO="${CHART_REPO}${CHART_DEV_REPOSITORY_SUFFIX}"
 

@@ -33,8 +33,48 @@ env:
   MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
 
 jobs:
+  discover:
+    name: Detect Lint Targets
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      include: ${{ steps.targets.outputs.include }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Select Present Targets
+        id: targets
+        env:
+          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+          DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+          CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+          MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${PROJECT_PATH}"
+          TARGETS='[{"name":"YAML","script":"yaml-lint.sh","subject":"yaml"}]'
+          if [[ -f "${DOCKERFILE}" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Dockerfile","script":"docker-lint.sh","subject":"dockerfile"}]' <<< "${TARGETS}")"
+          fi
+          if [[ -f "${CHART_DIR}/values.yaml" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Chart Values","script":"yaml-lint.sh","subject":"chart-values"}]' <<< "${TARGETS}")"
+          fi
+          if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Changelog","script":"markdown-lint.sh","subject":"changelog"}]' <<< "${TARGETS}")"
+          fi
+          if [[ -f "${MIGRATION_FILE_NAME}" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Migration Guide","script":"markdown-lint.sh","subject":"migration"}]' <<< "${TARGETS}")"
+          fi
+          echo "include=${TARGETS}" >> "${GITHUB_OUTPUT}"
+
   lint:
     name: "Lint: ${{ matrix.name }}"
+    needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
@@ -44,22 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Dockerfile
-            script: docker-lint.sh
-            subject: dockerfile
-          - name: YAML
-            script: yaml-lint.sh
-            subject: yaml
-          - name: Chart Values
-            script: yaml-lint.sh
-            subject: chart-values
-          - name: Changelog
-            script: markdown-lint.sh
-            subject: changelog
-          - name: Migration Guide
-            script: markdown-lint.sh
-            subject: migration
+        include: ${{ fromJSON(needs.discover.outputs.include) }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:

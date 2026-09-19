@@ -434,7 +434,7 @@ flowchart LR
 | `is-release` | `true` | promote vs build routing |
 | `version-suffix` | `-42.891` | diagnostics |
 | `image-tag` / `image-push-tag` | `1.4.0` / `1.4.0-42.891` | `docker`, `buildah` |
-| `image-repository` / `image-dev-repository` / `image-push-repository` | `myapp/order-backend[/dev]` | `docker`, `check`, promote |
+| `image-repository` / `image-dev-repository` / `image-push-repository` | `contoso/order-backend[-dev]` on Docker Hub | `docker`, `check`, promote |
 | `chart-name` / `chart-version` / `chart-app-version` / `chart-push-version` | `order-backend` / `1.4.0` / `1.4.0-42.891` | `chart` |
 | `chart-repository` / `chart-dev-repository` / `chart-push-repository` | `helm[/dev]` | `chart`, `check` |
 | `ignore-chart` / `ignore-docker` | `false` | conditional job gating |
@@ -971,7 +971,7 @@ wherever possible.
 | `CHART_REPOSITORY` | `helm` | Chart repository path in the registry. |
 | `DOCKERFILE` | `Dockerfile` | Dockerfile path for linting and building. |
 | `MASTER_BRANCH_REGEX` | `^(.*/)?master$` | Which protected branches are treated as release branches. |
-| `IMAGE_DEV_REPOSITORY_SUFFIX` | `/dev` | Appended for candidate images. Set to `""` to share one repository. |
+| `IMAGE_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate images: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override. |
 | `CHART_DEV_REPOSITORY_SUFFIX` | `/dev` | Appended for candidate charts. |
 | `RELEASE_VERSION_SUFFIX` | — | Suffix appended to the version, e.g. `backend` → `1.5.0-backend`. |
 | `CHANGELOG_FILE_NAME` | `./CHANGELOG.md` | Changelog path. |
