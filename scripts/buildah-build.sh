@@ -37,7 +37,6 @@ set -euo pipefail
 : "${CONTAINER_CMD:=}"
 : "${BUILDAH_SCRIPT_FILE_NAME:=buildah.sh}"
 : "${INSTALLED_PCKG_FILE_NAME:=installed_pkgs.txt}"
-: "${IMAGE_TAR_FILE_NAME:=image.tar.gz}"
 : "${DNF_INSTALL_ARG:=--setopt=install_weak_deps=0 --nodocs -y}"
 
 BASE_CONTAINER=$(buildah from "--creds=${REGISTRY_USERNAME}:${REGISTRY_PASSWORD}" "${BASE_IMAGE_REPO}:${BASE_IMAGE_TAG}")
@@ -128,7 +127,6 @@ rm -rf \
 buildah config --user 10001 "${BASE_CONTAINER}"
 buildah umount "${BASE_CONTAINER}"
 buildah commit --squash "${BASE_CONTAINER}" "${IMAGE_NAME}"
-podman save "${IMAGE_NAME}" | gzip > "${IMAGE_TAR_FILE_NAME}"
 
 echo "Installed Packages:"
 cat "./${INSTALLED_PCKG_FILE_NAME}"

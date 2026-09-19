@@ -28,10 +28,19 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `cd.yml` ignores `.github/**` on the default branch, so a change confined to
   the pipeline is verified by its pull request and never cuts a release on its
   own, and gains a `workflow_dispatch` trigger for a deliberate release.
+- Every job pins its runner to `ubuntu-24.04` instead of tracking
+  `ubuntu-latest`, so the platform's migration to Ubuntu 26 cannot change the
+  build environment underneath a release. `vars.CI_RUNNER` still overrides it.
 - `lint.yml` and `docker-lint.sh` report into the job summary, so every check in
   the library now says what it found without opening the raw log.
 
 ### Removed
+
+- The image tar hand-off between build and scan: `docker.yml`'s `save-tar`
+  input, `scan.yml`'s `image-artifact` input, and the save / upload / download
+  steps behind them. Passing an image as an artifact is a GitLab idiom; on
+  GitHub the scan pulls the pushed image from the registry by its
+  digest-pinned reference, which is what the build already publishes.
 
 - Every action outside GitHub's own and Marketplace-verified publishers.
   `mikepenz/action-junit-report` and `softprops/action-gh-release` are blocked

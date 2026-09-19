@@ -58,11 +58,6 @@ on:
         type: string
         default: ""
         description: "Dockerfile stage to build."
-      save-tar:
-        required: false
-        type: boolean
-        default: true
-        description: "Export the built image as an artifact so the scan reads the exact bytes offline."
       project-path:
         required: false
         type: string
@@ -107,13 +102,12 @@ env:
   DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
-  IMAGE_TAR_FILE_NAME: image.tar.gz
 
 jobs:
   lint:
     name: "Image: Dockerfile Lint"
     if: ${{ inputs.lint }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -146,7 +140,7 @@ jobs:
     # lint: false) must not — and GitHub skips a dependent job whose dependency
     # was skipped unless the condition tolerates it explicitly.
     if: ${{ !cancelled() && !inputs.is-release && needs.lint.result != 'failure' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -270,24 +264,6 @@ jobs:
           } > "${IMAGE_INFO_FILE_NAME}"
           cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Export Image Tar For Offline Scanning
-        if: ${{ inputs.save-tar }}
-        env:
-          REF: ${{ steps.ref.outputs.IMAGE_REF_DIGEST }}
-        run: |
-          set -euo pipefail
-          docker pull "${REF}"
-          docker save "${REF}" | gzip > "${IMAGE_TAR_FILE_NAME}"
-
-      - name: Upload Image Tar
-        if: ${{ inputs.save-tar && !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: image-tar
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/image.tar.gz
-          if-no-files-found: error
-          retention-days: 1
-
       - name: Upload Image Info
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
@@ -301,7 +277,7 @@ jobs:
     name: "Image: Smoke Test"
     needs: build
     if: ${{ !cancelled() && inputs.test && !inputs.is-release && needs.build.result == 'success' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -359,7 +335,7 @@ jobs:
   promote:
     name: "Image: Promote"
     if: ${{ inputs.is-release }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     permissions:
       contents: read

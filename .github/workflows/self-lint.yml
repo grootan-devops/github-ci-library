@@ -14,7 +14,7 @@ jobs:
   # actionlint and shellcheck ship in the organisation build container.
   self-lint:
     name: "Self Lint: ${{ matrix.tool }}"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: read

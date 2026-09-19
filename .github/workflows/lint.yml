@@ -35,7 +35,7 @@ env:
 jobs:
   discover:
     name: Detect Lint Targets
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -81,7 +81,7 @@ jobs:
   lint:
     name: "Lint: ${{ matrix.name }}"
     needs: discover
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: read

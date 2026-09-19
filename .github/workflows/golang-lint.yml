@@ -30,7 +30,7 @@ env:
 jobs:
   lint:
     name: "Go Lint: ${{ matrix.linter }}"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 75
     permissions:
       contents: read

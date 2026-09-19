@@ -58,7 +58,7 @@ env:
 jobs:
   collect:
     name: "Release: Collect Artifacts"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -219,7 +219,7 @@ jobs:
   publish:
     name: "Release: Publish"
     needs: collect
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: write
@@ -289,7 +289,7 @@ jobs:
     name: "Release: Notify Teams"
     if: ${{ inputs.notify }}
     needs: publish
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: read

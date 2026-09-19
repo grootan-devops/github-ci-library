@@ -127,7 +127,7 @@ on:
 jobs:
   initialize:
     name: Initialize Environment Context
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 10
     permissions:
       contents: read

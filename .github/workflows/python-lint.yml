@@ -24,7 +24,7 @@ env:
 jobs:
   lint:
     name: "Python Lint: ${{ matrix.linter }}"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 15
     permissions:
       contents: read

@@ -31,7 +31,7 @@ env:
 jobs:
   init:
     name: "Terraform: Init"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -98,7 +98,7 @@ jobs:
   check:
     name: "Terraform: ${{ matrix.name }}"
     needs: init
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
     permissions:
       contents: read

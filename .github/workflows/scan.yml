@@ -36,17 +36,12 @@ on:
         required: false
         type: string
         default: ""
-        description: "Tag or version to resolve when neither an image tar nor image-ref is present."
+        description: "Tag or version to resolve when image-ref is not given."
       scan-path:
         required: false
         type: string
         default: ""
         description: "Directory to scan for config scans. Defaults to the chart directory."
-      image-artifact:
-        required: false
-        type: string
-        default: ""
-        description: "Artifact holding an image tar to scan offline, instead of pulling from the registry."
       sbom-artifact:
         required: false
         type: string
@@ -91,13 +86,12 @@ env:
   TRIVY_IGNORE_CVES: ${{ vars.TRIVY_IGNORE_CVES || 'KSV-0011 KSV-0014 KSV-0015 KSV-0016 KSV-0018 KSV-0110 KSV-0113 KSV-0125' }}
   TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
   TRIVY_HOST: ${{ vars.TRIVY_HOST }}
-  IMAGE_TAR_FILE_NAME: image.tar.gz
   SBOM_FILE: sbom.cdx.json
 
 jobs:
   scan:
     name: "Scan: ${{ inputs.scan-type }}${{ inputs.config-type && format(' ({0})', inputs.config-type) || '' }}"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -142,13 +136,6 @@ jobs:
           key: trivy-db-${{ github.run_id }}
           restore-keys: trivy-db-
 
-      - name: Download Image Tar
-        if: ${{ inputs.image-artifact != '' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ inputs.image-artifact }}
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-
       - name: Download SBOM
         if: ${{ inputs.sbom-artifact != '' }}
         uses: actions/download-artifact@v8
@@ -157,7 +144,7 @@ jobs:
           path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
 
       - name: Authenticate To Registry
-        if: ${{ inputs.scan-type == 'image' && inputs.image-artifact == '' }}
+        if: ${{ inputs.scan-type == 'image' }}
         env:
           REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}

@@ -32,7 +32,7 @@ env:
 jobs:
   generate:
     name: "SBOM: Generate"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 45
     permissions:
       contents: read
@@ -111,7 +111,7 @@ jobs:
     name: "SBOM: Scan"
     if: ${{ inputs.scan }}
     needs: generate
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 60
     permissions:
       contents: read
