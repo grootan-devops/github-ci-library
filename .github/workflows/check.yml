@@ -78,10 +78,12 @@ jobs:
       - name: Verify Tag Is Available
         env:
           TAG: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
-          if ! REMOTE_TAGS="$(git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" 2>&1)"; then
+          AUTH_HEADER="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w0)"
+          if ! REMOTE_TAGS="$(git -c http.extraheader="AUTHORIZATION: basic ${AUTH_HEADER}" ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" 2>&1)"; then
             echo "::error title=Git tag::Could not list remote tags. Refusing to report a tag as available without checking."
             echo "${REMOTE_TAGS}" >&2
             exit 1
