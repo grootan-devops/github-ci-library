@@ -76,7 +76,7 @@ concurrency:
 permissions:
   contents: read
   packages: write
-  actions: read
+  actions: write
   checks: write
 
 jobs:
@@ -84,12 +84,19 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
+  # Runs alongside the image chain. A linter gates nothing.
   lint:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
   build:
     uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
+    secrets: inherit
+
+  # Pulls the Trivy databases once so every scan restores them.
+  trivy-cache:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
   image:
@@ -101,12 +108,23 @@ jobs:
       image-repository: ${{ needs.init.outputs.image-push-repository }}
 
   scan:
-    needs: [init, image]
+    needs: [init, image, trivy-cache]
     uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: image
       image-ref: ${{ needs.image.outputs.image-ref-digest }}
+
+  # Guards depend on init alone: they ask whether a tag, changelog entry and
+  # image version are still free, which no build or scan can change.
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
 ```
 
 ```yaml
@@ -121,15 +139,31 @@ concurrency:
 permissions:
   contents: write
   packages: write
-  actions: read
+  actions: write
 
 jobs:
   init:
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
-  image:
+  trivy-cache:
     needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # The candidate is scanned here, not trusted from the pull request run: it may
+  # have sat in the dev repository for days.
+  scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-repository: ${{ needs.init.outputs.image-dev-repository }}
+      target-version: ${{ needs.init.outputs.candidate-image-tag }}
+
+  image:
+    needs: [init, scan]
     uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
@@ -139,6 +173,9 @@ jobs:
       candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
       image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
+      # Required. docker.yml cannot depend on a scan that lives here, so it
+      # refuses to promote unless the verdict is handed to it.
+      scan-result: ${{ needs.scan.result }}
 
   release:
     needs: [init, image]
@@ -162,19 +199,52 @@ runtime with a 403 that names neither file:
 
 | Calling scenario | Required `permissions:` |
 |---|---|
-| Pull request verification | `contents: read`, `packages: write`, `actions: read`, `checks: write` |
-| Production release | `contents: write`, `packages: write`, `actions: read` |
+| Pull request verification | `contents: read`, `packages: write`, `actions: write`, `checks: write` |
+| Production release | `contents: write`, `packages: write`, `actions: write` |
 | Deploy only | `contents: read`, `actions: read` |
-| Audit only (scan, lint, SonarQube) | `contents: read`, `checks: write` |
+| Audit only (scan, lint, SonarQube) | `contents: read`, `actions: write`, `checks: write` |
 
 `contents: write` is needed only to create the git tag and GitHub Release. `packages: write`
-covers image and chart pushes. `actions: read` lets the release restore the candidate run's
-artifacts. `checks: write` publishes test and scan results as Checks.
+covers image and chart pushes. `actions: write` lets the release restore the candidate run's
+artifacts *and* lets `trivy-cache.yml` replace the `trivy-db` entry. `checks: write`
+publishes test and scan results as Checks.
+
+`actions: read` is enough to run, but not to refresh the Trivy cache: GitHub cache entries
+are immutable, so the stable `trivy-db` key has to be deleted before it can be rewritten.
+Without `actions: write` the warm job warns and leaves the existing entry in place, and
+every scan re-downloads roughly 1GB of vulnerability database.
 
 > [!IMPORTANT]
 > The repository's default token scope caps all of this. If **Settings → Actions → General →
 > Workflow permissions** is set to read-only, `contents: write` is denied and the release
 > cannot tag, whatever the workflow declares.
+
+### Promotion requires a scan verdict
+
+`docker.yml` and `buildah.yml` refuse to promote an image unless the caller proves it was
+scanned. The scan job lives in *your* workflow, so the library cannot make `promote` depend
+on it — the verdict has to be handed over:
+
+```yaml
+  image:
+    needs: [init, scan]
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
+    with:
+      is-release: true
+      scan-result: ${{ needs.scan.result }}
+```
+
+| Input | Default | Effect |
+|---|---|---|
+| `require-scan` | `true` | Promotion refuses unless `scan-result` is `success`. |
+| `scan-result` | `""` | The scan job's `result`. Empty means refused. |
+
+It fails closed and it fails loudly: a caller that forgets `scan-result` gets an empty
+value and the promote job **errors**, naming the fix. It is a failing step rather than a
+job condition on purpose — a skipped job reads as success to the caller's graph, so
+refusing by condition would let a release carry on having promoted nothing.
+
+Set `require-scan: false` only for an artifact with no scan in its pipeline.
 
 ### Concurrency & cancellation
 
@@ -193,6 +263,12 @@ caller's to reinstate.
 | Pull request verification | `${{ github.workflow }}-${{ github.ref }}` | `true` |
 | Production release (`release.yml`) | `release-${{ github.ref }}` | **`false`** |
 | GitOps deploy (`deploy-*-gitops.yml`) | `deploy-${{ inputs.environment }}` | **`false`** |
+
+A release caller that carries `workflow_dispatch` should also refuse a ref that is not the
+default branch. GitLab forbids a manual release outright (`.release-rules` sends `web` and
+`api` pipelines to `when: never`); a GitHub dispatch is looser still, because it can target
+any ref, so without that guard a release can be cut from a feature branch. `self-cd.yml`'s
+`guard-ref` job is the reference implementation.
 
 > [!WARNING]
 > Leave a release or deploy caller at `cancel-in-progress: true` and the next push or
@@ -283,7 +359,7 @@ repeat them.
 > exist, is this chart version taken, does a chart dependency still point at a dev
 > repository. Nothing a build or a scan does can change any of those answers. Chaining the
 > guards behind `build` delays the one signal that should fail fastest and, because
-> `Check: Verdict` is the required status check, holds the pull request open on a verdict
+> `Verdict` is the required status check, holds the pull request open on a verdict
 > that was knowable in seconds.
 
 A note on the GitLab edges the table is derived from: `optional: true` there means *"ignore
@@ -512,7 +588,7 @@ flowchart LR
 | `check.yml` · `verdict` | Consolidates every guard into one table and one required status check. |
 
 > [!TIP]
-> Set the branch protection **required status check** to `Check: Verdict`. It reports
+> Set the branch protection **required status check** to `Verdict`. It reports
 > `success` only when every applicable guard passed, and names the failures when not.
 
 #### `init.yml` outputs
@@ -615,7 +691,7 @@ Buildah.
 
 ```mermaid
 flowchart LR
-    DL["docker.yml · lint<br/>hadolint"] --> IB["docker.yml · build<br/>buildx build --push"]
+    IB["docker.yml · build<br/>buildx build --push"]
     IB --> IT["docker.yml · test<br/>smoke test in the image"]
     IB --> IS["scan.yml<br/>scan-type: image"]
     IP["docker.yml · promote<br/>crane mutate --tag"]
@@ -623,17 +699,16 @@ flowchart LR
 
 | Workflow · Job | Description |
 |---|---|
-| `docker.yml` · `lint` | hadolint with the organisation baseline ignores. Runs in the toolkit container. |
-| `docker.yml` · `build` | Buildx build and push, with every organisation base image injected as a build argument and registry layer cache. Outputs `image-ref-digest`. Optionally exports an image tar for offline scanning. |
+| `docker.yml` · `build` | Buildx build and push, with every organisation base image injected as a build argument and registry layer cache. Outputs `image-ref-digest`. |
 | `docker.yml` · `test` | Optional smoke test executed **inside** the built image. Off by default. |
-| `docker.yml` · `promote` | Release-mode only. Resolves the candidate and copies it by digest with `crane mutate --tag`, then tags `latest`, `MAJOR`, `MINOR`. |
+| `docker.yml` · `promote` | Release-mode only. Refuses unless the caller passes a successful `scan-result`. Resolves the candidate and copies it by digest with `crane mutate --tag`, then tags `latest`, `MAJOR`, `MINOR`. |
 | `buildah.yml` · `build` | Dockerfile-free minimal image assembly from a base image: `microdnf install`, package-manager purge, documentation/systemd/PAM strip, `USER 10001`. |
 | `buildah.yml` · `promote` | Same digest-preserving promotion as `docker.yml`. |
 
 > [!IMPORTANT]
 > `docker.yml` · `build` is the **only** job in the library that does not run inside an
 > organisation build container. Building an image needs the daemon and BuildKit on the
-> runner itself. Every other job, `docker.yml` · `lint` and `promote` included, is
+> runner itself. Every other job, `docker.yml` · `promote` included, is
 > containerised.
 
 #### Dockerfile Standards & Multi-Stack Reference (Packaging-Only & Non-Root 10001:10001)
@@ -1054,7 +1129,7 @@ wherever possible.
 
 | Variable | Default | Description |
 |---|---|---|
-| `CI_RUNNER` | `ubuntu-latest` | Runner label for every job. |
+| `CI_RUNNER` | `ubuntu-26.04` | Runner label for every job. Pinned rather than tracking `ubuntu-latest`, so a platform migration cannot change the build environment under a release. |
 | `PROJECT_PATH` | `.` | Root directory of the application inside the repository. |
 | `CHART_DIR` | `./chart` | Path to the Helm chart folder. |
 | `CHART_FILE` | `Chart.yaml` | Chart manifest filename. |

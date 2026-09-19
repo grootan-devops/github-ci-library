@@ -25,6 +25,10 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- README and MIGRATION updated for this release. The Quick Start release example
+  would have failed as written: `promote` now refuses without `scan-result`, and
+  neither example warmed the Trivy cache before scanning.
+
 - The release guards no longer report a free tag as "available", which read as
   "the artifact exists and can be pulled" — the opposite of what passing means.
   A passing guard now says nothing is published at that reference yet. The guard
