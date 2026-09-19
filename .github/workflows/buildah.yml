@@ -100,7 +100,6 @@ env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_NAME: dockerimage:internal
-  IMAGE_TAR_FILE_NAME: image.tar.gz
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
   INSTALLED_PCKG_FILE_NAME: installed_pkgs.txt
 
@@ -108,7 +107,7 @@ jobs:
   build:
     name: "Image: Buildah Build & Push"
     if: ${{ !inputs.is-release }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -203,14 +202,12 @@ jobs:
           } > "${IMAGE_INFO_FILE_NAME}"
           cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Upload Image Tar & Package List
+      - name: Upload Package List
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: image-tar
-          path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/image.tar.gz
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/installed_pkgs.txt
+          name: image-packages
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/installed_pkgs.txt
           if-no-files-found: error
           retention-days: 1
 
@@ -228,7 +225,7 @@ jobs:
   promote:
     name: "Image: Promote"
     if: ${{ inputs.is-release }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read

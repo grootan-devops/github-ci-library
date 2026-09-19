@@ -72,7 +72,7 @@ on:
 jobs:
   komodo-deploy:
     name: Sync Komodo Stack
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     timeout-minutes: 10

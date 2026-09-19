@@ -145,7 +145,7 @@ env:
 jobs:
   validate:
     name: Validate Deployment Prerequisites
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     timeout-minutes: 10
@@ -291,7 +291,7 @@ jobs:
 
   gitops-commit:
     name: Update GitOps Repository
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     timeout-minutes: 10
@@ -431,7 +431,7 @@ jobs:
 
   argocd-sync:
     name: Sync ArgoCD Application
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     timeout-minutes: 10

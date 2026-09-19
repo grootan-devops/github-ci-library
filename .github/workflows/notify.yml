@@ -19,7 +19,7 @@ on:
 jobs:
   notify:
     name: "Notify: Teams"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
       contents: read

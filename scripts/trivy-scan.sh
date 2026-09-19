@@ -26,7 +26,6 @@ set -uo pipefail
 : "${TRIVY_TIMEOUT:=60m}"
 : "${TRIVY_IGNORE_CVES:=}"
 : "${TRIVY_IGNORED_LICENSE_CLASSIFICATIONS:=notice,permissive,unencumbered}"
-: "${IMAGE_TAR_FILE_NAME:=image.tar.gz}"
 : "${SBOM_FILE:=sbom.cdx.json}"
 : "${IAC_SCAN_PATH:=.}"
 : "${IMAGE_CVE_INFO_FILE_NAME:=IMAGE_CVE.md}"
@@ -173,9 +172,7 @@ build_trivy_command() {
   local BASE_CMD=""
   case "${SCAN_TYPE}" in
     image)
-      if [[ -f "${IMAGE_TAR_FILE_NAME}" ]]; then
-        BASE_CMD="trivy image --scanners vuln ${TRIVY_ARGS} --input ${IMAGE_TAR_FILE_NAME}"
-      elif [[ -n "${IMAGE_REF}" ]]; then
+      if [[ -n "${IMAGE_REF}" ]]; then
         # An exact reference — preferably registry/repo@sha256:... — pins the scan
         # to the bytes the build produced, with no tag-resolution ambiguity.
         log_info "Scanning pinned image reference: ${IMAGE_REF}" >&2

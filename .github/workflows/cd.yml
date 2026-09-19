@@ -7,6 +7,11 @@ name: CD · Tag, Release & Notify
 on:
   push:
     branches: [master, main]
+    # A change confined to the pipeline itself is verified by the pull request
+    # that introduced it. It must never cut a release on its own.
+    paths-ignore:
+      - ".github/**"
+  workflow_dispatch:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -19,35 +24,9 @@ permissions:
 
 jobs:
   version:
-    name: "Version: Resolve"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
-    outputs:
-      TAG: ${{ steps.read.outputs.TAG }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-
-      - name: Read VERSION
-        id: read
-        run: |
-          set -euo pipefail
-          TAG="$(tr -d '[:space:]' < VERSION)"
-          if [[ ! "${TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error title=Version::'${TAG}' is not a semantic version."
-            exit 1
-          fi
-          echo "TAG=${TAG}" >> "${GITHUB_OUTPUT}"
-          {
-            echo "### 🏷️ Library version"
-            echo ""
-            echo "Releasing \`${TAG}\`."
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+    name: Version
+    uses: ./.github/workflows/self-version.yml
+    secrets: inherit
 
   # Runs again on master so the release is gated on the same guards the pull
   # request passed, and so the changelog and migration sections it extracts
@@ -58,7 +37,7 @@ jobs:
     uses: ./.github/workflows/check.yml
     secrets: inherit
     with:
-      tag: ${{ needs.version.outputs.TAG }}
+      tag: ${{ needs.version.outputs.tag }}
 
   release:
     name: Release
@@ -66,5 +45,5 @@ jobs:
     uses: ./.github/workflows/release.yml
     secrets: inherit
     with:
-      tag: ${{ needs.version.outputs.TAG }}
+      tag: ${{ needs.version.outputs.tag }}
       notify: true

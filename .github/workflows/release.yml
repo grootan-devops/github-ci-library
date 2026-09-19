@@ -58,7 +58,7 @@ env:
 jobs:
   collect:
     name: "Release: Collect Artifacts"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -219,7 +219,7 @@ jobs:
   publish:
     name: "Release: Publish"
     needs: collect
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: write
@@ -231,16 +231,35 @@ jobs:
           path: payload
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v2
-        with:
-          tag_name: ${{ inputs.tag }}
-          name: Release ${{ inputs.tag }}
-          body_path: payload/CONSOLIDATED_RELEASE_CHANGELOG.md
-          files: payload/_release_assets/*
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
-          target_commitish: ${{ github.sha }}
-          fail_on_unmatched_files: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          DRAFT: ${{ inputs.draft }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          ARGS=(--title "Release ${TAG}"
+                --notes-file payload/CONSOLIDATED_RELEASE_CHANGELOG.md
+                --target "${GITHUB_SHA}")
+          if [[ "${DRAFT}" == "true" ]]; then ARGS+=(--draft); fi
+          if [[ "${PRERELEASE}" == "true" ]]; then ARGS+=(--prerelease); fi
+
+          shopt -s nullglob
+          ASSETS=(payload/_release_assets/*)
+          shopt -u nullglob
+
+          # A re-run of a release that already exists updates it rather than
+          # failing, which keeps the release job idempotent.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "::notice title=Release::'${TAG}' already exists. Updating it."
+            gh release edit "${TAG}" "${ARGS[@]}"
+            if [[ ${#ASSETS[@]} -gt 0 ]]; then
+              gh release upload "${TAG}" "${ASSETS[@]}" --clobber
+            fi
+          else
+            gh release create "${TAG}" "${ARGS[@]}" "${ASSETS[@]}"
+          fi
 
       - name: Publish Release Summary
         if: always()
@@ -270,7 +289,7 @@ jobs:
     name: "Release: Notify Teams"
     if: ${{ inputs.notify }}
     needs: publish
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
       contents: read

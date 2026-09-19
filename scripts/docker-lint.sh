@@ -35,4 +35,36 @@ for RULE in "${IGNORES[@]}"; do
 done
 
 echo "hadolint ${HADOLINT_ARGS[*]} --disable-ignore-pragma ${DOCKERFILE}"
-hadolint "${HADOLINT_ARGS[@]}" --disable-ignore-pragma "${DOCKERFILE}"
+
+# Capture rather than stream, so the findings can go to the job summary as well
+# as the log. Every other check in the library reports into the summary; the
+# Dockerfile lint should not be the one that makes you open the raw log.
+set +e
+FINDINGS="$(hadolint "${HADOLINT_ARGS[@]}" --disable-ignore-pragma "${DOCKERFILE}" 2>&1)"
+RESULT=$?
+set -e
+
+if [[ -n "${FINDINGS}" ]]; then
+  echo "${FINDINGS}"
+fi
+
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+  {
+    echo "### 🐳 Dockerfile lint"
+    echo ""
+    echo "\`${DOCKERFILE}\`, ignoring: \`${FULL_HADOLINT_IGNORE}\`"
+    echo ""
+    if [[ "${RESULT}" -eq 0 ]]; then
+      echo "✅ No findings."
+    else
+      echo "❌ hadolint reported findings:"
+      echo ""
+      echo '```'
+      echo "${FINDINGS}"
+      echo '```'
+    fi
+    echo ""
+  } >> "${GITHUB_STEP_SUMMARY}"
+fi
+
+exit "${RESULT}"
