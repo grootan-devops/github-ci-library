@@ -55,6 +55,13 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Docker Hub authentication used the configured hostname as the credential key,
+  but BuildKit resolves Docker Hub against the canonical
+  `https://index.docker.io/v1/`. The push therefore ran unauthenticated and
+  Docker Hub returned "access token has insufficient scopes" — an anonymous
+  token can pull a public repository but not push to it. `docker.yml` now logs
+  in under the canonical key, and `scan.yml` writes every Docker Hub alias.
+
 - `secret-scanning.yml`: mark the workspace as a safe git directory before
   scanning. `actions/checkout` only marks it for its own step, so git inside the
   container refused the checkout as dubiously owned and the scan found nothing.

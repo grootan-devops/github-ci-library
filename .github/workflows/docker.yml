@@ -147,10 +147,29 @@ jobs:
           done < /etc/hosts
           docker exec "${CONTAINER}" cat /etc/hosts
 
+      - name: Resolve Login Registry
+        id: login-registry
+        env:
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+        run: |
+          set -euo pipefail
+          # docker/login-action stores the credential under exactly the key it
+          # is given, but BuildKit resolves Docker Hub against the canonical
+          # "https://index.docker.io/v1/". Passing "registry-1.docker.io" leaves
+          # the push unauthenticated, and an anonymous token can pull a public
+          # repository but not push to it — which surfaces as "access token has
+          # insufficient scopes", not as a login failure. An empty registry
+          # makes the action use Docker Hub's canonical key.
+          case "${REGISTRY_HOST}" in
+            docker.io|index.docker.io|registry-1.docker.io) VALUE="" ;;
+            *) VALUE="${REGISTRY_HOST}" ;;
+          esac
+          echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
+
       - name: Authenticate To Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
         with:
-          registry: ${{ vars.IMAGE_REGISTRY }}
+          registry: ${{ steps.login-registry.outputs.value }}
           username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
           password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
 
@@ -253,10 +272,29 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Resolve Login Registry
+        id: login-registry
+        env:
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+        run: |
+          set -euo pipefail
+          # docker/login-action stores the credential under exactly the key it
+          # is given, but BuildKit resolves Docker Hub against the canonical
+          # "https://index.docker.io/v1/". Passing "registry-1.docker.io" leaves
+          # the push unauthenticated, and an anonymous token can pull a public
+          # repository but not push to it — which surfaces as "access token has
+          # insufficient scopes", not as a login failure. An empty registry
+          # makes the action use Docker Hub's canonical key.
+          case "${REGISTRY_HOST}" in
+            docker.io|index.docker.io|registry-1.docker.io) VALUE="" ;;
+            *) VALUE="${REGISTRY_HOST}" ;;
+          esac
+          echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
+
       - name: Authenticate To Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
         with:
-          registry: ${{ vars.IMAGE_REGISTRY }}
+          registry: ${{ steps.login-registry.outputs.value }}
           username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
           password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
 
