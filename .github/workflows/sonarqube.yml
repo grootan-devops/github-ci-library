@@ -192,11 +192,13 @@ jobs:
               *)       echo "Status: ${OUTCOME}" ;;
             esac
             echo ""
-            echo "| Property | Value |"
-            echo "|---|---|"
-            echo "| **Project key** | \`${SONAR_PROJECT_KEY:-unresolved}\` |"
-            if [[ -n "${DASHBOARD}" && -n "${SONAR_PROJECT_KEY:-}" ]]; then
-              echo "| **Dashboard** | [${SONAR_PROJECT_KEY}](${DASHBOARD}/dashboard?id=${SONAR_PROJECT_KEY}) |"
+            # Unset when the run never got past configuration validation.
+            if [[ -n "${SONAR_PROJECT_KEY:-}" ]]; then
+              KEY_CELL="\`${SONAR_PROJECT_KEY}\`"
+              [[ -z "${DASHBOARD}" ]] || KEY_CELL="[${KEY_CELL}](${DASHBOARD}/dashboard?id=${SONAR_PROJECT_KEY})"
+              echo "| Property | Value |"
+              echo "|---|---|"
+              echo "| **Project key** | ${KEY_CELL} |"
             fi
             if [[ -n "${GATE}" ]]; then
               echo ""

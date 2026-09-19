@@ -615,20 +615,22 @@ generate_cve_summary_file() {
     fi
     echo "### 📊 ${REPORT_LABEL} Severity Breakdown"
     echo ""
-    generate_table "Severity" "Fixable" "Unfixable" "Total"
     local SEVERITIES=("CRITICAL" "HIGH" "MEDIUM" "LOW" "UNKNOWN")
-    for SEV in "${SEVERITIES[@]}"; do
-      local FIXABLE UNFIXABLE TOTAL
-      if [[ "${SCAN_TYPE}" == "config" ]]; then
-        FIXABLE=$(jq "[.Results[]?.Misconfigurations[]? | select(.Severity == \"${SEV}\")] | length" "${INPUT_JSON}")
-        UNFIXABLE=0
-      else
+    if [[ "${SCAN_TYPE}" == "config" ]]; then
+      # Misconfigurations carry no fixed version, so the fixable split does not apply.
+      generate_table "Severity" "Count"
+      for SEV in "${SEVERITIES[@]}"; do
+        echo "| ${SEV} | $(jq "[.Results[]?.Misconfigurations[]? | select(.Severity == \"${SEV}\")] | length" "${INPUT_JSON}") |"
+      done
+    else
+      generate_table "Severity" "Fixable" "Unfixable" "Total"
+      for SEV in "${SEVERITIES[@]}"; do
+        local FIXABLE UNFIXABLE
         FIXABLE=$(jq "[.Results[]?.Vulnerabilities[]? | select(.Severity == \"${SEV}\" and .FixedVersion != null and .FixedVersion != \"\")] | length" "${INPUT_JSON}")
         UNFIXABLE=$(jq "[.Results[]?.Vulnerabilities[]? | select(.Severity == \"${SEV}\" and (.FixedVersion == null or .FixedVersion == \"\"))] | length" "${INPUT_JSON}")
-      fi
-      TOTAL=$((FIXABLE + UNFIXABLE))
-      echo "| ${SEV} | ${FIXABLE} | ${UNFIXABLE} | ${TOTAL} |"
-    done
+        echo "| ${SEV} | ${FIXABLE} | ${UNFIXABLE} | $((FIXABLE + UNFIXABLE)) |"
+      done
+    fi
     echo ""
   } > "${SUMMARY_FILE}"
   log_info "Summary file generated: ${SUMMARY_FILE}"
@@ -654,7 +656,8 @@ generate_license_summary_file() {
     done
     echo "| **Total** | **${TOTAL}** | — |"
     echo ""
-    if [[ ${#FINAL_RESTRICTED[@]} -gt 0 ]]; then
+    # Same condition the exit code uses: ignored classifications require no action.
+    if [[ ${#FINAL_RESTRICTED[@]} -gt 0 ]] && ! is_classification_ignored "restricted"; then
       echo "### ⚠️ Action Required: Restricted Licenses"
       echo "The following restricted licenses require immediate attention:"
       echo ""
@@ -1019,18 +1022,20 @@ generate_action_table() {
   case "${SCAN_TYPE}" in
     license)
       generate_table "License category" "Needs review" "Ignored"
-      echo "| Restricted | ${#FINAL_RESTRICTED[@]} | ${#FINAL_RESTRICTED_IGNORED[@]} |"
-      echo "| Reciprocal | ${#FINAL_RECIPROCAL[@]} | ${#FINAL_RECIPROCAL_IGNORED[@]} |"
-      echo "| Unrecognized | ${#FINAL_UNRECOGNIZED[@]} | ${#FINAL_UNRECOGNIZED_IGNORED[@]} |"
-      echo "| Notice | ${#FINAL_NOTICE[@]} | ${#FINAL_NOTICE_IGNORED[@]} |"
-      echo "| Permissive | ${#FINAL_PERMISSIVE[@]} | ${#FINAL_PERMISSIVE_IGNORED[@]} |"
+      # A classification the exit code never acts on is not left to act on.
+      is_classification_ignored "restricted" || echo "| Restricted | ${#FINAL_RESTRICTED[@]} | ${#FINAL_RESTRICTED_IGNORED[@]} |"
+      is_classification_ignored "reciprocal" || echo "| Reciprocal | ${#FINAL_RECIPROCAL[@]} | ${#FINAL_RECIPROCAL_IGNORED[@]} |"
+      is_classification_ignored "unrecognized" || echo "| Unrecognized | ${#FINAL_UNRECOGNIZED[@]} | ${#FINAL_UNRECOGNIZED_IGNORED[@]} |"
+      is_classification_ignored "notice" || echo "| Notice | ${#FINAL_NOTICE[@]} | ${#FINAL_NOTICE_IGNORED[@]} |"
+      is_classification_ignored "permissive" || echo "| Permissive | ${#FINAL_PERMISSIVE[@]} | ${#FINAL_PERMISSIVE_IGNORED[@]} |"
       echo "| **Ignored but no longer present** | ${#FINAL_FIXED_IGNORED[@]} | — |"
       ;;
     *)
       generate_table "Category" "Count"
       echo "| Active, fixable | ${#FINAL_FIXABLE[@]} |"
       echo "| Ignored (justified) | ${#FINAL_FIXABLE_IGNORED[@]} |"
-      echo "| Unfixable | ${#FINAL_UNFIXABLE[@]} |"
+      # Misconfigurations carry no fixed version, so nothing is ever unfixable.
+      [[ "${SCAN_TYPE}" == "config" ]] || echo "| Unfixable | ${#FINAL_UNFIXABLE[@]} |"
       echo "| **Ignored but no longer present** | ${#FINAL_FIXED_IGNORED[@]} |"
       ;;
   esac
@@ -1072,8 +1077,11 @@ publish_step_summary() {
         echo "</details>"
       fi
     fi
-    echo ""
-    echo "Full findings: \`${TRIVY_SCAN_REPORT_NAME}.md\` in this run's artifacts."
+    # A scan that found nothing has no full report worth opening.
+    if [[ -s "${ALL_FOUND_FILE}" ]]; then
+      echo ""
+      echo "Full findings: \`${TRIVY_SCAN_REPORT_NAME}.md\` in this run's artifacts."
+    fi
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"
 

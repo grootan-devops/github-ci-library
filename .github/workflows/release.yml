@@ -200,14 +200,7 @@ jobs:
             echo "### 📥 Release payload"
             echo ""
             if [[ -d _release_assets ]] && compgen -G "_release_assets/*" > /dev/null; then
-              echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') asset(s):"
-              echo ""
-              echo "| Asset | Size |"
-              echo "|---|---|"
-              for F in _release_assets/*; do
-                [[ -f "${F}" ]] || continue
-                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
-              done
+              echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') asset(s)."
             else
               echo "⚠️ No assets were staged, so the release will carry notes only. The scan reports and chart packages come from the candidate run — check that \`upstream-run-id\` resolved."
             fi
@@ -317,8 +310,6 @@ jobs:
                 [[ -f "${F}" ]] || continue
                 echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
               done
-            else
-              echo "_No assets were attached._"
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

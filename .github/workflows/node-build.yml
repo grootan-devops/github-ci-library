@@ -98,6 +98,8 @@ jobs:
           DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the download never ran.
+          [[ "${DOWNLOAD_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           CACHE_STATE="rebuilt — no entry matched"
           [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
@@ -180,6 +182,9 @@ jobs:
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the build never ran.
+          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
+          FILE_COUNT="$(find "${OUT_DIR}" -type f 2>/dev/null | wc -l | tr -d ' ')" || FILE_COUNT=0
           {
             echo "### 📦 Node build"
             echo ""
@@ -189,8 +194,8 @@ jobs:
               echo '```'
               tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
               echo '```'
-            elif [[ -d "${OUT_DIR}" ]]; then
-              echo "✅ Output \`${OUT_DIR}/\` — $(du -sh "${OUT_DIR}" | cut -f1) across $(find "${OUT_DIR}" -type f | wc -l | tr -d ' ') files."
+            elif [[ "${FILE_COUNT}" -gt 0 ]]; then
+              echo "✅ Output \`${OUT_DIR}/\` — $(du -sh "${OUT_DIR}" | cut -f1) across ${FILE_COUNT} files."
             else
               echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote nothing to \`${OUT_DIR}/\`, so the \`node-dist\` artifact will be empty."
             fi

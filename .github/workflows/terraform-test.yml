@@ -61,16 +61,6 @@ jobs:
           fi
 
           echo "root=${ROOT}" >> "${GITHUB_OUTPUT}"
-          {
-            echo "### 🌍 Terraform module test"
-            echo ""
-            if [[ "${ROOT}" == "[]" ]]; then
-              echo "⏭️ Skipped — no \`main.tf\` root module."
-            else
-              echo "Root module found; the test suite will run."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
 
   test:
     name: Module Test

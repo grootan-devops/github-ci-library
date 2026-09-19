@@ -82,6 +82,8 @@ jobs:
           OUTCOME: ${{ steps.biome.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and Biome never ran.
+          [[ "${OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           TALLY="$(grep -E '^(Checked|Found|Fixed|Skipped) ' "${BIOME_REPORT}" 2>/dev/null | tail -n 5 || true)"
           {
             echo "### 📗 Node lint: biome"

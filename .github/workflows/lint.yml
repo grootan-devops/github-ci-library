@@ -156,22 +156,18 @@ jobs:
         if: ${{ steps.target.outputs.skip != 'true' }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/${{ matrix.script }}"
 
-      # Linters write their own summary sections; only a skipped subject or a
-      # failure before the linter ran needs one here.
+      # Linters write their own summary sections; only a failure before the
+      # linter ran needs one here.
       - name: Publish Lint Summary
         if: always()
         env:
           NAME: ${{ matrix.name }}
-          SKIPPED: ${{ steps.target.outputs.skip }}
           LINT_OUTCOME: ${{ steps.lint.outcome }}
           OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
-          # shellcheck disable=SC2016 # backticks are markdown, not command substitution
-          if [[ "${SKIPPED}" == "true" ]]; then
-            printf '### 🧹 Lint: %s\n\n⏭️ Nothing to lint — subject not present in this repository.\n\n' \
-              "${NAME}" >> "${GITHUB_STEP_SUMMARY}"
-          elif [[ "${OUTCOME}" == "failure" && "${LINT_OUTCOME}" != "failure" ]]; then
+          if [[ "${OUTCOME}" == "failure" && "${LINT_OUTCOME}" != "failure" ]]; then
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
             printf '### 🧹 Lint: %s\n\n❌ The job failed before %s could run (the linter step was `%s`). The failing step in the log is the checkout or the target resolution, not the linter.\n\n' \
               "${NAME}" "${NAME}" "${LINT_OUTCOME}" >> "${GITHUB_STEP_SUMMARY}"
           fi

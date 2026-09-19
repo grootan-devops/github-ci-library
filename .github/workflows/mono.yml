@@ -94,9 +94,9 @@ jobs:
           fi
 
           DECLARED="$(jq 'length' <<<"${PROJECTS}")"
-          RANGE="every project (always-run-all)"
           if [[ "${ALWAYS_RUN_ALL}" == "true" ]]; then
             echo "always-run-all is set — selecting every project."
+            RANGE="every project (always-run-all)"
             SELECTED="${PROJECTS}"
           else
             # Compare over the whole pushed range, not just the tip commit.

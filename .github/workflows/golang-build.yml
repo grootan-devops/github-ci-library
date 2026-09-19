@@ -93,6 +93,8 @@ jobs:
           DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the download never ran.
+          [[ "${DOWNLOAD_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           CACHE_STATE="rebuilt — no entry matched"
           [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
@@ -171,6 +173,8 @@ jobs:
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the build never ran.
+          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           {
             echo "### 📦 Go build"
             echo ""
@@ -180,7 +184,7 @@ jobs:
               echo '```'
               tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
               echo '```'
-            elif [[ -d bin ]]; then
+            elif compgen -G "bin/*" > /dev/null; then
               echo "| Binary | Size |"
               echo "|---|---|"
               for F in bin/*; do

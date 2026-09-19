@@ -49,8 +49,6 @@ summarise() {
 if [[ -z "${PREVIOUS_RELEASE_VERSION}" ]]; then
   echo "ℹ️ Notice: No previous release found in repository. Initial release detected."
   echo "Migration guide check is skipped for initial release."
-  summarise "### 🧭 Migration guide
-No previous release found — initial release, migration guide not required."
   exit 0
 fi
 

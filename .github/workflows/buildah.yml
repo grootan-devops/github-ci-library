@@ -388,6 +388,7 @@ jobs:
           [[ -n "${MAJOR}" ]] && crane tag "${PROD_IMAGE}:${TAG}" "${MAJOR}"
           [[ -n "${MINOR}" ]] && crane tag "${PROD_IMAGE}:${TAG}" "${MINOR}"
 
+          PROD_DIGEST="$(crane digest "${PROD_IMAGE}:${TAG}")"
           {
             echo "### 🐳 Container Image"
             echo ""
@@ -395,7 +396,7 @@ jobs:
             echo "|---|---|"
             echo "| **Promoted from** | \`${SOURCE}\` |"
             echo "| **Released as** | \`${PROD_IMAGE}:${TAG}\` |"
-            echo "| **Digest** | \`$(crane digest "${PROD_IMAGE}:${TAG}")\` |"
+            echo "| **Digest** | \`${PROD_DIGEST}\` |"
             # `crane mutate` rewrites the version label, so the scanned
             # candidate's digest differs from the released one by design.
             echo "| **Scanned candidate digest** | \`${SOURCE_DIGEST}\` |"

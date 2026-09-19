@@ -398,7 +398,7 @@ jobs:
 
           # Mirror a stable push into the dev channel so consumers pinned there
           # still resolve it. A convenience: a failed mirror warns, not fails.
-          MIRROR_STATE="not applicable"
+          MIRROR_STATE=""
           if [[ -n "${CHART_DEV_REPOSITORY}" && "${CHART_REPOSITORY}" != "${CHART_DEV_REPOSITORY}" ]]; then
             DEV_TARGET="oci://${REGISTRY_HOST}/${CHART_DEV_REPOSITORY}"
             echo "Mirroring ${PACKAGE} to the dev channel at ${DEV_TARGET}..."
@@ -416,7 +416,9 @@ jobs:
             echo "- **📦 Name:** \`${CHART_NAME}\`"
             echo "- **🏷️ Version:** \`${CHART_VERSION}\`"
             echo "- **🌐 Registry:** \`${TARGET}\`"
-            echo "- **🔁 Dev mirror:** ${MIRROR_STATE}"
+            if [[ -n "${MIRROR_STATE}" ]]; then
+              echo "- **🔁 Dev mirror:** ${MIRROR_STATE}"
+            fi
           } > "${CHART_INFO_FILE_NAME}"
           cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
 

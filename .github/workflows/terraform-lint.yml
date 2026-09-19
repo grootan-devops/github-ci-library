@@ -73,20 +73,16 @@ jobs:
             echo "checks=${CHECKS}"
             echo "docs=${DOCS}"
           } >> "${GITHUB_OUTPUT}"
-          {
-            echo "### 🌍 Applicable Terraform jobs"
-            echo ""
-            if [[ "${ROOT}" == "[]" ]]; then
-              echo "- None — no \`main.tf\` root module."
-            else
+          if [[ "${ROOT}" != "[]" ]]; then
+            {
+              echo "### 🌍 Applicable Terraform jobs"
+              echo ""
               echo "- Init"
               jq -r '.[] | "- \(.name)"' <<< "${CHECKS}"
-              if [[ "${DOCS}" != "[]" ]]; then
-                echo "- Documentation"
-              fi
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+              [[ "${DOCS}" == "[]" ]] || echo "- Documentation"
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
   init:
     name: Init
@@ -149,7 +145,7 @@ jobs:
             echo "### 🌍 Terraform init"
             echo ""
             if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ Backend initialised; providers cached for the checks (provider cache ${CACHE_STATE})."
+              echo "✅ Backend initialised; provider cache ${CACHE_STATE}."
             else
               echo "❌ \`terraform init\` failed, so neither \`validate\` nor \`tflint\` ran. Terraform reported:"
               echo ""

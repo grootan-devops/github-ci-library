@@ -9,7 +9,6 @@ CHART_DIR="${CHART_DIR:-./chart}"
 if [[ -z "${CHART_VERSION:-}" ]]; then
   if [[ -f "${PROJECT_PATH}/${CHART_DIR}/Chart.yaml" ]]; then
     echo "Local chart present; nothing published to collide with."
-    { echo "### ⎈ Chart version"; echo; echo "✅ Working-tree chart present; no published version to collide with."; echo; } >> "${GITHUB_STEP_SUMMARY}"
     exit 0
   fi
   echo "::error title=Chart::No chart-version supplied and no chart at ${PROJECT_PATH}/${CHART_DIR}/Chart.yaml."
@@ -19,7 +18,6 @@ fi
 
 if [[ ! "${CHART_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "::notice::Chart version '${CHART_VERSION}' is a candidate build. Skipping the collision check."
-  { echo "### ⎈ Chart version"; echo; echo "✅ \`${CHART_VERSION}\` is a candidate build — collision check skipped."; echo; } >> "${GITHUB_STEP_SUMMARY}"
   exit 0
 fi
 

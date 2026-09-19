@@ -95,6 +95,8 @@ jobs:
           RESOLVE_OUTCOME: ${{ steps.resolve.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the resolve never ran.
+          [[ "${RESOLVE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           CACHE_STATE="rebuilt — no entry matched"
           [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
@@ -174,6 +176,8 @@ jobs:
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the build never ran.
+          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           {
             echo "### 📦 Java build"
             echo ""

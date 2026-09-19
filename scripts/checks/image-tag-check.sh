@@ -7,7 +7,6 @@ set -euo pipefail
 
 if [[ ! "${IMAGE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "::notice::Image tag '${IMAGE_TAG}' is a candidate build. Skipping the collision check."
-  { echo "### 🐳 Image tag"; echo; echo "✅ \`${IMAGE_TAG}\` is a candidate build — collision check skipped."; echo; } >> "${GITHUB_STEP_SUMMARY}"
   exit 0
 fi
 

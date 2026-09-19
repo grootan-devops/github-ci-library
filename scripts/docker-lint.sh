@@ -51,7 +51,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
     echo "### 🐳 Dockerfile lint"
     echo ""
-    echo "\`${DOCKERFILE}\`, ignoring: \`${FULL_HADOLINT_IGNORE}\`"
+    echo "\`${DOCKERFILE}\`${HADOLINT_IGNORE:+, also ignoring \`${HADOLINT_IGNORE}\`}"
     echo ""
     if [[ "${RESULT}" -eq 0 ]]; then
       echo "✅ No findings."

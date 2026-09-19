@@ -395,18 +395,29 @@ jobs:
 
       - name: Publish Komodo Deployment Summary
         if: always()
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          GITOPS_REPO: ${{ inputs.gitops-repo }}
+          PREVIOUS_IMAGE: ${{ steps.gitops_commit.outputs.previous_image }}
+          # validate's reference survives a failed GitOps step; env.NEW_IMAGE_REF would not.
+          DEPLOYED_IMAGE: ${{ needs.validate.outputs.new-image }}
+          COMMIT_SHA: ${{ steps.gitops_commit.outputs.commit_sha }}
+          EXEC_ID: ${{ steps.trigger_komodo.outputs.execution_id }}
+          VERDICT: ${{ steps.poll_komodo.outputs.status || job.status }}
         run: |
+          set -euo pipefail
           {
             echo "## 🦎 Komodo GitOps Deployment Summary"
             echo ""
             echo "| Property | Value |"
             echo "| :--- | :--- |"
-            echo "| **Environment** | \`${{ inputs.environment }}\` |"
-            echo "| **Stack Name** | \`${{ inputs.komodo-stack-name }}\` |"
-            echo "| **Previous Image** | \`${{ steps.gitops_commit.outputs.previous_image || 'none recorded' }}\` |"
-            echo "| **Deployed Image** | \`${{ env.NEW_IMAGE_REF || inputs.image-tag }}\` |"
-            echo "| **GitOps Repository** | \`${{ inputs.gitops-repo }}\` |"
-            echo "| **GitOps Commit** | \`${{ steps.gitops_commit.outputs.commit_sha || 'N/A' }}\` |"
-            echo "| **Komodo Execution ID** | \`${{ steps.trigger_komodo.outputs.execution_id || 'N/A' }}\` |"
-            echo "| **Deployment Verdict** | **${{ steps.poll_komodo.outputs.status || job.status }}** |"
+            echo "| **Environment** | \`${ENVIRONMENT}\` |"
+            echo "| **Stack Name** | \`${STACK_NAME}\` |"
+            [[ -n "${PREVIOUS_IMAGE}" ]] && echo "| **Previous Image** | \`${PREVIOUS_IMAGE}\` |"
+            echo "| **Deployed Image** | \`${DEPLOYED_IMAGE}\` |"
+            echo "| **GitOps Repository** | \`${GITOPS_REPO}\` |"
+            [[ -n "${COMMIT_SHA}" ]] && echo "| **GitOps Commit** | \`${COMMIT_SHA}\` |"
+            [[ -n "${EXEC_ID}" ]] && echo "| **Komodo Execution ID** | \`${EXEC_ID}\` |"
+            echo "| **Deployment Verdict** | **${VERDICT}** |"
           } >> "${GITHUB_STEP_SUMMARY}"

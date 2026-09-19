@@ -189,7 +189,6 @@ jobs:
     steps:
       - name: Consolidate Guard Results
         env:
-          GUARDS: ${{ needs.discover.outputs.include }}
           RESULT: ${{ needs.guard.result }}
           DISCOVER_RESULT: ${{ needs.discover.result }}
         run: |

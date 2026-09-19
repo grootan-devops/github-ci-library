@@ -322,8 +322,13 @@ jobs:
           MODE: ${{ steps.resolve.outputs.mode }}
           NEW_IMAGE: ${{ steps.resolve.outputs.new_image }}
           CHART_REPO_URL: ${{ steps.resolve.outputs.chart_repo_url }}
+          IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
         run: |
           set -euo pipefail
+          # Manifest mode resolves no chart; helm mode writes an image only when image-values-file is set.
+          WANT_CHART=false; [[ "${MODE}" == "helm" ]] && WANT_CHART=true
+          WANT_IMAGE=false; [[ "${MODE}" == "manifest" || -n "${IMAGE_VALUES_FILE}" ]] && WANT_IMAGE=true
+
           {
             echo "### 🔎 Deployment prerequisites"
             echo ""
@@ -331,9 +336,9 @@ jobs:
             echo ""
             echo "| Property | Value |"
             echo "|---|---|"
-            echo "| **Chart version** | \`${VERSION:-n/a}\` |"
-            echo "| **Chart repository** | \`${CHART_REPO_URL:-n/a}\` |"
-            echo "| **Image** | \`${NEW_IMAGE:-n/a}\` |"
+            [[ "${WANT_CHART}" == "true" && -n "${VERSION}" ]] && echo "| **Chart version** | \`${VERSION}\` |"
+            [[ "${WANT_CHART}" == "true" ]] && echo "| **Chart repository** | \`${CHART_REPO_URL}\` |"
+            [[ "${WANT_IMAGE}" == "true" ]] && echo "| **Image** | \`${NEW_IMAGE}\` |"
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -502,8 +507,8 @@ jobs:
               echo "| **Repository** | \`${GITOPS_REPO}\` |"
               echo "| **Branch** | \`${BRANCH}\` |"
               echo "| **Commit** | \`${SHA}\` |"
-              echo "| **Previous** | \`${PREVIOUS:-none recorded}\` |"
-              echo "| **Now** | \`${CURRENT:-${VERSION}}\` |"
+              [[ -n "${PREVIOUS}" ]] && echo "| **Previous** | \`${PREVIOUS}\` |"
+              echo "| **Now** | \`${CURRENT}\` |"
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -628,26 +633,39 @@ jobs:
 
       - name: Publish Deployment Summary
         if: always()
+        env:
+          MODE: ${{ needs.validate.outputs.mode }}
+          VERSION: ${{ needs.validate.outputs.target-version }}
+          CHART_REPO_URL: ${{ needs.validate.outputs.chart-repo-url }}
+          NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
+          IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
+          BRANCH: ${{ needs.validate.outputs.gitops-branch }}
+          COMMIT_SHA: ${{ needs.gitops-commit.outputs.commit-sha }}
+          LIVE_URL: ${{ inputs.github-environment-url }}
         run: |
+          set -euo pipefail
+          APP_ROWS="${RUNNER_TEMP}/argocd-apps.tsv"
+          # Manifest mode resolves no chart; helm mode writes an image only when image-values-file is set.
+          WANT_CHART=false; [[ "${MODE}" == "helm" ]] && WANT_CHART=true
+          WANT_IMAGE=false; [[ "${MODE}" == "manifest" || -n "${IMAGE_VALUES_FILE}" ]] && WANT_IMAGE=true
+
           {
             echo "## 🚢 Deployment Summary"
             echo ""
             echo "| Property | Value |"
             echo "|---|---|"
             echo "| **Environment** | \`${ENVIRONMENT}\` |"
-            echo "| **Applications** | \`${ARGOCD_APP_NAME}\` |"
-            echo "| **Chart Version** | \`${{ needs.validate.outputs.target-version || 'n/a' }}\` |"
-            echo "| **Chart repoURL** | \`${{ needs.validate.outputs.chart-repo-url || 'n/a' }}\` |"
-            echo "| **Image** | \`${{ needs.validate.outputs.new-image || 'n/a' }}\` |"
-            echo "| **GitOps Branch** | \`${{ needs.validate.outputs.gitops-branch }}\` |"
-            echo "| **GitOps Commit** | \`${{ needs.gitops-commit.outputs.commit-sha || 'no change' }}\` |"
-            echo "| **Sync Status** | ${{ steps.sync.outputs.sync || 'n/a' }} |"
-            echo "| **Health Status** | ${{ steps.sync.outputs.health || 'n/a' }} |"
-            if [[ -n "${{ inputs.github-environment-url }}" ]]; then
-              echo "| **Live URL** | [${{ inputs.github-environment-url }}](${{ inputs.github-environment-url }}) |"
+            # The per-application table below carries the names; list them here only when it never rendered.
+            [[ ! -s "${APP_ROWS}" ]] && echo "| **Applications** | \`${ARGOCD_APP_NAME}\` |"
+            [[ "${WANT_CHART}" == "true" && -n "${VERSION}" ]] && echo "| **Chart Version** | \`${VERSION}\` |"
+            [[ "${WANT_CHART}" == "true" ]] && echo "| **Chart repoURL** | \`${CHART_REPO_URL}\` |"
+            [[ "${WANT_IMAGE}" == "true" ]] && echo "| **Image** | \`${NEW_IMAGE}\` |"
+            echo "| **GitOps Branch** | \`${BRANCH}\` |"
+            echo "| **GitOps Commit** | \`${COMMIT_SHA:-no change}\` |"
+            if [[ -n "${LIVE_URL}" ]]; then
+              echo "| **Live URL** | [${LIVE_URL}](${LIVE_URL}) |"
             fi
 
-            APP_ROWS="${RUNNER_TEMP}/argocd-apps.tsv"
             if [[ -s "${APP_ROWS}" ]]; then
               echo ""
               echo "### 📦 Applications"

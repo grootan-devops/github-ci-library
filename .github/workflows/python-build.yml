@@ -93,6 +93,8 @@ jobs:
           RESOLVE_OUTCOME: ${{ steps.resolve.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the resolve never ran.
+          [[ "${RESOLVE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           CACHE_STATE="rebuilt — no entry matched"
           [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
@@ -175,6 +177,8 @@ jobs:
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
+          # Anything else means an earlier step failed and the build never ran.
+          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
           {
             echo "### 📦 Python build"
             echo ""
@@ -184,7 +188,7 @@ jobs:
               echo '```'
               tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
               echo '```'
-            elif [[ -d dist ]]; then
+            elif compgen -G "dist/*" > /dev/null; then
               echo "| Artifact | Size |"
               echo "|---|---|"
               for F in dist/*; do

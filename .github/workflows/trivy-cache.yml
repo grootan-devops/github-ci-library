@@ -63,7 +63,6 @@ jobs:
             if [[ -f pom.xml ]]; then WANT_JAVA=true; else WANT_JAVA=false; fi
           fi
 
-          JAVA_DB="skipped — no pom.xml and enable-java-db is not \`true\`"
           if [[ "${WANT_JAVA}" == "true" ]]; then
             echo "Warming trivy-java-db for downstream image and SBOM scans..."
             # Downstream scans pass --skip-java-db-update, which Trivy treats as
@@ -74,10 +73,10 @@ jobs:
               JAVA_DB="⚠️ **download failed** — a later image or SBOM scan of a Java artifact will fail on the cold cache"
               echo "::warning title=Trivy cache::trivy-java-db did not download. Image and SBOM scans of Java artifacts will fail against this cache."
             fi
+            echo "java_db=${JAVA_DB}" >> "${GITHUB_OUTPUT}"
           else
             echo "No pom.xml and enable-java-db is not true — skipping trivy-java-db."
           fi
-          echo "java_db=${JAVA_DB}" >> "${GITHUB_OUTPUT}"
 
       # GitHub caches are immutable, so a stable key must be deleted before it can
       # be rewritten, or `trivy-db` freezes at whatever the first run stored.
@@ -144,6 +143,7 @@ jobs:
           else
             WRITTEN="no — already refreshed today, or \`actions: write\` was not granted"
           fi
+          SIZE="$(du -sh "${TRIVY_CACHE_DIR}" 2>/dev/null | awk '{print $1}' || true)"
           {
             echo "### 🗄️ Trivy database cache"
             echo ""
@@ -151,7 +151,12 @@ jobs:
             echo "|---|---|"
             echo "| **Cache** | ${RESTORED} |"
             echo "| **Written back** | ${WRITTEN} |"
-            echo "| **Java DB** | ${JAVA_DB:-not attempted} |"
-            echo "| **Size** | $(du -sh .trivycache 2>/dev/null | cut -f1 || echo 'empty') |"
+            # Set only when the Java DB was actually warmed.
+            if [[ -n "${JAVA_DB}" ]]; then
+              echo "| **Java DB** | ${JAVA_DB} |"
+            fi
+            if [[ -n "${SIZE}" ]]; then
+              echo "| **Size** | ${SIZE} |"
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
