@@ -86,26 +86,34 @@ jobs:
 
           STAMP=".trivycache/.warmed-on"
           TODAY="$(date -u +%Y-%m-%d)"
+
+          # NOTE: the caches API matches `key` as a PREFIX, so a query for
+          # "trivy-db" also returns "trivy-db-anything". Filter for the exact
+          # key or an unrelated entry will be mistaken for ours.
+          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" \
+            --jq '[.actions_caches[] | select(.key == "trivy-db")] | length' 2>/dev/null || echo 0)"
+
+          if [[ "${EXISTING}" == "0" ]]; then
+            mkdir -p .trivycache && echo "${TODAY}" > "${STAMP}"
+            echo "No 'trivy-db' entry yet; this run writes it."
+            echo "save=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
           if [[ -f "${STAMP}" ]] && [[ "$(cat "${STAMP}")" == "${TODAY}" ]]; then
-            echo "Databases were already warmed today; keeping the cached entry."
+            echo "'trivy-db' was already refreshed today; keeping it."
             echo "save=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          mkdir -p .trivycache
-          echo "${TODAY}" > "${STAMP}"
-
+          # GitHub caches are immutable: the entry has to go before the same key
+          # can be written again. Deleting needs actions: write, which a caller
+          # may not grant — then the existing entry simply stays.
+          mkdir -p .trivycache && echo "${TODAY}" > "${STAMP}"
           if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" >/dev/null 2>&1; then
-            echo "Deleted the previous trivy-db entry so this run can write it."
-            echo "save=true" >> "${GITHUB_OUTPUT}"
-          elif gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" \
-                 --jq '.actions_caches | length' 2>/dev/null | grep -qx 0; then
-            echo "No previous trivy-db entry; this run writes the first one."
+            echo "Replaced the 'trivy-db' entry with today's databases."
             echo "save=true" >> "${GITHUB_OUTPUT}"
           else
-            # Deleting needs actions: write, which the caller may not grant.
-            # The existing entry then stays as it is — restores keep working,
-            # and Trivy refreshes anything stale in the job itself.
             echo "::warning title=Trivy cache::Could not replace the 'trivy-db' entry. Grant 'actions: write' in the calling workflow to let it refresh."
             echo "save=false" >> "${GITHUB_OUTPUT}"
           fi
