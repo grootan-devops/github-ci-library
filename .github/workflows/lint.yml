@@ -71,6 +71,12 @@ jobs:
             TARGETS="$(jq -c '. + [{"name":"Migration Guide","script":"markdown-lint.sh","subject":"migration"}]' <<< "${TARGETS}")"
           fi
           echo "include=${TARGETS}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### 🧹 Applicable linters"
+            echo ""
+            jq -r '.[] | "- \(.name)"' <<< "${TARGETS}"
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   lint:
     name: "Lint: ${{ matrix.name }}"

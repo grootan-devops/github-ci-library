@@ -25,6 +25,11 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one on Docker Hub (`/dev` becomes `-dev`), which has no nested repositories.
   Consumers no longer have to set `IMAGE_DEV_REPOSITORY_SUFFIX` per registry.
 - `ci.yml` also runs on `dev` pull requests and filters on `.github/**`.
+- `cd.yml` ignores `.github/**` on the default branch, so a change confined to
+  the pipeline is verified by its pull request and never cuts a release on its
+  own, and gains a `workflow_dispatch` trigger for a deliberate release.
+- `lint.yml` and `docker-lint.sh` report into the job summary, so every check in
+  the library now says what it found without opening the raw log.
 
 ### Removed
 
