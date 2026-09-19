@@ -7,6 +7,25 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `self-version.yml`, `self-lint.yml`, `self-check.yml` and `self-secret-scan.yml`:
+  the library's own pipeline split into independently dispatchable dimensions, so
+  a developer working on one of them can run just that one. `ci.yml` is now only
+  an aggregator over them.
+- `scripts/checks/`: the git-tag, chart-version, chart-dependency and image-tag
+  guards extracted into standalone scripts.
+
+### Changed
+
+- `check.yml` discovers the guards that apply to the repository and runs them as
+  a matrix, so a repository with no chart or no Dockerfile no longer gets
+  permanently skipped chart and image jobs in its run graph.
+- `init.yml` normalises a path-style development repository suffix to a tag-style
+  one on Docker Hub (`/dev` becomes `-dev`), which has no nested repositories.
+  Consumers no longer have to set `IMAGE_DEV_REPOSITORY_SUFFIX` per registry.
+- `ci.yml` also runs on `dev` pull requests and filters on `.github/**`.
+
 ## [1.0.0] - 2026-09-19
 
 ### Added

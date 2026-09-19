@@ -1,0 +1,64 @@
+name: Lint · Library
+
+# One dimension of the library's own pipeline, callable on its own so a change
+# to a linter or a script can be verified without running the whole CI run.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  # actionlint and shellcheck ship in the organisation build container.
+  self-lint:
+    name: "Self Lint: ${{ matrix.tool }}"
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [actionlint, shellcheck]
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Run ${{ matrix.tool }}
+        env:
+          TOOL: ${{ matrix.tool }}
+        run: |
+          set -euo pipefail
+          case "${TOOL}" in
+            actionlint)  actionlint -color ;;
+            shellcheck)  shellcheck scripts/*.sh scripts/checks/*.sh ;;
+          esac
+
+      - name: Publish Self Lint Summary
+        if: always()
+        env:
+          TOOL: ${{ matrix.tool }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🔧 Self lint: ${TOOL}"
+            echo ""
+            case "${OUTCOME}" in
+              success) echo "✅ Passed." ;;
+              failure) echo "❌ Failed. See the job log." ;;
+              *)       echo "Status: ${OUTCOME}" ;;
+            esac
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  lint:
+    name: Lint
+    uses: ./.github/workflows/lint.yml
+    secrets: inherit
+    with:
+      lint-yaml-files: ".github/workflows/*.yml .yamllint.yml"
