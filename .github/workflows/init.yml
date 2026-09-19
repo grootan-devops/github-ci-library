@@ -532,51 +532,95 @@ jobs:
       # resolved version.
       - name: Publish Initialization Summary
         if: ${{ always() && steps.version.outcome == 'success' }}
+        env:
+          IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
+          IGNORE_DOCKER: ${{ steps.version.outputs.IGNORE_DOCKER }}
+          IS_RELEASE: ${{ steps.version.outputs.IS_RELEASE }}
+          DEV_SUFFIX_NOTE: ${{ steps.version.outputs.DEV_SUFFIX_NOTE }}
+          TAG: ${{ steps.version.outputs.TAG }}
+          VERSION_SUFFIX: ${{ steps.version.outputs.VERSION_SUFFIX }}
+          IMAGE_PUSH_TAG: ${{ steps.version.outputs.IMAGE_PUSH_TAG }}
+          IMAGE_PUSH_REPOSITORY: ${{ steps.version.outputs.IMAGE_PUSH_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY: ${{ steps.version.outputs.IMAGE_DEV_REPOSITORY }}
+          IMAGE_REPOSITORY: ${{ steps.version.outputs.IMAGE_REPOSITORY }}
+          CHART_PUSH_VERSION: ${{ steps.version.outputs.CHART_PUSH_VERSION }}
+          CHART_PUSH_REPOSITORY: ${{ steps.version.outputs.CHART_PUSH_REPOSITORY }}
+          CHART_DEV_REPOSITORY: ${{ steps.version.outputs.CHART_DEV_REPOSITORY }}
+          CHART_REPOSITORY: ${{ steps.version.outputs.CHART_REPOSITORY }}
+          MERGED_PR_NUMBER: ${{ steps.provenance.outputs.MERGED_PR_NUMBER }}
+          UPSTREAM_HEAD_SHA: ${{ steps.provenance.outputs.UPSTREAM_HEAD_SHA }}
+          UPSTREAM_RUN_ID: ${{ steps.provenance.outputs.UPSTREAM_RUN_ID }}
+          CANDIDATE_IMAGE_TAG: ${{ steps.provenance.outputs.CANDIDATE_IMAGE_TAG }}
+          CANDIDATE_CHART_VERSION: ${{ steps.provenance.outputs.CANDIDATE_CHART_VERSION }}
         run: |
-          {
-            echo "## 🚀 CI/CD Version & Target Discovery"
-            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${{ steps.version.outputs.IS_RELEASE }}" != "true" ]]; then
-              echo ""
-              echo "> [!NOTE]"
-              echo "> Manual run. A candidate suffix is forced and every push is routed to the"
-              echo "> development repositories, so this run cannot overwrite a published artifact."
-            fi
-            if [[ -n "${{ steps.version.outputs.DEV_SUFFIX_NOTE }}" ]]; then
-              echo ""
-              echo "> [!NOTE]"
-              echo "> ${{ steps.version.outputs.DEV_SUFFIX_NOTE }}"
-            fi
-            echo ""
-            echo "### 🏷️ Discovered Version Metadata"
-            echo ""
-            echo "| Property | Target Value |"
-            echo "|---|---|"
-            echo "| **Discovered Release Tag** | \`${{ steps.version.outputs.TAG }}\` |"
-            echo "| **Build Type** | ${{ steps.version.outputs.IS_RELEASE == 'true' && '🚀 Production Release' || '🔍 Candidate' }} |"
-            echo "| **Major / Minor Scope** | \`${{ steps.version.outputs.MAJOR_VERSION || '(non-numeric)' }}\` / \`${{ steps.version.outputs.MINOR_VERSION || '(non-numeric)' }}\` |"
-            echo "| **Candidate Suffix** | \`${{ steps.version.outputs.VERSION_SUFFIX || '(none - release)' }}\` |"
-            echo "| **Container Push Tag** | \`${{ steps.version.outputs.IMAGE_PUSH_TAG }}\` |"
-            echo "| **Helm Chart Push Version** | \`${{ steps.version.outputs.CHART_PUSH_VERSION }}\` |"
-            echo ""
-            echo "### 📦 Registry Target Repositories"
-            echo ""
-            echo "| Artifact | This Run Pushes To | Candidate | Production |"
-            echo "|---|---|---|---|"
-            echo "| **Container Image** | \`${{ steps.version.outputs.IMAGE_PUSH_REPOSITORY }}\` | \`${{ steps.version.outputs.IMAGE_DEV_REPOSITORY }}\` | \`${{ steps.version.outputs.IMAGE_REPOSITORY }}\` |"
-            echo "| **Helm Chart** | \`${{ steps.version.outputs.CHART_PUSH_REPOSITORY }}\` | \`${{ steps.version.outputs.CHART_DEV_REPOSITORY }}\` | \`${{ steps.version.outputs.CHART_REPOSITORY }}\` |"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          set -euo pipefail
+          WANT_IMAGE=false; [[ "${IGNORE_DOCKER}" != "true" ]] && WANT_IMAGE=true
+          WANT_CHART=false; [[ "${IGNORE_CHART}" != "true" ]] && WANT_CHART=true
 
-          if [[ "${{ steps.version.outputs.IS_RELEASE }}" == "true" ]]; then
-            {
+          {
+            echo "## 🚀 Version & Targets"
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${IS_RELEASE}" != "true" ]]; then
               echo ""
-              echo "### 🔗 Promotion Source"
+              echo "> [!NOTE]"
+              echo "> Manual run: a candidate suffix is forced and pushes go to the development"
+              echo "> repositories, so this run cannot overwrite a published artifact."
+            fi
+            if [[ -n "${DEV_SUFFIX_NOTE}" ]]; then
+              echo ""
+              echo "> [!NOTE]"
+              echo "> ${DEV_SUFFIX_NOTE}"
+            fi
+            echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| **Release tag** | \`${TAG}\` |"
+            if [[ "${IS_RELEASE}" == "true" ]]; then
+              echo "| **Build type** | 🚀 Production release |"
+            else
+              echo "| **Build type** | 🔍 Candidate \`${VERSION_SUFFIX}\` |"
+            fi
+            [[ "${WANT_IMAGE}" == "true" ]] && echo "| **Image tag** | \`${IMAGE_PUSH_TAG}\` |"
+            [[ "${WANT_CHART}" == "true" ]] && echo "| **Chart version** | \`${CHART_PUSH_VERSION}\` |"
+
+            if [[ "${WANT_IMAGE}" == "true" || "${WANT_CHART}" == "true" ]]; then
+              echo ""
+              echo "| Artifact | Pushes to | Production |"
+              echo "|---|---|---|"
+              [[ "${WANT_IMAGE}" == "true" ]] && echo "| Image | \`${IMAGE_PUSH_REPOSITORY}\` | \`${IMAGE_REPOSITORY}\` |"
+              [[ "${WANT_CHART}" == "true" ]] && echo "| Chart | \`${CHART_PUSH_REPOSITORY}\` | \`${CHART_REPOSITORY}\` |"
+            fi
+
+            if [[ "${IS_RELEASE}" == "true" ]]; then
+              echo ""
+              echo "### 🔗 Promotion source"
               echo ""
               echo "| Property | Value |"
               echo "|---|---|"
-              echo "| **Merged Pull Request** | ${{ steps.provenance.outputs.MERGED_PR_NUMBER && format('[#{0}]({1}/{2}/pull/{0})', steps.provenance.outputs.MERGED_PR_NUMBER, github.server_url, github.repository) || '⚠️ unresolved' }} |"
-              echo "| **Upstream Head Commit** | \`${{ steps.provenance.outputs.UPSTREAM_HEAD_SHA || 'unresolved' }}\` |"
-              echo "| **Upstream Run** | ${{ steps.provenance.outputs.UPSTREAM_RUN_ID && format('[{0}]({1}/{2}/actions/runs/{0})', steps.provenance.outputs.UPSTREAM_RUN_ID, github.server_url, github.repository) || '⚠️ unresolved' }} |"
-              echo "| **Exact Image Candidate** | ${{ steps.version.outputs.IGNORE_DOCKER == 'true' && '*(image disabled)*' || (steps.provenance.outputs.CANDIDATE_IMAGE_TAG && format('`{0}`', steps.provenance.outputs.CANDIDATE_IMAGE_TAG) || '⚠️ unresolved — promotion searches by tag') }} |"
-              echo "| **Exact Chart Candidate** | ${{ steps.version.outputs.IGNORE_CHART == 'true' && '*(chart disabled)*' || (steps.provenance.outputs.CANDIDATE_CHART_VERSION && format('`{0}`', steps.provenance.outputs.CANDIDATE_CHART_VERSION) || '⚠️ unresolved — promotion searches by version') }} |"
-            } >> "${GITHUB_STEP_SUMMARY}"
-          fi
+              if [[ -n "${MERGED_PR_NUMBER}" ]]; then
+                echo "| Merged pull request | [#${MERGED_PR_NUMBER}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${MERGED_PR_NUMBER}) |"
+              else
+                echo "| Merged pull request | ⚠️ unresolved |"
+              fi
+              echo "| Upstream commit | \`${UPSTREAM_HEAD_SHA:-unresolved}\` |"
+              if [[ -n "${UPSTREAM_RUN_ID}" ]]; then
+                echo "| Upstream run | [${UPSTREAM_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${UPSTREAM_RUN_ID}) |"
+              else
+                echo "| Upstream run | ⚠️ unresolved |"
+              fi
+              if [[ "${WANT_IMAGE}" == "true" ]]; then
+                if [[ -n "${CANDIDATE_IMAGE_TAG}" ]]; then
+                  echo "| Image candidate | \`${CANDIDATE_IMAGE_TAG}\` |"
+                else
+                  echo "| Image candidate | ⚠️ unresolved, promotion searches by tag |"
+                fi
+              fi
+              if [[ "${WANT_CHART}" == "true" ]]; then
+                if [[ -n "${CANDIDATE_CHART_VERSION}" ]]; then
+                  echo "| Chart candidate | \`${CANDIDATE_CHART_VERSION}\` |"
+                else
+                  echo "| Chart candidate | ⚠️ unresolved, promotion searches by version |"
+                fi
+              fi
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
