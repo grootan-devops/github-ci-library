@@ -55,7 +55,7 @@ on:
 jobs:
   # ------------------------------------------------------------- discovery
   discover:
-    name: Detect Applicable Guards
+    name: Discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
@@ -101,17 +101,13 @@ jobs:
             TARGETS="$(jq -c '. + [{"name":"Image Not Published","subject":"image-tag","script":"image-tag-check.sh"}]' <<< "${TARGETS}")"
           fi
 
+          # No job summary here on purpose: the guards it would list are the
+          # jobs the run graph is about to show by name anyway.
           echo "include=${TARGETS}" >> "${GITHUB_OUTPUT}"
-          {
-            echo "### 🚦 Applicable release guards"
-            echo ""
-            jq -r '.[] | "- \(.name)"' <<< "${TARGETS}"
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
 
   # ---------------------------------------------------------------- guards
   guard:
-    name: "Check: ${{ matrix.name }}"
+    name: "${{ matrix.name }}"
     needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
@@ -193,7 +189,7 @@ jobs:
 
   # --------------------------------------------------------------- verdict
   verdict:
-    name: "Check: Verdict"
+    name: Verdict
     if: always()
     needs: [discover, guard]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -219,10 +215,6 @@ jobs:
               skipped)   echo "⏭️ No guards ran." ;;
               *)         echo "Status: ${RESULT}" ;;
             esac
-            echo ""
-            echo "| Guard |"
-            echo "|---|"
-            jq -r '.[] | "| \(.name) |"' <<< "${GUARDS:-[]}"
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 

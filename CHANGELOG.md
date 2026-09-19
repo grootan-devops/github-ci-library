@@ -16,7 +16,6 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   gets an empty value and a refusal rather than a quietly promoted image that
   nothing scanned.
 
-
 - `self-version.yml`, `self-lint.yml`, `self-check.yml` and `self-secret-scan.yml`:
   the library's own pipeline split into independently dispatchable dimensions, so
   a developer working on one of them can run just that one. `ci.yml` is now only
@@ -68,7 +67,6 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`.release-rules` sends `web`/`api` pipelines to `when: never`); the dispatch
   trigger stays, but a ref that is not the default branch is now refused.
 
-
 - The four language `test` jobs invoked `scripts/junit-report.sh` without ever
   checking the library out, so every unit-test job failed on a missing file
   whether the tests passed or not.
@@ -91,7 +89,6 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reserve and the analysis data never refreshed.
 - `secret-scanning.yml` did not pass `--platform github`, so findings carried
   bare SHAs instead of commit links.
-
 
 - The Trivy database cache was keyed by run id, so it could never be reused and
   every run downloaded the ~1.2GB vulnerability database and, for an image with

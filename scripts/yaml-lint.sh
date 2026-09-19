@@ -22,8 +22,12 @@ if [[ ${#YAML_TARGETS[@]} -eq 0 ]]; then
 fi
 
 echo "Linting: ${YAML_TARGETS[*]}"
+# shellcheck source=scripts/lint-summary.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lint-summary.sh"
 if [[ ! -f .yamllint.yml && ! -f .yamllint.yaml && ! -f .yamllint ]]; then
-  yamllint -s -d "{extends: default, rules: {line-length: disable, document-start: disable, comments: disable, comments-indentation: disable}}" "${YAML_TARGETS[@]}"
+  run_linted "🧾 YAML lint" yamllint -s \
+    -d "{extends: default, rules: {line-length: disable, document-start: disable, comments: disable, comments-indentation: disable}}" \
+    "${YAML_TARGETS[@]}"
 else
-  yamllint -s "${YAML_TARGETS[@]}"
+  run_linted "🧾 YAML lint" yamllint -s "${YAML_TARGETS[@]}"
 fi

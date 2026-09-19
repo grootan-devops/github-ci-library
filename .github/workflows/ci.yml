@@ -37,7 +37,19 @@ jobs:
     uses: ./.github/workflows/self-secret-scan.yml
     secrets: inherit
 
-  check:
-    name: Check
-    uses: ./.github/workflows/self-check.yml
+  # Calls check.yml directly rather than through self-check.yml. Each reusable
+  # hop prefixes the job name, and "Check / Release Guards / Check: Migration
+  # Guide" said one thing three times. self-check.yml still exists for a
+  # standalone dispatch.
+  version:
+    name: Version
+    uses: ./.github/workflows/self-version.yml
     secrets: inherit
+
+  guards:
+    name: Guards
+    needs: version
+    uses: ./.github/workflows/check.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.tag }}
