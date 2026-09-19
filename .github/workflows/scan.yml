@@ -251,12 +251,8 @@ jobs:
 
       - name: Publish Findings As Checks
         if: ${{ !cancelled() }}
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
-        with:
-          report_paths: '${{ inputs.project-path || vars.PROJECT_PATH || ''.'' }}/*_trivy_scan_report.junit'
-          token: ${{ github.token }}
-          check_name: 'Trivy ${{ inputs.scan-type }} findings'
-          job_summary: false
-          annotate_only: true
-          fail_on_failure: false
-          require_tests: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_NAME: "Trivy ${{ inputs.scan-type }} findings"
+          REPORT_GLOB: "*_trivy_scan_report.junit"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/publish-findings.sh"

@@ -214,14 +214,10 @@ jobs:
 
       - name: Publish Test Report
         if: always()
-        uses: mikepenz/action-junit-report@a9170d5795813c01ab4901ffb045b52bab4ab09d # v6
-        with:
-          report_paths: '${{ inputs.project-path || vars.PROJECT_PATH || ''.'' }}/test-report/**/*.xml'
-          token: ${{ github.token }}
-          check_name: 'Go Unit Test Results'
-          job_summary: true
-          job_summary_text: '### 🧪 Go test execution report'
-          detailed_summary: true
-          include_passed: true
-          fail_on_failure: true
-          require_tests: false
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_NAME: "Go Unit Test Results"
+          REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/**/*.xml"
+          JOB_SUMMARY: "true"
+          FAIL_ON_FAILURE: "true"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"

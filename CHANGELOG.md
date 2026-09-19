@@ -26,11 +26,24 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Consumers no longer have to set `IMAGE_DEV_REPOSITORY_SUFFIX` per registry.
 - `ci.yml` also runs on `dev` pull requests and filters on `.github/**`.
 
+### Removed
+
+- Every action outside GitHub's own and Marketplace-verified publishers.
+  `mikepenz/action-junit-report` and `softprops/action-gh-release` are blocked
+  by the common organisation policy that allows only those publishers, and a
+  blocked action fails the whole run at startup, before any job begins.
+
 ### Fixed
 
 - `secret-scanning.yml`: mark the workspace as a safe git directory before
   scanning. `actions/checkout` only marks it for its own step, so git inside the
   container refused the checkout as dubiously owned and the scan found nothing.
+- `scan.yml`, `golang-build.yml`, `java-build.yml`, `node-build.yml` and
+  `python-build.yml` publish JUnit results through `scripts/junit-report.sh`,
+  which parses the reports with `yq` and posts a check run with annotations and
+  a job summary using the `gh` already in the build container.
+- `release.yml` publishes through `gh release`, and updates an existing release
+  instead of failing, so a re-run of a release is idempotent.
 - `secret-scanning.yml`: a pull request now scans its own commit range only when
   both ends of that range resolve in the checkout and the range is non-empty.
   Anything else falls back to the full history with a warning, so an

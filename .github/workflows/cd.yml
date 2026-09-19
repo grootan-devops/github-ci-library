@@ -7,6 +7,11 @@ name: CD · Tag, Release & Notify
 on:
   push:
     branches: [master, main]
+    # A change confined to the pipeline itself is verified by the pull request
+    # that introduced it. It must never cut a release on its own.
+    paths-ignore:
+      - ".github/**"
+  workflow_dispatch:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
