@@ -1,12 +1,15 @@
 name: Image / Docker Build, Push & Promote
 
-# Counterpart of the GitLab Docker:Lint, Image:Build, Image:Push and
-# Image:Promote jobs.
+# Counterpart of the GitLab Image:Build, Image:Push and Image:Promote jobs.
 #
 # Unlike every other workflow in this library, the build job does not run inside
 # the organisation build container: building an image needs the daemon/buildkit
-# on the runner itself. The lint job does use the container, since hadolint is
-# already installed there.
+# on the runner itself.
+#
+# The Dockerfile lint is deliberately NOT here. A caller depends on this whole
+# workflow, so a lint job inside it would put every downstream job — the scan,
+# the release guards — behind hadolint. lint.yml already discovers and lints the
+# Dockerfile; a caller runs it alongside this workflow rather than through it.
 #
 # Every organisation base image is passed to the build as a build argument, so a
 # packaging Dockerfile pins nothing itself — bumping a base image is a change to
@@ -63,11 +66,6 @@ on:
         type: string
         default: ""
         description: "Project root. Monorepo children set this."
-      lint:
-        required: false
-        type: boolean
-        default: true
-        description: "Run hadolint against the Dockerfile."
       test:
         required: false
         type: boolean
@@ -104,40 +102,8 @@ env:
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
 
 jobs:
-  lint:
-    name: "Image: Dockerfile Lint"
-    if: ${{ inputs.lint }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
-    defaults:
-      run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-
-      - name: Checkout CI Library
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .ci-library
-          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
-
-      - name: Lint Dockerfile
-        env:
-          HADOLINT_IGNORE: ${{ vars.HADOLINT_IGNORE }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/docker-lint.sh"
-
   build:
     name: "Image: Build & Push"
-    # Deliberately independent of the Dockerfile lint. They answer different
-    # questions and neither needs the other's answer, so they run together and
-    # the run reports both. A failing lint still fails the run on its own.
     if: ${{ !inputs.is-release }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60

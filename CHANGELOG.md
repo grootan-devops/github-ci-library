@@ -31,9 +31,12 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Every job pins its runner to `ubuntu-26.04` instead of tracking
   `ubuntu-latest`, so the platform's migration to Ubuntu 26 cannot change the
   build environment underneath a release. `vars.CI_RUNNER` still overrides it.
-- `docker.yml`'s image build no longer waits on the Dockerfile lint. They
-  answer different questions and neither needs the other's answer, so they now
-  run together and the run reports both. A failing lint still fails the run.
+- The Dockerfile lint left `docker.yml` entirely. A caller depends on the whole
+  workflow, so a lint job inside it put every downstream job — the scan, the
+  release guards — behind hadolint, which is not a dependency of any of them.
+  `lint.yml` already discovers and lints the Dockerfile, so a caller runs it
+  alongside the image build instead of through it. `docker.yml`'s `lint` input
+  is gone with it.
 - `lint.yml` and `docker-lint.sh` report into the job summary, so every check in
   the library now says what it found without opening the raw log.
 
