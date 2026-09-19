@@ -63,6 +63,12 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- A manual `workflow_dispatch` of `cd.yml` could cut a release from any ref,
+  including a feature branch. GitLab refuses a manual release outright
+  (`.release-rules` sends `web`/`api` pipelines to `when: never`); the dispatch
+  trigger stays, but a ref that is not the default branch is now refused.
+
+
 - The four language `test` jobs invoked `scripts/junit-report.sh` without ever
   checking the library out, so every unit-test job failed on a missing file
   whether the tests passed or not.

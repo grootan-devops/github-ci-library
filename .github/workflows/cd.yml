@@ -23,8 +23,38 @@ permissions:
   checks: write
 
 jobs:
+  # GitLab refuses a release from a manual pipeline outright
+  # (`.release-rules`: `$CI_PIPELINE_SOURCE =~ /^(web|api)$/ → when: never`).
+  # A workflow_dispatch is worse still, because it can target ANY ref — a
+  # release cut from a feature branch would tag and publish work that never
+  # passed the pull request. Keep the deliberate-release button, but refuse
+  # any ref that is not the default branch.
+  guard-ref:
+    name: "Release: Verify Ref"
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            { echo "### 🚫 Release refused"; echo; echo "\`${GITHUB_REF_NAME}\` is not the default branch."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "Releasing from the default branch '${DEFAULT_BRANCH}'."
+
   version:
     name: Version
+    needs: [guard-ref]
+    # guard-ref is skipped on a push, and a skipped dependency would skip this
+    # too — so accept skipped, refuse only an actual failure.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
     uses: ./.github/workflows/self-version.yml
     secrets: inherit
 
