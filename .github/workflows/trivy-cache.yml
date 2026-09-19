@@ -39,12 +39,23 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Resolve Cache Key
+        id: cache-key
+        run: |
+          set -euo pipefail
+          # GitLab keys this cache "trivy-db" and pulls it on every pipeline.
+          # A per-run key can never be reused, so the databases were downloaded
+          # again on every run. Key by day instead: one entry serves every run
+          # that day, and the prefix restore-key falls back to yesterday's while
+          # today's is still being warmed.
+          echo "value=trivy-db-$(date -u +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
+
       - name: Restore Trivy Database Cache
         id: cache
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: trivy-db-${{ github.run_id }}
+          key: ${{ steps.cache-key.outputs.value }}
           restore-keys: trivy-db-
 
       - name: Warm Policy & Java Databases
@@ -69,12 +80,14 @@ jobs:
             echo "No pom.xml and enable-java-db is not true — skipping trivy-java-db."
           fi
 
+      # An exact hit means today's databases are already cached; saving again
+      # would only fail on a duplicate key.
       - name: Save Trivy Database Cache
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .trivycache
-          key: trivy-db-${{ github.run_id }}
+          key: ${{ steps.cache-key.outputs.value }}
 
       - name: Publish Cache Summary
         if: always()
@@ -83,6 +96,6 @@ jobs:
           {
             echo "### 🗄️ Trivy database cache"
             echo ""
-            echo "Warmed into \`trivy-db-${GITHUB_RUN_ID}\` — $(du -sh .trivycache 2>/dev/null | cut -f1 || echo 'empty')."
+            echo "Warmed into \`${{ steps.cache-key.outputs.value }}\` — $(du -sh .trivycache 2>/dev/null | cut -f1 || echo 'empty')."
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

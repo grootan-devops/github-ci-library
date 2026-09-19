@@ -129,11 +129,22 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve Cache Key
+        id: cache-key
+        run: |
+          set -euo pipefail
+          # GitLab keys this cache "trivy-db" and pulls it on every pipeline.
+          # A per-run key can never be reused, so the databases were downloaded
+          # again on every run. Key by day instead: one entry serves every run
+          # that day, and the prefix restore-key falls back to yesterday's while
+          # today's is still being warmed.
+          echo "value=trivy-db-$(date -u +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
+
       - name: Restore Trivy Database Cache
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: trivy-db-${{ github.run_id }}
+          key: ${{ steps.cache-key.outputs.value }}
           restore-keys: trivy-db-
 
       - name: Download SBOM
