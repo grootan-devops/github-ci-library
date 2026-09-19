@@ -31,6 +31,10 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `secret-scanning.yml`: mark the workspace as a safe git directory before
   scanning. `actions/checkout` only marks it for its own step, so git inside the
   container refused the checkout as dubiously owned and the scan found nothing.
+- `secret-scanning.yml`: a pull request now scans its own commit range only when
+  both ends of that range resolve in the checkout and the range is non-empty.
+  Anything else falls back to the full history with a warning, so an
+  unresolvable range can never silently degrade into a scan of nothing.
 
 ## [1.0.0] - 2026-09-19
 
