@@ -25,9 +25,6 @@ jobs:
       contents: read
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
     outputs:
       TAG: ${{ steps.read.outputs.TAG }}
     steps:
@@ -68,9 +65,6 @@ jobs:
         tool: [actionlint, shellcheck]
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7

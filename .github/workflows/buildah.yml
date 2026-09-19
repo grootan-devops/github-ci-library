@@ -115,9 +115,6 @@ jobs:
       packages: write
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
       # buildah needs to mount the container filesystem it is assembling.
       options: --privileged
     defaults:
@@ -238,9 +235,6 @@ jobs:
       packages: write
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
     defaults:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}

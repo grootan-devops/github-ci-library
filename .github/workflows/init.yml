@@ -138,9 +138,6 @@ jobs:
     # the language toolchains, so no setup-* action has to install anything.
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
 
     env:
       PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}

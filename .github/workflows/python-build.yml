@@ -51,9 +51,6 @@ jobs:
       contents: read
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
     defaults:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
@@ -105,9 +102,6 @@ jobs:
       contents: read
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
     defaults:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
@@ -181,9 +175,6 @@ jobs:
       checks: write
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
     defaults:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}

@@ -36,9 +36,6 @@ jobs:
       contents: read
     container:
       image: ${{ vars.IMAGE_REGISTRY }}/${{ vars.SONAR_SCANNER_IMAGE }}
-      credentials:
-        username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
     env:
       SONAR_USER_HOME: ${{ github.workspace }}/.sonar
       SONAR_SCANNER_OPTS: -XX:MaxRAMPercentage=90.0 -XX:InitialRAMPercentage=90.0
