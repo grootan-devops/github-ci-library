@@ -135,11 +135,10 @@ jobs:
 
   build:
     name: "Image: Build & Push"
-    needs: lint
-    # A failing lint must block the build, but a *skipped* lint (the caller set
-    # lint: false) must not — and GitHub skips a dependent job whose dependency
-    # was skipped unless the condition tolerates it explicitly.
-    if: ${{ !cancelled() && !inputs.is-release && needs.lint.result != 'failure' }}
+    # Deliberately independent of the Dockerfile lint. They answer different
+    # questions and neither needs the other's answer, so they run together and
+    # the run reports both. A failing lint still fails the run on its own.
+    if: ${{ !inputs.is-release }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
     permissions:
