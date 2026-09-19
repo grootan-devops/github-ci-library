@@ -392,6 +392,7 @@ flowchart LR
 ```
 
 ---
+
 ## Module Catalog
 
 ### init & check
@@ -736,7 +737,7 @@ flowchart LR
 |---|---|
 | `chart.yml` · `docs` | Regenerates `chart/README.md` with `helm-docs` and fails on drift, showing the diff and the exact command in the summary. |
 | `chart.yml` · `lint` | `helm lint --strict`, with optional inline value overrides. |
-i| `chart.yml` · `unittest` | **Optional, opt-in** (`run-unittest: true`, default `false`). Renders the mock consumer chart at `mock-chart` (default `test`) with `helm unittest --strict` and uploads `chart-unittest-report`. For repositories that *ship* a chart others depend on; requires the `unittest` Helm plugin in the job image. |
+| `chart.yml` · `unittest` | **Optional, opt-in** (`run-unittest: true`, default `false`). Renders the mock consumer chart at `mock-chart` (default `test`) with `helm unittest --strict` and uploads `chart-unittest-report`. For repositories that *ship* a chart others depend on; requires the `unittest` Helm plugin in the job image. |
 | `chart.yml` · `build` | `helm package --version --app-version`. Uploads `chart-package`. |
 | `chart.yml` · `push` | `helm push` to the OCI repository. Writes `CHART_INFO.md`. |
 | `chart.yml` · `promote` | Release-mode only. Pulls the exact candidate, repackages at the release tag, pushes to production. |
@@ -919,6 +920,7 @@ Declare projects once in `vars.MONO_PROJECTS`:
 Pass `always-run-all: true` on release runs so a release never skips a project.
 
 ---
+
 ## Key Variables & Configuration
 
 The GitLab library sets everything once in a group-level `variables:` block and each project
@@ -1107,6 +1109,7 @@ Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
   At release, `chart.yml` · `promote` pulls the exact candidate, repackages it at the release
   version and pushes to the production repository.
 - **Consuming a published chart**:
+
   ```bash
   helm registry login "${IMAGE_REGISTRY}" --username "${USER}" --password-stdin
   helm pull "oci://${IMAGE_REGISTRY}/helm/order-backend" --version 1.4.0
@@ -1127,6 +1130,7 @@ Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
   resolve a different tag than the one that was built.
 
 ---
+
 ## Project-Level Integration Examples (All Permutations)
 
 Every example assumes the organisation variables and secrets above are set, and pins the

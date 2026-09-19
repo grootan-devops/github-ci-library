@@ -81,7 +81,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if ! REMOTE_TAGS="$(git ls-remote --tags --refs origin 2>&1)"; then
+          if ! REMOTE_TAGS="$(git ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" 2>&1)"; then
             echo "::error title=Git tag::Could not list remote tags. Refusing to report a tag as available without checking."
             echo "${REMOTE_TAGS}" >&2
             exit 1
