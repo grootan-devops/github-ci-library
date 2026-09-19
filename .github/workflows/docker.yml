@@ -107,7 +107,7 @@ jobs:
   lint:
     name: "Image: Dockerfile Lint"
     if: ${{ inputs.lint }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -140,7 +140,7 @@ jobs:
     # lint: false) must not — and GitHub skips a dependent job whose dependency
     # was skipped unless the condition tolerates it explicitly.
     if: ${{ !cancelled() && !inputs.is-release && needs.lint.result != 'failure' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -277,7 +277,7 @@ jobs:
     name: "Image: Smoke Test"
     needs: build
     if: ${{ !cancelled() && inputs.test && !inputs.is-release && needs.build.result == 'success' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -335,7 +335,7 @@ jobs:
   promote:
     name: "Image: Promote"
     if: ${{ inputs.is-release }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read

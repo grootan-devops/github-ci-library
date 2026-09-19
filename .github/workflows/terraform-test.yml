@@ -33,7 +33,7 @@ env:
 jobs:
   test:
     name: "Terraform: Module Test"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 90
     permissions:
       contents: read
@@ -91,7 +91,7 @@ jobs:
     # Only on failure: a passing test tears down its own fixtures. This exists so
     # a crashed test cannot strand real infrastructure.
     if: ${{ failure() && inputs.destroy-on-failure }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
     permissions:
       contents: read

@@ -30,7 +30,7 @@ on:
 jobs:
   sonarqube:
     name: "Quality: SonarQube"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 45
     permissions:
       contents: read

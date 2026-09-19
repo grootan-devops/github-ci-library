@@ -81,7 +81,7 @@ jobs:
   docs:
     name: "Chart: Documentation"
     if: ${{ inputs.check-docs }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -107,7 +107,7 @@ jobs:
 
   lint:
     name: "Chart: Lint"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -171,7 +171,7 @@ jobs:
   unittest:
     name: "Chart: Unit Test"
     if: ${{ inputs.run-unittest }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -224,7 +224,7 @@ jobs:
     name: "Chart: Package"
     if: ${{ !inputs.is-release }}
     needs: lint
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -284,7 +284,7 @@ jobs:
     name: "Chart: Push"
     needs: build
     if: ${{ !cancelled() && !inputs.is-release && needs.build.result == 'success' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -344,7 +344,7 @@ jobs:
   promote:
     name: "Chart: Promote"
     if: ${{ inputs.is-release }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read

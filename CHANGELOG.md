@@ -28,7 +28,7 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `cd.yml` ignores `.github/**` on the default branch, so a change confined to
   the pipeline is verified by its pull request and never cuts a release on its
   own, and gains a `workflow_dispatch` trigger for a deliberate release.
-- Every job pins its runner to `ubuntu-24.04` instead of tracking
+- Every job pins its runner to `ubuntu-26.04` instead of tracking
   `ubuntu-latest`, so the platform's migration to Ubuntu 26 cannot change the
   build environment underneath a release. `vars.CI_RUNNER` still overrides it.
 - `lint.yml` and `docker-lint.sh` report into the job summary, so every check in

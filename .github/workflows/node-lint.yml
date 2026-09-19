@@ -20,7 +20,7 @@ env:
 jobs:
   lint:
     name: "Node Lint: biome"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: read

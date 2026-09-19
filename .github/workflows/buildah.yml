@@ -107,7 +107,7 @@ jobs:
   build:
     name: "Image: Buildah Build & Push"
     if: ${{ !inputs.is-release }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -225,7 +225,7 @@ jobs:
   promote:
     name: "Image: Promote"
     if: ${{ inputs.is-release }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read

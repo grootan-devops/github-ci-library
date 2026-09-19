@@ -42,7 +42,7 @@ env:
 jobs:
   dependency:
     name: "Go: Dependency Download"
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -93,7 +93,7 @@ jobs:
   build:
     name: "Go: Build"
     needs: dependency
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -163,7 +163,7 @@ jobs:
     name: "Go: Unit Test"
     if: ${{ inputs.run-tests }}
     needs: dependency
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
     permissions:
       contents: read
