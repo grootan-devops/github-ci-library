@@ -26,6 +26,12 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Consumers no longer have to set `IMAGE_DEV_REPOSITORY_SUFFIX` per registry.
 - `ci.yml` also runs on `dev` pull requests and filters on `.github/**`.
 
+### Fixed
+
+- `secret-scanning.yml`: mark the workspace as a safe git directory before
+  scanning. `actions/checkout` only marks it for its own step, so git inside the
+  container refused the checkout as dubiously owned and the scan found nothing.
+
 ## [1.0.0] - 2026-09-19
 
 ### Added
