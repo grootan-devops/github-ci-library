@@ -57,9 +57,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # hashFiles returns "" when go.sum is absent, collapsing the key
+      # onto the bare `go-` restore-keys prefix — a half-populated module tree
+      # every later run would then prefix-match, valid go.sum or not.
       - name: Compute Module Cache Key
         id: key
-        run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) }}" >> "${GITHUB_OUTPUT}"
+        run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore Module Cache
         id: cache
@@ -72,8 +75,13 @@ jobs:
       - name: Download Modules
         run: go mod download
 
+      # GitLab inherits `when: always` here, which is safe there because a cache
+      # key is rewritable — a partial tree from a failed resolve is overwritten
+      # by the next green run. GitHub entries are immutable, so the same write
+      # would freeze a half-populated tree under a perfectly valid key until
+      # go.sum changes, and the build and test jobs would keep restoring it.
       - name: Save Module Cache
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ success() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .go-cache
@@ -176,6 +184,14 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
       - name: Export Test Environment
         if: ${{ inputs.build-env != '' }}

@@ -74,6 +74,7 @@ jobs:
           PROJECTS_VAR: ${{ vars.MONO_PROJECTS }}
           ALWAYS_RUN_ALL: ${{ inputs.always-run-all }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
 
@@ -91,25 +92,50 @@ jobs:
             echo "always-run-all is set — selecting every project."
             SELECTED="${PROJECTS}"
           else
+            # GitLab's `changes:` spans the whole pushed range
+            # (CI_COMMIT_BEFORE_SHA..HEAD), not just the tip commit: a push of
+            # three commits that touched a project only in the first one still
+            # builds it. github.event.before is that same boundary — all zeroes
+            # on a branch's first push, where there is nothing to compare to.
             if [[ -n "${BASE_SHA}" ]]; then
               COMPARE_BASE="${BASE_SHA}"
+            elif [[ -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
+              COMPARE_BASE="${BEFORE_SHA}"
             else
               COMPARE_BASE="$(git rev-parse HEAD~1 2>/dev/null || true)"
             fi
 
-            if [[ -z "${COMPARE_BASE}" ]]; then
+            # A base that is not in this checkout — a force-pushed target branch,
+            # a rewritten history — would otherwise abort the step. GitLab treats
+            # a `changes:` rule it cannot evaluate as true and runs the job, and
+            # that is the only safe direction: skipping a project that did change
+            # is the one outcome a monorepo gate must never produce.
+            if [[ -n "${COMPARE_BASE}" ]] && ! git cat-file -e "${COMPARE_BASE}^{commit}" 2>/dev/null; then
+              echo "::warning title=Monorepo::Comparison base ${COMPARE_BASE} is not in this checkout. Selecting every project."
+              COMPARE_BASE=""
+            elif [[ -z "${COMPARE_BASE}" ]]; then
               echo "::warning title=Monorepo::No comparison base (first commit?). Selecting every project."
+            fi
+
+            if [[ -z "${COMPARE_BASE}" ]]; then
               SELECTED="${PROJECTS}"
             else
               CHANGED_FILES="$(git diff --name-only "${COMPARE_BASE}" HEAD)"
-              echo "Comparing against ${COMPARE_BASE} — $(wc -l <<<"${CHANGED_FILES}" | tr -d ' ') changed files."
+              echo "Comparing against ${COMPARE_BASE} — $(grep -c . <<<"${CHANGED_FILES}" || true) changed files."
 
+              # GitLab's convention writes these paths as `./backend`, while
+              # `git diff --name-only` prints `backend/...`. A projects list
+              # carried over from the GitLab config verbatim would then match
+              # nothing at all and quietly build no project, so normalise first.
               SELECTED="$(jq -c --arg files "${CHANGED_FILES}" '
-                ($files | split("\n")) as $changed
-                | map(select(
-                    .path as $p
-                    | ($changed | any(startswith($p + "/") or . == $p))
-                  ))
+                ($files | split("\n") | map(select(length > 0))) as $changed
+                | map(
+                    (.path | sub("^\\./"; "") | sub("/+$"; "")) as $p
+                    | select(
+                        $p == "" or $p == "."
+                        or ($changed | any(. == $p or startswith($p + "/")))
+                      )
+                  )
               ' <<<"${PROJECTS}")"
             fi
           fi

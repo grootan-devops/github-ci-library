@@ -1,9 +1,14 @@
 name: Terraform / Module Test
 
 # Counterpart of the GitLab Terraform:Module:Test and
-# Terraform:Module:Test:Destroy jobs. The destroy job runs only when the test
-# job fails, so a test that provisioned real infrastructure and then blew up
-# does not leave it behind.
+# Terraform:Module:Test:Destroy jobs. The destroy job runs when the test job
+# fails or is cancelled, so a test that provisioned real infrastructure and then
+# stopped does not leave it behind.
+#
+# GitLab pinned `interruptible: false` on both jobs. The GitHub equivalent is on
+# the caller: the workflow calling this one must set `cancel-in-progress: false`
+# in its concurrency group, or a superseded run is force-cancelled before the
+# teardown job can claim a runner and the fixtures stay provisioned.
 
 on:
   workflow_call:
@@ -22,7 +27,7 @@ on:
         required: false
         type: boolean
         default: true
-        description: "Run terraform destroy when the test job fails."
+        description: "Run terraform destroy when the test job fails or is cancelled."
 
 env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
@@ -31,12 +36,60 @@ env:
   TF_INPUT: "0"
 
 jobs:
+  # GitLab gates the module test on `exists: ${PROJECT_PATH}/main.tf`. An empty
+  # matrix is the GitHub equivalent, and here it is a safety gate rather than a
+  # tidiness one: this workflow provisions real infrastructure, so a repository
+  # with no root module must produce no test job at all.
+  discover:
+    name: Detect Terraform Root Module
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      root: ${{ steps.targets.outputs.root }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Select Applicable Terraform Jobs
+        id: targets
+        env:
+          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${PROJECT_PATH}"
+
+          ROOT='[]'
+          if [[ -f main.tf ]]; then
+            ROOT='[{"module":"root"}]'
+          else
+            echo "::warning title=Terraform::No main.tf in ${PROJECT_PATH} — the module test does not apply."
+          fi
+
+          echo "root=${ROOT}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "### 🌍 Terraform module test"
+            echo ""
+            if [[ "${ROOT}" == "[]" ]]; then
+              echo "⏭️ Skipped — no \`main.tf\` root module."
+            else
+              echo "Root module found; the test suite will run."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   test:
     name: "Terraform: Module Test"
+    needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 90
     permissions:
       contents: read
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.root) }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:
@@ -78,9 +131,10 @@ jobs:
             echo "### 🌍 Terraform module test"
             echo ""
             case "${OUTCOME}" in
-              success) echo "✅ Passed." ;;
-              failure) echo "❌ Failed — the destroy job will tear down anything the test provisioned." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
+              success)   echo "✅ Passed." ;;
+              failure)   echo "❌ Failed — the destroy job will tear down anything the test provisioned." ;;
+              cancelled) echo "🚫 Cancelled — the destroy job will tear down anything the test provisioned." ;;
+              *)         echo "Status: ${OUTCOME}" ;;
             esac
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -88,9 +142,12 @@ jobs:
   destroy:
     name: "Terraform: Test Teardown"
     needs: test
-    # Only on failure: a passing test tears down its own fixtures. This exists so
-    # a crashed test cannot strand real infrastructure.
-    if: ${{ failure() && inputs.destroy-on-failure }}
+    # A passing test tears down its own fixtures; this covers the two cases that
+    # cannot. Cancellation is one of them — GitLab pinned `interruptible: false`
+    # precisely so a cancelled run could not strand real infrastructure — so the
+    # condition must not be `failure()` alone. `skipped` means the test never ran
+    # and there is nothing provisioned to destroy.
+    if: ${{ inputs.destroy-on-failure && (failure() || cancelled()) && needs.test.result != 'skipped' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
     permissions:

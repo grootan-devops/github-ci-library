@@ -1,8 +1,10 @@
 name: Terraform / Init, Validate & Lint
 
 # Counterpart of the GitLab Terraform:Init, Terraform:Validate, Terraform:Lint
-# and Terraform:Check:README jobs. Init runs once; validate, tflint and the docs
-# check then run in parallel against the initialised working directory.
+# and Terraform:Check:README jobs. Init runs once; validate and tflint then run
+# in parallel against the initialised working directory. The docs check reads
+# only the sources, so — like GitLab's Terraform:Check:README, which needs only
+# Common:Init — it runs beside init instead of behind it.
 
 on:
   workflow_call:
@@ -29,12 +31,77 @@ env:
   TF_INPUT: "0"
 
 jobs:
+  # GitLab gates every Terraform job on `exists: ${PROJECT_PATH}/main.tf`. An
+  # empty matrix is the GitHub equivalent: a repository with no root module gets
+  # no Terraform jobs at all, rather than a `terraform init` that fails hard.
+  discover:
+    name: Detect Terraform Root Module
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      root: ${{ steps.targets.outputs.root }}
+      checks: ${{ steps.targets.outputs.checks }}
+      docs: ${{ steps.targets.outputs.docs }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Select Applicable Terraform Jobs
+        id: targets
+        env:
+          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          CHECK_DOCS: ${{ inputs.check-docs }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${PROJECT_PATH}"
+
+          ROOT='[]'
+          CHECKS='[]'
+          DOCS='[]'
+
+          if [[ -f main.tf ]]; then
+            ROOT='[{"module":"root"}]'
+            CHECKS='[{"name":"Validate","check":"validate"},{"name":"TFLint","check":"tflint"}]'
+            if [[ "${CHECK_DOCS}" == "true" ]]; then
+              DOCS="${ROOT}"
+            fi
+          else
+            echo "::warning title=Terraform::No main.tf in ${PROJECT_PATH} — the Terraform checks do not apply."
+          fi
+
+          {
+            echo "root=${ROOT}"
+            echo "checks=${CHECKS}"
+            echo "docs=${DOCS}"
+          } >> "${GITHUB_OUTPUT}"
+          {
+            echo "### 🌍 Applicable Terraform jobs"
+            echo ""
+            if [[ "${ROOT}" == "[]" ]]; then
+              echo "- None — no \`main.tf\` root module."
+            else
+              echo "- Init"
+              jq -r '.[] | "- \(.name)"' <<< "${CHECKS}"
+              if [[ "${DOCS}" != "[]" ]]; then
+                echo "- Documentation"
+              fi
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   init:
     name: "Terraform: Init"
+    needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.root) }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:
@@ -46,9 +113,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # hashFiles returns "" when the lock file is absent, collapsing the
+      # key onto the bare `tf-` restore-keys prefix — an unpinned provider
+      # set every later run would then fall back to and never invalidate.
       - name: Compute Provider Cache Key
         id: key
-        run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) }}" >> "${GITHUB_OUTPUT}"
+        run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore Provider Cache
         id: cache
@@ -97,7 +167,7 @@ jobs:
 
   check:
     name: "Terraform: ${{ matrix.name }}"
-    needs: init
+    needs: [discover, init]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
@@ -105,13 +175,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: Validate
-            check: validate
-          - name: TFLint
-            check: tflint
-          - name: Documentation
-            check: docs
+        include: ${{ fromJSON(needs.discover.outputs.checks) }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:
@@ -120,15 +184,6 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
-
-      - name: Checkout CI Library
-        if: ${{ matrix.check == 'docs' }}
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .ci-library
-          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
       - name: Restore Provider Cache
         uses: actions/cache/restore@v6
@@ -142,7 +197,6 @@ jobs:
       - name: Run ${{ matrix.name }}
         env:
           CHECK: ${{ matrix.check }}
-          CHECK_DOCS: ${{ inputs.check-docs }}
         run: |
           set -euo pipefail
           case "${CHECK}" in
@@ -153,26 +207,15 @@ jobs:
             tflint)
               tflint --chdir . --recursive --filter=tests/** --call-module-type=all
               ;;
-            docs)
-              if [[ "${CHECK_DOCS}" != "true" ]]; then
-                echo "Documentation check disabled by the caller."
-                exit 0
-              fi
-              bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform-docs-check.sh"
-              ;;
           esac
 
       - name: Publish Check Summary
         if: always()
         env:
           NAME: ${{ matrix.name }}
-          CHECK: ${{ matrix.check }}
           OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
-          if [[ "${CHECK}" == "docs" ]]; then
-            exit 0
-          fi
           {
             echo "### 🌍 Terraform: ${NAME}"
             echo ""
@@ -183,3 +226,36 @@ jobs:
             esac
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  # Deliberately not `needs: init`: the check only reads the module sources, so
+  # a backend or credential failure in `terraform init` must not hide stale
+  # generated documentation. The script writes its own step summary.
+  docs:
+    name: "Terraform: Documentation"
+    needs: discover
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.docs) }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Check Generated Documentation
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform-docs-check.sh"

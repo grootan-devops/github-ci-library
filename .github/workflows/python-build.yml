@@ -60,9 +60,12 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # hashFiles returns "" when uv.lock is absent, collapsing the key
+      # onto the bare `py-` restore-keys prefix — a half-populated environment
+      # every later run would then prefix-match, valid uv.lock or not.
       - name: Compute Dependency Cache Key
         id: key
-        run: echo "key=py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) }}" >> "${GITHUB_OUTPUT}"
+        run: echo "key=py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore uv Cache
         id: cache
@@ -75,8 +78,13 @@ jobs:
       - name: Resolve Dependencies
         run: uv sync --frozen --no-install-project --no-install-workspace
 
+      # GitLab inherits `when: always` here, which is safe there because a cache
+      # key is rewritable — a partial tree from a failed resolve is overwritten
+      # by the next green run. GitHub entries are immutable, so the same write
+      # would freeze a half-populated tree under a perfectly valid key until
+      # uv.lock changes, and the build and test jobs would keep restoring it.
       - name: Save uv Cache
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ success() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .uv-cache
@@ -181,6 +189,14 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
       - name: Export Test Environment
         if: ${{ inputs.build-env != '' }}

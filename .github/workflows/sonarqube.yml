@@ -65,7 +65,7 @@ jobs:
         with:
           path: .sonar
           key: sonar-${{ github.repository_id }}
-          restore-keys: sonar-
+          restore-keys: sonar-${{ github.repository_id }}
 
       - name: Validate SonarQube Configuration
         env:
@@ -114,8 +114,52 @@ jobs:
           sonar-scanner "${SCANNER_ARGS[@]}"
           echo "SONAR_PROJECT_KEY=${PROJECT_KEY}" >> "${GITHUB_ENV}"
 
-      - name: Save Sonar Analysis Cache
+      # GitLab keeps this cache on a stable key with `policy: pull-push`, so
+      # every pipeline writes the newest analysis data back. GitHub caches are
+      # immutable, so a stable key silently freezes at whatever the first run
+      # stored — the save simply fails to reserve from then on. Delete the entry
+      # before rewriting it, at most once a day, and the key stays stable while
+      # the contents stay current. Needs `actions: write`; without it the older
+      # entry survives and restores keep working.
+      - name: Refresh Cache Entry
+        id: refresh
         if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: sonar-${{ github.repository_id }}
+        run: |
+          set -euo pipefail
+
+          STAMP=".sonar/.cached-on"
+          TODAY="$(date -u +%Y-%m-%d)"
+
+          # The caches API matches `key` as a PREFIX, so filter for the exact
+          # key or a neighbouring entry is mistaken for this one.
+          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" \
+            --jq "[.actions_caches[] | select(.key == \"${CACHE_KEY}\")] | length" 2>/dev/null || echo 0)"
+
+          if [[ "${EXISTING}" == "0" ]]; then
+            mkdir -p .sonar && echo "${TODAY}" > "${STAMP}"
+            echo "save=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ -f "${STAMP}" ]] && [[ "$(cat "${STAMP}")" == "${TODAY}" ]]; then
+            echo "Analysis cache was already refreshed today; keeping it."
+            echo "save=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          mkdir -p .sonar && echo "${TODAY}" > "${STAMP}"
+          if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" >/dev/null 2>&1; then
+            echo "save=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning title=Sonar cache::Could not replace '${CACHE_KEY}'. Grant 'actions: write' in the calling workflow to let it refresh."
+            echo "save=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Save Sonar Analysis Cache
+        if: ${{ !cancelled() && steps.refresh.outputs.save == 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .sonar

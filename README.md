@@ -9,7 +9,10 @@ Reusable GitHub Actions workflows (`workflow_call`)
 ## Contents
 
 - [Quick Start](#quick-start)
+  - [Caller-side permissions](#caller-side-permissions)
+  - [Concurrency & cancellation](#concurrency--cancellation)
 - [Pipeline Phases & Lifecycle](#pipeline-phases--lifecycle)
+- [Caller Dependency Map](#caller-dependency-map)
 - [Execution Model & Trigger Strategy](#execution-model--trigger-strategy)
   - [The Two-Tier Release Model](#the-two-tier-release-model)
   - [Available Scenario Workflows](#available-scenario-workflows)
@@ -112,6 +115,9 @@ name: CD · Production Release
 on:
   push:
     branches: [master]
+concurrency:
+  group: "release-${{ github.ref }}"
+  cancel-in-progress: false
 permissions:
   contents: write
   packages: write
@@ -170,6 +176,33 @@ artifacts. `checks: write` publishes test and scan results as Checks.
 > Workflow permissions** is set to read-only, `contents: write` is denied and the release
 > cannot tag, whatever the workflow declares.
 
+### Concurrency & cancellation
+
+GitLab pins `interruptible: false` on the release jobs (`release/.gitlab-ci.yml:7`) and on
+both deploy jobs (`deploy/gitops/.argocd.gitlab-ci.yml:148`,
+`deploy/gitops/.komodo.gitlab-ci.yml:78`), so the project-level
+`auto_cancel.on_new_commit: conservative` can never cancel a promotion or a deploy that is
+already running.
+
+**A reusable workflow cannot declare `concurrency:`** — the key is only valid on the
+calling workflow. The guarantee therefore does not survive the port on its own; it is the
+caller's to reinstate.
+
+| Calling scenario | `group:` | `cancel-in-progress:` |
+|---|---|:--:|
+| Pull request verification | `${{ github.workflow }}-${{ github.ref }}` | `true` |
+| Production release (`release.yml`) | `release-${{ github.ref }}` | **`false`** |
+| GitOps deploy (`deploy-*-gitops.yml`) | `deploy-${{ inputs.environment }}` | **`false`** |
+
+> [!WARNING]
+> Leave a release or deploy caller at `cancel-in-progress: true` and the next push or
+> dispatch cancels the run already in flight. A release cancelled between `publish` and
+> `notify` leaves the git tag and the GitHub Release created but the assets and the Teams
+> card never sent — and the next run will not re-cut it, because the tag is now taken. A
+> deploy cancelled between the GitOps commit and the Komodo or ArgoCD sync leaves the
+> cluster on the old image while the GitOps repository claims the new one. Cancelling PR
+> verification costs a rebuild; cancelling a promotion costs a broken release.
+
 ---
 
 ## Pipeline Phases & Lifecycle
@@ -202,6 +235,63 @@ flowchart LR
 > There is no `trigger` phase. GitHub cannot call a reusable workflow from a matrix, so the
 > monorepo child-pipeline pattern is replaced by `mono.yml`, which returns a matrix the
 > caller fans out over. See [mono](#mono).
+
+---
+
+## Caller Dependency Map
+
+In GitLab every job carried its own `needs:`, so the dependency graph shipped **inside** the
+library. In GitHub the library ships jobs, but the edges *between* library workflows belong
+to the calling workflow. This table gives, for each library workflow, the GitLab job it
+ports and the `needs:` a caller must declare — derived from the GitLab `needs:` graph rather
+than guessed.
+
+Edges marked *internal* are already declared inside the library workflow; a caller must not
+repeat them.
+
+| Library workflow · job | GitLab job(s) | Caller must declare | Derived from |
+|---|---|---|---|
+| `init.yml` · `initialize` | `Common:Init` | *(nothing — it is the root)* | — |
+| `trivy-cache.yml` · `warm` | `Trivy:Cache:Warm` | `needs: init` | `Common:Init` |
+| `lint.yml` | `.YAML:Lint`, `Changelog:Lint`, Dockerfile & chart-values lint | `needs: init` | `Common:Init` |
+| `node-lint.yml` | `Node:Lint` | `needs: init` | `Common:Init` |
+| `python-lint.yml` | `.python-lint-common` | `needs: [init, build]` | `Python:Dependency:Download` |
+| `golang-lint.yml` | `.go-lint-common` | `needs: [init, build]` | `Go:Dependency:Download` |
+| `*-build.yml` · `dependency` → `build` ∥ `test` | `.Node:Build`, `.Python:Build`, `.Go`, `.java-common` | `needs: init` | `Common:Init`; the `*:Dependency:Download` edge is *internal* |
+| `docker.yml` / `buildah.yml` · `lint` → `build` → `test` / `promote` | `Image:Build`, `Image:Push`, `.Image:Test`, `Image:Promote` | `needs: [init, build]` when the image copies build output, else `needs: init` | `Common:Init`; `Image:Push` → `Image:Build` is *internal* |
+| `chart.yml` · `docs` ∥ `lint` → `build` → `push` / `promote` | `Chart:Check:README`, `Chart:Lint`, `Chart:Build`, `Chart:Push`, `Chart:Promote` | `needs: init` | `Common:Init`; `Chart:Build` → `Chart:Lint` is *internal* |
+| `scan.yml` (`scan-type: image`) | `Image:Scan` | `needs: [init, image, trivy-cache]` | `Common:Init`, `Image:Build`, `Trivy:Cache:Warm` |
+| `scan.yml` (`scan-type: config`) | `Chart:Scan` | `needs: [init, chart, trivy-cache]` | `Common:Init`, `Chart:Lint`, `Trivy:Cache:Warm` |
+| `scan.yml` (`scan-type: license`) | `License:Scan` | `needs: [init, trivy-cache]` | `Common:Init` |
+| `sbom.yml` · `generate` → `scan` | `SBOM:Generate`, `SBOM:Scan` | `needs: [init, trivy-cache]` | `Common:Init`, `Trivy:Cache:Warm`, `Java:Dependency:Download`; `SBOM:Scan` → `SBOM:Generate` is *internal* |
+| `secret-scanning.yml` | `Git:Secret:Scan` | `needs: init` | `Common:Init` |
+| `sonarqube.yml` | `Sonarqube` | `needs: [init, build]` | `Common:Init`, `Project:Build`, `Project:Unit:Test` |
+| `terraform-lint.yml` | `Terraform:Init`, `Terraform:Validate`, `Terraform:Lint`, `Terraform:Check:README` | `needs: init` | `Common:Init`; `Terraform:Init` → `Validate` / `Lint` is *internal* |
+| `terraform-test.yml` | `Terraform:Scan` | `needs: [init, terraform-lint, trivy-cache]` | `Terraform:Validate` **(required)**, `Trivy:Cache:Warm` |
+| `check.yml` · six guards → `verdict` | `Tag:Tag Existence`, `Changelog:Check Existence`, `Migration:Check Existence`, `Chart:Check Existence`, `Chart:Check:Dependency`, `Image:Check Existence` | **`needs: init` — and nothing else** | `.check-job-common` → `Common:Init`. See the warning below. |
+| `deploy-komodo-gitops.yml` · `validate` → `komodo-deploy` | `Deploy:Komodo:Validate:Image:<env>`, `Deploy:Komodo:<env>` | `needs: init`; add `image` when the same run pushed it | `Common:Init`, `Image:Push`; the `Validate:Image` edge is now *internal* |
+| `deploy-argocd-gitops.yml` · `validate` → `gitops-commit` → `sync` | `Deploy:ArgoCD:Validate:Chart/Image:<env>`, `Deploy:ArgoCD:<env>` | `needs: init`; add `image` / `chart` when the same run published them | `Common:Init`, `Image:Push`, `Chart:Push`; the `Validate:*` edges are *internal* |
+| `release.yml` · `collect` → `publish` → `notify` | `Release:Upload`, `Release`, `Release:Notification:Teams` | `needs: [init, image, chart]` — whichever of `image` / `chart` this run promotes | `Release:Upload` → `Common:Init`, `Image:Promote`, `Chart:Promote`; `Release` → `Release:Upload` **(required)** is *internal* |
+| `notify.yml` | `Release:Notification:Teams` | `needs: init` **(required, not optional)**; add `check` for the changelog artifact | `Common:Init` — the library's only `optional: false` edge |
+| `mono.yml` · `discover` | `Trigger:*` child pipelines | *(nothing — it is a root)* | — |
+
+> [!WARNING]
+> **`check.yml` depends on `init` alone. Never write `needs: [init, build]` or
+> `needs: [init, scan]` for it.** Every guard extends GitLab's `.check-job-common`
+> (`common/.gitlab-ci.yml:405`), whose only edge is `Common:Init` — not `build`, not `scan`,
+> not `image`. The guards ask questions about the *repository*: does this git tag already
+> exist, is this chart version taken, does a chart dependency still point at a dev
+> repository. Nothing a build or a scan does can change any of those answers. Chaining the
+> guards behind `build` delays the one signal that should fail fastest and, because
+> `Check: Verdict` is the required status check, holds the pull request open on a verdict
+> that was knowable in seconds.
+
+A note on the GitLab edges the table is derived from: `optional: true` there means *"ignore
+this edge if the job is not in this pipeline"*, **not** *"ignore it if the job failed"*. The
+GitHub equivalent is to list a job in `needs:` only when the caller actually includes it —
+which is why the single-focus scenario files declare `needs: init` and nothing more. Where
+the library tolerates a skipped upstream *within* its own graph it uses
+`needs.<job>.result != 'failure'` rather than dropping the edge.
 
 ---
 
@@ -1256,6 +1346,9 @@ on:
         description: Version to deploy (defaults to the current chart version)
         required: false
         type: string
+concurrency:
+  group: "deploy-${{ inputs.environment }}"
+  cancel-in-progress: false
 permissions: { contents: read, actions: read }
 
 jobs:

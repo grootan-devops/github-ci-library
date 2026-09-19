@@ -136,6 +136,21 @@ jobs:
           key: trivy-db
           restore-keys: trivy-db
 
+      # GitLab's Terraform:Scan carries a second cache, key `terraform`, policy
+      # pull-push. Without it `trivy config` on a Terraform module re-downloads
+      # every provider before it can resolve a single module reference. The key
+      # and prefix are terraform-lint.yml's verbatim so both share one entry:
+      # whichever job runs first pays for the providers, the other restores.
+      - name: Restore Terraform Provider Cache
+        if: ${{ inputs.scan-type == 'config' && inputs.config-type == 'terraform' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}
+          restore-keys: tf-
+
       - name: Download SBOM
         if: ${{ inputs.sbom-artifact != '' }}
         uses: actions/download-artifact@v8
@@ -266,3 +281,15 @@ jobs:
           FAIL_ON_FAILURE: "false"
           ANNOTATION_LEVEL: "warning"
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
+
+      # The write half of GitLab's pull-push policy. Runs even when the scan
+      # failed: the providers are just as valid, and re-downloading them on the
+      # retry is pure cost.
+      - name: Save Terraform Provider Cache
+        if: ${{ !cancelled() && inputs.scan-type == 'config' && inputs.config-type == 'terraform' }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
+            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}

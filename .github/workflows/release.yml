@@ -6,6 +6,20 @@ name: Release / Publish & Notify
 # The release is assembled from the artifacts the pre-merge run produced, not
 # from a fresh build: the scan reports attached here describe the exact bytes
 # that were promoted.
+#
+# CONCURRENCY -- THE CALLER'S RESPONSIBILITY. GitLab pins `interruptible: false`
+# on every release job so that `auto_cancel.on_new_commit: conservative` can
+# never cancel a promotion in flight. A reusable workflow cannot declare
+# `concurrency:`, so the calling workflow must:
+#
+#   concurrency:
+#     group: "release-${{ github.ref }}"
+#     cancel-in-progress: false
+#
+# Leave it at `cancel-in-progress: true` and a second push to the release branch
+# cancels this run part-published: the git tag and GitHub Release can already
+# exist while the assets and the Teams card never arrive -- a release nobody was
+# told about, which the next run will not re-cut because the tag is now taken.
 
 on:
   workflow_call:
@@ -58,6 +72,13 @@ env:
 jobs:
   collect:
     name: "Release: Collect Artifacts"
+    # GitLab marks Release:Upload `allow_failure: true`: a package-registry
+    # hiccup must never cost the release. The assets are a convenience, the tag
+    # and the notes are the contract. So this job is allowed to fail without
+    # failing the run, and `publish` keys off its *result* rather than its
+    # success. The guard that must still bite -- a missing tag -- is deliberately
+    # left to `publish`: swallowing it here would cut a release with no version.
+    continue-on-error: true
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
@@ -219,12 +240,16 @@ jobs:
   publish:
     name: "Release: Publish"
     needs: collect
+    # `collect` may fail, so wait for it to finish rather than to succeed. An
+    # empty tag is the one unrecoverable case: there is no version to cut.
+    if: ${{ !cancelled() && inputs.tag != '' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - name: Download Release Payload
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: release-payload
@@ -239,8 +264,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # `collect` is allowed to fail, so the payload may be absent or empty.
+          # The notes degrade; the release itself does not.
+          NOTES_FILE=payload/CONSOLIDATED_RELEASE_CHANGELOG.md
+          if [[ ! -s "${NOTES_FILE}" ]]; then
+            echo "::warning title=Release::No consolidated release notes were collected. Publishing '${TAG}' with a minimal body."
+            mkdir -p payload
+            echo "Release ${TAG}" > "${NOTES_FILE}"
+          fi
+
           ARGS=(--title "Release ${TAG}"
-                --notes-file payload/CONSOLIDATED_RELEASE_CHANGELOG.md
+                --notes-file "${NOTES_FILE}"
                 --target "${GITHUB_SHA}")
           if [[ "${DRAFT}" == "true" ]]; then ARGS+=(--draft); fi
           if [[ "${PRERELEASE}" == "true" ]]; then ARGS+=(--prerelease); fi
@@ -289,6 +323,10 @@ jobs:
     name: "Release: Notify Teams"
     if: ${{ inputs.notify }}
     needs: publish
+    # GitLab applies `allow_failure: true` to Release:Notification:Teams through
+    # .teams-adaptivecard-notification-vars. A Teams outage must not turn an
+    # already-published release red.
+    continue-on-error: true
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:

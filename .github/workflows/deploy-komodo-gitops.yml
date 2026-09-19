@@ -1,5 +1,23 @@
 name: Deploy / GitOps Komodo Synchronization
 
+# Counterpart of the GitLab Deploy:Komodo:Validate:Image:<env> -> Deploy:Komodo:<env>
+# chain. The image is proven to exist before the GitOps compose file is touched,
+# so a deploy can never commit a reference that will not resolve.
+#
+# CONCURRENCY -- THE CALLER'S RESPONSIBILITY. GitLab pins `interruptible: false`
+# on Deploy:Komodo:<env> so that `auto_cancel.on_new_commit: conservative` can
+# never cancel a deploy in flight. A reusable workflow cannot declare
+# `concurrency:`, so the calling workflow must:
+#
+#   concurrency:
+#     group: "deploy-${{ inputs.environment }}"
+#     cancel-in-progress: false
+#
+# Leave it at `cancel-in-progress: true` and a second dispatch cancels this run
+# mid-deploy: the GitOps commit can already be pushed while the Komodo redeploy
+# is never triggered or never polled, leaving the stack pinned to an image the
+# repository no longer describes and no job reporting the drift.
+
 on:
   workflow_call:
     inputs:
@@ -70,8 +88,8 @@ on:
         description: "Token for the GitOps repository. Falls back to GITHUB_TOKEN."
 
 jobs:
-  komodo-deploy:
-    name: Sync Komodo Stack
+  validate:
+    name: Validate Deployment Prerequisites
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
@@ -82,8 +100,12 @@ jobs:
       run:
         shell: bash
 
+    outputs:
+      new-image: ${{ steps.resolve.outputs.new_image }}
+
     steps:
-      - name: Validate Deployment Configuration
+      - name: Resolve Deployment Target
+        id: resolve
         env:
           GITOPS_REPO: ${{ inputs.gitops-repo }}
           GITOPS_BRANCH: ${{ inputs.gitops-branch }}
@@ -93,6 +115,10 @@ jobs:
           STACK_NAME: ${{ inputs.komodo-stack-name }}
           KOMODO_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
           KOMODO_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_REPO: ${{ inputs.image-repository }}
+          DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
         run: |
           set -euo pipefail
           MISSING=()
@@ -104,11 +130,67 @@ jobs:
           [[ -z "${STACK_NAME}" ]] && MISSING+=("komodo-stack-name")
           [[ -z "${KOMODO_KEY}" ]] && MISSING+=("KOMODO_API_KEY secret")
           [[ -z "${KOMODO_SECRET}" ]] && MISSING+=("KOMODO_API_SECRET secret")
+          [[ -z "${IMAGE_TAG}" ]] && MISSING+=("image-tag")
+          [[ -z "${IMAGE_REPO}" ]] && MISSING+=("image-repository")
           if [[ ${#MISSING[@]} -gt 0 ]]; then
             echo "::error::[HARD FAILURE] Missing mandatory deployment configuration: ${MISSING[*]}"
             exit 1
           fi
 
+          NEW_IMAGE="${REGISTRY_HOST}/${IMAGE_REPO}${DEV_SUFFIX}:${IMAGE_TAG}"
+
+          {
+            echo "new_image=${NEW_IMAGE}"
+          } | tee -a "${GITHUB_OUTPUT}"
+
+      - name: Validate Image Exists In Registry
+        env:
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          TARGET: ${{ steps.resolve.outputs.new_image }}
+        run: |
+          set -euo pipefail
+          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
+          if ! crane manifest "${TARGET}" >/dev/null 2>&1; then
+            echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."
+            exit 1
+          fi
+          echo "Image ${TARGET} verified."
+
+      - name: Publish Validation Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          TARGET: ${{ steps.resolve.outputs.new_image }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🔎 Deployment prerequisites"
+            echo ""
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ \`${TARGET}\` verified in the registry — ready to deploy to **${ENVIRONMENT}**."
+            else
+              echo "❌ Refused to commit a GitOps change that cannot resolve. Check that \`${TARGET}\` was published."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  komodo-deploy:
+    name: Sync Komodo Stack
+    needs: validate
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
       - name: Checkout Code
         uses: actions/checkout@v7
 
@@ -125,31 +207,6 @@ jobs:
             printf '%s=%s\n' "${key}" "${val}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
-      - name: Validate Container Image in Registry
-        env:
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-          IMAGE_TAG: ${{ inputs.image-tag }}
-          IMAGE_REPO: ${{ inputs.image-repository }}
-          DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [[ -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
-            printf '%s' "${REGISTRY_PASSWORD}" | docker login "${REGISTRY_HOST}" -u "${REGISTRY_USERNAME}" --password-stdin
-          fi
-
-          TARGET_REPO="${IMAGE_REPO}${DEV_SUFFIX}"
-          if [[ -n "${TARGET_REPO}" ]]; then
-            FULL_IMAGE="${REGISTRY_HOST}/${TARGET_REPO}:${IMAGE_TAG}"
-            echo "Validating image '${FULL_IMAGE}'..."
-            if docker manifest inspect "${FULL_IMAGE}" >/dev/null 2>&1; then
-              echo "✅ Container image '${FULL_IMAGE}' verified in registry."
-            else
-              echo "::warning::Container image '${FULL_IMAGE}' could not be verified in registry. Proceeding with deployment."
-            fi
-          fi
-
       - name: Mutate GitOps Compose Configuration
         id: gitops_commit
         env:
@@ -158,19 +215,15 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
           COMPOSE_FILE: ${{ inputs.gitops-compose-file }}
           YQ_PATH: ${{ inputs.gitops-service-image-yq-path }}
-          IMAGE_TAG: ${{ inputs.image-tag }}
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-          IMAGE_REPO: ${{ inputs.image-repository }}
-          DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
           STACK_NAME: ${{ inputs.komodo-stack-name }}
           GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN || github.token }}
+          # Reuse the reference `validate` proved resolvable rather than
+          # recomputing it, so the two jobs cannot disagree about the target.
+          NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
         run: |
           set -euo pipefail
           REPO_DIR="_gitops_worktree"
           rm -rf "${REPO_DIR}"
-
-          TARGET_REPO="${IMAGE_REPO}${DEV_SUFFIX}"
-          NEW_IMAGE="${REGISTRY_HOST}/${TARGET_REPO}:${IMAGE_TAG}"
 
           echo "Cloning GitOps repo '${GITOPS_REPO}' (branch: ${GITOPS_BRANCH})..."
           AUTH_URL="https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git"
@@ -200,9 +253,9 @@ jobs:
             git -C "${REPO_DIR}" config user.email "github-actions[bot]@users.noreply.github.com"
             git -C "${REPO_DIR}" add "${COMPOSE_FILE}"
             git -C "${REPO_DIR}" commit -m "chore(gitops): update ${STACK_NAME} image to ${NEW_IMAGE} [skip ci]"
-            git -C "${REPO_DIR}" push origin "${BRANCH}"
+            git -C "${REPO_DIR}" push origin "${GITOPS_BRANCH}"
             COMMIT_SHA="$(git -C "${REPO_DIR}" rev-parse HEAD)"
-            echo "Pushed GitOps commit ${COMMIT_SHA} to ${BRANCH}."
+            echo "Pushed GitOps commit ${COMMIT_SHA} to ${GITOPS_BRANCH}."
           fi
 
           echo "commit_sha=${COMMIT_SHA}" >> "${GITHUB_OUTPUT}"

@@ -55,6 +55,30 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The four language `test` jobs invoked `scripts/junit-report.sh` without ever
+  checking the library out, so every unit-test job failed on a missing file
+  whether the tests passed or not.
+- `terraform-test.yml` had no `main.tf` gate and could provision real
+  infrastructure in a repository with no Terraform, and its `destroy` ran only
+  on `failure()` — a cancelled run left the infrastructure standing.
+- `mono.yml` change detection: a push of several commits only inspected the tip,
+  an unresolvable base killed the step instead of selecting everything, and the
+  `./project` convention never matched `git diff --name-only` output, so a
+  monorepo could silently build nothing.
+- `deploy-komodo-gitops.yml` pushed to an undefined `BRANCH`, so every deploy
+  that actually had a change to commit failed under `set -u`.
+- Dependency and Sonar caches could be poisoned permanently. GitLab inherits
+  `when: always` and a rewritable key, so a partial tree is replaced by the next
+  green run; GitHub cache entries are immutable, so the same write froze a
+  half-populated tree under a valid key. The dependency saves are now guarded on
+  success, and a missing lock file no longer collapses the key onto its bare
+  `restore-keys` prefix.
+- The Sonar cache key was constant, so after the first run every save failed to
+  reserve and the analysis data never refreshed.
+- `secret-scanning.yml` did not pass `--platform github`, so findings carried
+  bare SHAs instead of commit links.
+
+
 - The Trivy database cache was keyed by run id, so it could never be reused and
   every run downloaded the ~1.2GB vulnerability database and, for an image with
   Java in it, a further ~900MB Java database. The key is now `trivy-db`, as on

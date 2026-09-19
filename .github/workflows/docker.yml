@@ -2,6 +2,30 @@ name: Image / Docker Build, Push & Promote
 
 # Counterpart of the GitLab Image:Build, Image:Push and Image:Promote jobs.
 #
+# ⚠️ THE SCAN IS THE CALLER'S RESPONSIBILITY, AND IT IS NOT OPTIONAL.
+#
+# GitLab's Image:Build saved the image to a tar that Image:Push and Image:Scan
+# both consumed, so nothing reached a registry before it had been scanned. This
+# port deliberately drops the tar — the scan pulls the candidate back from the
+# registry by digest instead — which means `build` pushes as it builds, and the
+# candidate exists in the dev repository from that moment on.
+#
+# Nothing in this file can stop a vulnerable candidate being promoted: `promote`
+# has no `needs`, because the scan job lives in the caller's workflow, not here.
+# The caller MUST put it between the two:
+#
+#   build:    uses: <org>/ci-library/.github/workflows/docker.yml@<ref>
+#   scan:     needs: build
+#             uses: <org>/ci-library/.github/workflows/scan.yml@<ref>
+#             with: { scan-type: image, image-ref: "${{ needs.build.outputs.image-ref-digest }}" }
+#   promote:  needs: [build, scan]          # <-- omit `scan` here and a failing
+#             uses: <org>/ci-library/.github/workflows/docker.yml@<ref>
+#             with: { is-release: true, ... }
+#
+# Omitting `scan` from promote's `needs` is silent: the promotion succeeds and
+# the vulnerable image is tagged into production. Pushing the candidate to the
+# dev repository is not the exposure — promoting it is.
+#
 # Unlike every other workflow in this library, the build job does not run inside
 # the organisation build container: building an image needs the daemon/buildkit
 # on the runner itself.
@@ -257,6 +281,23 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      # The digest table is written by the step after the push, so a build that
+      # fails leaves the run summary empty — the one case where the reader most
+      # needs to be told which target was being built before opening the log.
+      - name: Publish Build Failure Summary
+        if: failure()
+        env:
+          REPO: ${{ inputs.image-repository }}
+          TAG: ${{ inputs.image-tag }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🐳 Container Image"
+            echo ""
+            echo "❌ \`${REGISTRY_HOST}/${REPO}:${TAG}\` was not built. No candidate exists for the scan or the promotion to consume."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
   test:
     name: "Image: Smoke Test"
     needs: build
@@ -414,3 +455,19 @@ jobs:
           path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
           if-no-files-found: ignore
           retention-days: 7
+      # `crane mutate` writes the promotion table only once the production tag
+      # exists, so a run that found no candidate — or was refused by the
+      # registry — would report nothing at all where it matters most.
+      - name: Publish Promotion Failure Summary
+        if: failure()
+        env:
+          TAG: ${{ inputs.release-tag }}
+          DEV_REPOSITORY: ${{ inputs.image-dev-repository }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🐳 Container Image"
+            echo ""
+            echo "❌ \`${TAG}\` was not promoted. Either nothing in \`${REGISTRY_HOST}/${DEV_REPOSITORY}\` matched it or the registry refused the retag; the production tag is unchanged."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
