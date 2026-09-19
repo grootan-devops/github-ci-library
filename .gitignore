@@ -9,3 +9,7 @@ test-report/
 coverage/
 dist/
 _scan_tmp/
+
+# Python test artifacts
+__pycache__/
+*.py[cod]

@@ -1,5 +1,7 @@
 # Github CI/CD Library
 
+Release `1.0.0` · [Compatibility](https://github.com/grootan-devops/ai-skills/blob/main/COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+
 Reusable GitHub Actions workflows (`workflow_call`)
 
 ---
@@ -76,20 +78,20 @@ permissions:
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   lint:
-    uses: my-org/ci-library/.github/workflows/lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
   build:
-    uses: my-org/ci-library/.github/workflows/python-build.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
     secrets: inherit
 
   image:
     needs: [init, build]
-    uses: my-org/ci-library/.github/workflows/docker.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
@@ -97,7 +99,7 @@ jobs:
 
   scan:
     needs: [init, image]
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: image
@@ -117,12 +119,12 @@ permissions:
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   image:
     needs: init
-    uses: my-org/ci-library/.github/workflows/docker.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
       is-release: true
@@ -134,7 +136,7 @@ jobs:
 
   release:
     needs: [init, image]
-    uses: my-org/ci-library/.github/workflows/release.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}
@@ -770,12 +772,12 @@ publish job to maintain: the git ref *is* the version.
 
 ```hcl
 module "vpc" {
-  source = "git::git@github.com:my-org/terraform-modules.git//modules/vpc?ref=2.1.0"
+  source = "git::git@github.com:grootan-devops/terraform-modules.git//modules/vpc?ref=1.0.0"
 }
 
 module "eks" {
   # git::<repo_url>//<sub_folder>?ref=<tag | branch | commit>
-  source = "git::git@github.com:my-org/terraform-modules.git//modules/eks?ref=b4f8d29"
+  source = "git::git@github.com:grootan-devops/terraform-modules.git//modules/eks?ref=b4f8d29"
 }
 ```
 
@@ -806,7 +808,7 @@ module "eks" {
 Licence compliance is a mode of the shared scanner rather than a separate workflow:
 
 ```yaml
-uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
 with:
   scan-type: license
 ```
@@ -1129,7 +1131,7 @@ Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
 ## Project-Level Integration Examples (All Permutations)
 
 Every example assumes the organisation variables and secrets above are set, and pins the
-library with `@3.0.0`.
+library with `@1.0.0`.
 
 ### 1. Node.js Full Stack (App + Docker + Helm + Multi-Env GitOps Deploy)
 
@@ -1146,16 +1148,16 @@ permissions: { contents: read, packages: write, actions: read, checks: write }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   trivy-cache:
-    uses: my-org/ci-library/.github/workflows/trivy-cache.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
   check:
     needs: init
-    uses: my-org/ci-library/.github/workflows/check.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}
@@ -1166,15 +1168,15 @@ jobs:
       image-repository: ${{ needs.init.outputs.image-repository }}
 
   lint:
-    uses: my-org/ci-library/.github/workflows/lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
   node-lint:
-    uses: my-org/ci-library/.github/workflows/node-lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/node-lint.yml@1.0.0
     secrets: inherit
 
   build:
-    uses: my-org/ci-library/.github/workflows/node-build.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/node-build.yml@1.0.0
     secrets: inherit
     with:
       build-command: npm run build
@@ -1182,7 +1184,7 @@ jobs:
 
   image:
     needs: [init, build]
-    uses: my-org/ci-library/.github/workflows/docker.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
@@ -1190,7 +1192,7 @@ jobs:
 
   chart:
     needs: init
-    uses: my-org/ci-library/.github/workflows/chart.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/chart.yml@1.0.0
     secrets: inherit
     with:
       chart-name: ${{ needs.init.outputs.chart-name }}
@@ -1200,7 +1202,7 @@ jobs:
 
   image-scan:
     needs: [image, trivy-cache]
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: image
@@ -1208,7 +1210,7 @@ jobs:
 
   chart-scan:
     needs: [chart, trivy-cache]
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: config
@@ -1216,23 +1218,23 @@ jobs:
 
   license-scan:
     needs: trivy-cache
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: license
 
   sbom:
     needs: trivy-cache
-    uses: my-org/ci-library/.github/workflows/sbom.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
     secrets: inherit
 
   secret-scan:
-    uses: my-org/ci-library/.github/workflows/secret-scanning.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
     secrets: inherit
 
   sonarqube:
     needs: build
-    uses: my-org/ci-library/.github/workflows/sonarqube.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
     secrets: inherit
 ```
 
@@ -1255,16 +1257,16 @@ permissions: { contents: read, actions: read }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   deploy:
     needs: init
-    uses: my-org/ci-library/.github/workflows/deploy-argocd-gitops.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/deploy-argocd-gitops.yml@1.0.0
     secrets: inherit
     with:
       environment: ${{ inputs.environment }}
-      gitops-repo: my-org/app-gitops
+      gitops-repo: contoso/app-gitops
       app-path: apps/${{ inputs.environment }}/order-backend
       chart-name: ${{ needs.init.outputs.chart-name }}
       chart-version: ${{ inputs.target-version || needs.init.outputs.chart-version }}
@@ -1285,26 +1287,26 @@ permissions: { contents: read, packages: write, actions: read, checks: write }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   lint:
-    uses: my-org/ci-library/.github/workflows/lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
   python-lint:
-    uses: my-org/ci-library/.github/workflows/python-lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/python-lint.yml@1.0.0
     secrets: inherit
     with:
       linters: '["ruff","mypy"]'
 
   build:
-    uses: my-org/ci-library/.github/workflows/python-build.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
     secrets: inherit
 
   image:
     needs: [init, build]
-    uses: my-org/ci-library/.github/workflows/docker.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
@@ -1313,7 +1315,7 @@ jobs:
 
   scan:
     needs: [init, image]
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: image
@@ -1335,22 +1337,22 @@ permissions: { contents: read, packages: write, actions: read, checks: write }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   golang-lint:
-    uses: my-org/ci-library/.github/workflows/golang-lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/golang-lint.yml@1.0.0
     secrets: inherit
 
   build:
-    uses: my-org/ci-library/.github/workflows/golang-build.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/golang-build.yml@1.0.0
     secrets: inherit
     with:
       build-command: go build -trimpath -ldflags="-s -w" -o bin/ ./cmd/...
 
   image:
     needs: [init, build]
-    uses: my-org/ci-library/.github/workflows/docker.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
@@ -1358,7 +1360,7 @@ jobs:
 
   scan:
     needs: [init, image]
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: image
@@ -1377,26 +1379,26 @@ permissions: { contents: read, packages: write, actions: read, checks: write }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   trivy-cache:
-    uses: my-org/ci-library/.github/workflows/trivy-cache.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
     with:
       enable-java-db: "true"
 
   lint:
-    uses: my-org/ci-library/.github/workflows/lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
   build:
-    uses: my-org/ci-library/.github/workflows/java-build.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/java-build.yml@1.0.0
     secrets: inherit
 
   image:
     needs: [init, build]
-    uses: my-org/ci-library/.github/workflows/docker.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
@@ -1404,7 +1406,7 @@ jobs:
 
   sbom:
     needs: [build, trivy-cache]
-    uses: my-org/ci-library/.github/workflows/sbom.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
     secrets: inherit
 ```
 
@@ -1427,14 +1429,14 @@ permissions: { contents: read, packages: write, actions: read }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
     with:
       ignore-docker: "true"
 
   check:
     needs: init
-    uses: my-org/ci-library/.github/workflows/check.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}
@@ -1443,12 +1445,12 @@ jobs:
       chart-repository: ${{ needs.init.outputs.chart-repository }}
 
   lint:
-    uses: my-org/ci-library/.github/workflows/lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
   chart:
     needs: init
-    uses: my-org/ci-library/.github/workflows/chart.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/chart.yml@1.0.0
     secrets: inherit
     with:
       chart-name: ${{ needs.init.outputs.chart-name }}
@@ -1458,7 +1460,7 @@ jobs:
 
   chart-scan:
     needs: chart
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: config
@@ -1481,7 +1483,7 @@ permissions: { contents: read, actions: read }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
     with:
       ignore-docker: "true"
@@ -1489,13 +1491,13 @@ jobs:
       tag: "1.2.0"
 
   terraform-lint:
-    uses: my-org/ci-library/.github/workflows/terraform-lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform-lint.yml@1.0.0
     secrets: inherit
     with:
       state-name: network
 
   terraform-scan:
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: config
@@ -1504,7 +1506,7 @@ jobs:
 
   terraform-test:
     needs: terraform-lint
-    uses: my-org/ci-library/.github/workflows/terraform-test.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform-test.yml@1.0.0
     secrets: inherit
     with:
       test-timeout: 45m
@@ -1518,7 +1520,7 @@ There is no publish step: the release tags the repository, and consumers pin tha
 
 ```hcl
 module "network" {
-  source = "git::git@github.com:my-org/terraform-modules.git//modules/network?ref=1.2.0"
+  source = "git::git@github.com:grootan-devops/terraform-modules.git//modules/network?ref=1.0.0"
 }
 ```
 
@@ -1534,7 +1536,7 @@ permissions: { contents: read, packages: write, actions: read, checks: write }
 
 jobs:
   discover:
-    uses: my-org/ci-library/.github/workflows/mono.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/mono.yml@1.0.0
     secrets: inherit
 
   build:
@@ -1543,7 +1545,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-    uses: my-org/ci-library/.github/workflows/node-build.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/node-build.yml@1.0.0
     secrets: inherit
     with:
       project-path: ${{ matrix.path }}
@@ -1554,7 +1556,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-    uses: my-org/ci-library/.github/workflows/lint.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
     with:
       project-path: ${{ matrix.path }}
@@ -1586,29 +1588,29 @@ permissions: { contents: read, actions: read, checks: write }
 
 jobs:
   trivy-cache:
-    uses: my-org/ci-library/.github/workflows/trivy-cache.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
   secret-scan:
-    uses: my-org/ci-library/.github/workflows/secret-scanning.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
     secrets: inherit
     with:
       full-history: true
 
   license-scan:
     needs: trivy-cache
-    uses: my-org/ci-library/.github/workflows/scan.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
       scan-type: license
 
   sbom:
     needs: trivy-cache
-    uses: my-org/ci-library/.github/workflows/sbom.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
     secrets: inherit
 
   sonarqube:
-    uses: my-org/ci-library/.github/workflows/sonarqube.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
     secrets: inherit
 ```
 
@@ -1625,11 +1627,11 @@ permissions: { contents: read, actions: read, checks: write }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   build:
-    uses: my-org/ci-library/.github/workflows/python-build.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
     secrets: inherit
 ```
 
@@ -1649,12 +1651,12 @@ permissions: { contents: read, actions: read }
 
 jobs:
   init:
-    uses: my-org/ci-library/.github/workflows/init.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
   check:
     needs: init
-    uses: my-org/ci-library/.github/workflows/check.yml@3.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
     secrets: inherit
     with:
       tag: ${{ needs.init.outputs.tag }}
@@ -1701,3 +1703,11 @@ Consuming projects are expected to follow the same standard the library applies 
 The released version is the contents of `VERSION`. Bump it in the pull request that ships
 the change, the same way `RELEASE_VERSION` is bumped in the GitLab library's own
 `.gitlab-ci.yml`.
+
+## License
+
+Copyright 2026 Grootan Technologies Pvt Ltd.
+
+Licensed under the [GNU Affero General Public License v3.0](./LICENSE.md)
+(`AGPL-3.0-only`). External contributions are not accepted; see
+[CONTRIBUTING.md](./CONTRIBUTING.md) for bug and security reporting.

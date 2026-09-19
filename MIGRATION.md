@@ -1,7 +1,8 @@
-# Migration Guide & Standard
+# Migration Guide
 
-This document defines the **Migration Standard** for the GitLab CI/CD Library and contains the historical, version-by-version migration instructions for all **major releases** (breaking changes).
+This document records required consumer actions when upgrading between releases.
+Breaking changes must include an entry before release.
 
-This standard is designed specifically to be consumed by **AI Coding Assistants & Migration Skills** (e.g., Google Antigravity, Cursor, Claude Code, custom CLI migration agents) as well as platform engineers upgrading consumer repositories from one major version to another.
+## 1.0.0
 
----
+No migration is required for the initial release.
