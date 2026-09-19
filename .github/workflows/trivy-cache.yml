@@ -27,9 +27,10 @@ jobs:
     name: "Trivy: Warm Cache"
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
-    permissions:
-      contents: read
-      actions: write
+    # Permissions are deliberately inherited rather than declared. Declaring
+    # actions: write here would force every caller to grant it or fail the run
+    # at startup, and that is too much to ask for a cache refresh. A caller that
+    # grants it gets refreshes; one that does not still gets restores.
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:
@@ -96,10 +97,18 @@ jobs:
 
           if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" >/dev/null 2>&1; then
             echo "Deleted the previous trivy-db entry so this run can write it."
+            echo "save=true" >> "${GITHUB_OUTPUT}"
+          elif gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" \
+                 --jq '.actions_caches | length' 2>/dev/null | grep -qx 0; then
+            echo "No previous trivy-db entry; this run writes the first one."
+            echo "save=true" >> "${GITHUB_OUTPUT}"
           else
-            echo "No previous trivy-db entry to delete."
+            # Deleting needs actions: write, which the caller may not grant.
+            # The existing entry then stays as it is — restores keep working,
+            # and Trivy refreshes anything stale in the job itself.
+            echo "::warning title=Trivy cache::Could not replace the 'trivy-db' entry. Grant 'actions: write' in the calling workflow to let it refresh."
+            echo "save=false" >> "${GITHUB_OUTPUT}"
           fi
-          echo "save=true" >> "${GITHUB_OUTPUT}"
 
       - name: Save Trivy Database Cache
         if: ${{ !cancelled() && steps.refresh.outputs.save == 'true' }}
