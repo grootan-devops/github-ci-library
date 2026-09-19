@@ -9,6 +9,14 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `docker.yml` and `buildah.yml` take `require-scan` (default true) and
+  `scan-result`. The scan job belongs to the caller, so these workflows cannot
+  depend on it; the promotion now refuses, loudly and with a failing step,
+  unless the caller hands over a successful scan verdict. A caller that forgets
+  gets an empty value and a refusal rather than a quietly promoted image that
+  nothing scanned.
+
+
 - `self-version.yml`, `self-lint.yml`, `self-check.yml` and `self-secret-scan.yml`:
   the library's own pipeline split into independently dispatchable dimensions, so
   a developer working on one of them can run just that one. `ci.yml` is now only
