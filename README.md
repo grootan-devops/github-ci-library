@@ -414,7 +414,7 @@ flowchart LR
 | `init.yml` · `initialize` | Discovers the application version from `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **26 outputs.** |
 | `check.yml` · `tag-existence` | Fails when the git tag already exists on a different commit. A tag already on *this* commit is treated as a re-run, not a collision. |
 | `check.yml` · `changelog-existence` | Extracts the `## [x.y.z]` section from `CHANGELOG.md` and renders it as an Adaptive Card fragment. Uploads `release-changelog`. |
-| `check.yml` · `migration-existence` | Extracts the `previous...current` section from `MIGRATION.md`. Skipped for an initial release. Uploads `release-migration`. |
+| `check.yml` · `migration-existence` | Extracts the `previous...current` section from `MIGRATION.md`. Skipped for an initial release, or disabled with `check-migration: false` for artifacts that intentionally have no migration contract. Uploads `release-migration`. |
 | `check.yml` · `chart-existence` | Fails when the chart version is already published. Candidate versions skip the collision check. |
 | `check.yml` · `chart-dependency` | Fails when a chart dependency resolves to a development repository. |
 | `check.yml` · `image-existence` | Fails when the image tag is already published. |
@@ -934,7 +934,6 @@ wherever possible.
 |---|---|
 | `IMAGE_REGISTRY` | Container and chart registry host, e.g. `registry.domain.local`. |
 | `IMAGE_REPOSITORY` | Image repository path, e.g. `myapp/order-backend`. |
-| `CI_LIBRARY_REPO` | This repository, e.g. `devops/ci-library`. Jobs check out its `scripts/` at the exact ref you pinned. |
 | `TOOLKIT_BUILD_IMAGE` | Default build container, e.g. `devops/build-containers/bt-container:3.2.1`. |
 
 > [!IMPORTANT]

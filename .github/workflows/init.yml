@@ -8,7 +8,6 @@ name: Init / Environment & Version Discovery
 #   vars.IMAGE_REGISTRY            e.g. registry.domain.local
 #   vars.IMAGE_REPOSITORY          e.g. myapp/order-backend
 #   vars.CHART_REPOSITORY          e.g. helm
-#   vars.CI_LIBRARY_REPO           e.g. devops/ci-library
 #
 # Build container images are pinned in the workflows themselves
 # (registry-1.docker.io/grootantech/toolkit:verify-v2).
