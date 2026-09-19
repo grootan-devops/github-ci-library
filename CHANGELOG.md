@@ -55,6 +55,17 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `trivy-scan.sh` passed `--skip-java-db-update` unconditionally. Trivy treats
+  that as fatal on a cold cache rather than as a cue to fetch the database, so
+  the first scan of any image containing Java died with "The first run cannot
+  skip downloading Java DB". The flag is now used only when a Java DB is
+  actually cached.
+- A failed scan reported only "Trivy scan failed", sending the reader to the
+  raw log for the sentence that explains it. Trivy's own FATAL/ERROR lines now
+  reach the log and the job summary.
+- The candidate version suffix used `-<run>.r<attempt>`; it is now
+  `-<run>.<attempt>`.
+
 - Docker Hub authentication used the configured hostname as the credential key,
   but BuildKit resolves Docker Hub against the canonical
   `https://index.docker.io/v1/`. The push therefore ran unauthenticated and

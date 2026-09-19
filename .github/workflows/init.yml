@@ -331,7 +331,7 @@ jobs:
 
           if [[ "${IS_RELEASE_BRANCH}" == "true" && "${IS_MANUAL}" == "true" ]]; then
             echo "::warning title=Manual run::Manual trigger on release branch '${GITHUB_REF_NAME}' - forcing a candidate suffix and the dev repositories so a published artifact cannot be overwritten."
-            VERSION_SUFFIX="-${GITHUB_RUN_NUMBER}.r${GITHUB_RUN_ATTEMPT}"
+            VERSION_SUFFIX="-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
             IS_RELEASE="false"
           elif [[ "${IS_RELEASE_BRANCH}" == "true" ]]; then
             VERSION_SUFFIX=""
@@ -340,7 +340,7 @@ jobs:
             VERSION_SUFFIX="-${GITHUB_RUN_NUMBER}.${PR_NUMBER}"
             IS_RELEASE="false"
           else
-            VERSION_SUFFIX="-${GITHUB_RUN_NUMBER}.r${GITHUB_RUN_ATTEMPT}"
+            VERSION_SUFFIX="-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}"
             IS_RELEASE="false"
           fi
 

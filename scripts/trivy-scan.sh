@@ -167,7 +167,14 @@ validate_config_type() {
   fi
   log_info "Config type: ${CONFIG_TYPE}"
 }
-TRIVY_ARGS="--skip-java-db-update"
+# Skipping the Java DB update is only safe once a Java DB is actually cached.
+# Trivy treats "skip the update" on a cold cache as fatal rather than as a cue
+# to fetch it, so a first run against any image containing Java dies with
+# "The first run cannot skip downloading Java DB". Skip only what is present.
+TRIVY_ARGS=""
+if [[ -n "${TRIVY_CACHE_DIR:-}" ]] && compgen -G "${TRIVY_CACHE_DIR}/java-db/*" > /dev/null 2>&1; then
+  TRIVY_ARGS="--skip-java-db-update"
+fi
 build_trivy_command() {
   local BASE_CMD=""
   case "${SCAN_TYPE}" in
@@ -224,8 +231,31 @@ execute_trivy_scan() {
     fi
   fi
 
-  if ! ${TRIVY_CMD} --format json --ignorefile .trivyignore --skip-version-check --timeout "${TRIVY_TIMEOUT}" --output "${TRIVY_SCAN_REPORT_NAME}.json"; then
+  # Capture Trivy's own diagnostics. "Trivy scan failed" on its own sends the
+  # reader to the raw log to find the sentence that actually explains it, and
+  # into the job summary it goes too, so the cause is where the failure is.
+  local TRIVY_LOG="trivy-scan.log"
+  if ! ${TRIVY_CMD} --format json --ignorefile .trivyignore --skip-version-check --timeout "${TRIVY_TIMEOUT}" --output "${TRIVY_SCAN_REPORT_NAME}.json" 2>&1 | tee "${TRIVY_LOG}"; then
+    local REASON
+    REASON="$(grep -E "\bFATAL\b|\bERROR\b" "${TRIVY_LOG}" | tail -n 5 || true)"
     log_error "Trivy scan failed"
+    if [[ -n "${REASON}" ]]; then
+      echo "${REASON}" >&2
+    fi
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      {
+        echo "### 🛡️ Trivy ${SCAN_TYPE} scan"
+        echo ""
+        echo "❌ The scan did not complete."
+        if [[ -n "${REASON}" ]]; then
+          echo ""
+          echo '```'
+          echo "${REASON}"
+          echo '```'
+        fi
+        echo ""
+      } >> "${GITHUB_STEP_SUMMARY}"
+    fi
     exit 1
   fi
 
