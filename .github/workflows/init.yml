@@ -365,13 +365,11 @@ jobs:
           IMAGE_REPO="${IMAGE_REPOSITORY_INPUT}"
           IMAGE_DEV_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX:-/dev}"
           # Docker Hub has no nested repositories, so `<repo>/dev` is not a valid target.
-          DEV_SUFFIX_NOTE=""
           case "${REGISTRY_HOST}" in
             docker.io|index.docker.io|registry-1.docker.io)
               NORMALISED_DEV_SUFFIX="${IMAGE_DEV_SUFFIX//\//-}"
               if [[ "${NORMALISED_DEV_SUFFIX}" != "${IMAGE_DEV_SUFFIX}" ]]; then
                 echo "::notice title=Dev repository::Docker Hub does not support nested repositories. Using '${NORMALISED_DEV_SUFFIX}' instead of '${IMAGE_DEV_SUFFIX}' for development images."
-                DEV_SUFFIX_NOTE="Docker Hub has no nested repositories, so the dev suffix was rewritten from \`${IMAGE_DEV_SUFFIX}\` to \`${NORMALISED_DEV_SUFFIX}\`."
               fi
               IMAGE_DEV_SUFFIX="${NORMALISED_DEV_SUFFIX}"
               ;;
@@ -424,7 +422,6 @@ jobs:
             echo "PROJECT_PATH=${PROJECT_PATH}"
             echo "MAJOR_VERSION=${MAJOR_VERSION}"
             echo "MINOR_VERSION=${MINOR_VERSION}"
-            echo "DEV_SUFFIX_NOTE=${DEV_SUFFIX_NOTE}"
           } | tee -a "${GITHUB_OUTPUT}"
 
       - name: Resolve Upstream Candidate Provenance
@@ -536,7 +533,7 @@ jobs:
           IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
           IGNORE_DOCKER: ${{ steps.version.outputs.IGNORE_DOCKER }}
           IS_RELEASE: ${{ steps.version.outputs.IS_RELEASE }}
-          DEV_SUFFIX_NOTE: ${{ steps.version.outputs.DEV_SUFFIX_NOTE }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           TAG: ${{ steps.version.outputs.TAG }}
           VERSION_SUFFIX: ${{ steps.version.outputs.VERSION_SUFFIX }}
           IMAGE_PUSH_TAG: ${{ steps.version.outputs.IMAGE_PUSH_TAG }}
@@ -554,25 +551,23 @@ jobs:
           CANDIDATE_CHART_VERSION: ${{ steps.provenance.outputs.CANDIDATE_CHART_VERSION }}
         run: |
           set -euo pipefail
+          case "${GITHUB_EVENT_NAME}" in
+            workflow_dispatch) TRIGGER="Manual" ;;
+            pull_request)      TRIGGER="Pull request #${PR_NUMBER}" ;;
+            push)              TRIGGER="Push to \`${GITHUB_REF_NAME}\`" ;;
+            schedule)          TRIGGER="Schedule" ;;
+            *)                 TRIGGER="${GITHUB_EVENT_NAME}" ;;
+          esac
+
           WANT_IMAGE=false; [[ "${IGNORE_DOCKER}" != "true" ]] && WANT_IMAGE=true
           WANT_CHART=false; [[ "${IGNORE_CHART}" != "true" ]] && WANT_CHART=true
 
           {
             echo "## 🚀 Version & Targets"
-            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && "${IS_RELEASE}" != "true" ]]; then
-              echo ""
-              echo "> [!NOTE]"
-              echo "> Manual run: a candidate suffix is forced and pushes go to the development"
-              echo "> repositories, so this run cannot overwrite a published artifact."
-            fi
-            if [[ -n "${DEV_SUFFIX_NOTE}" ]]; then
-              echo ""
-              echo "> [!NOTE]"
-              echo "> ${DEV_SUFFIX_NOTE}"
-            fi
             echo ""
             echo "| Property | Value |"
             echo "|---|---|"
+            echo "| **Trigger** | ${TRIGGER} |"
             echo "| **Release tag** | \`${TAG}\` |"
             if [[ "${IS_RELEASE}" == "true" ]]; then
               echo "| **Build type** | 🚀 Production release |"
