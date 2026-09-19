@@ -1,9 +1,8 @@
 name: CI · PR Verification
+run-name: "CI · ${{ github.event.pull_request.number && format('PR #{0} · {1}', github.event.pull_request.number, github.head_ref) || format('{0} · #{1}', github.ref_name, github.run_number) }}"
 
-# The library's own pipeline, the counterpart of ci-templates/.gitlab-ci.yml.
-# It is only an aggregator: every dimension lives in its own `self-*.yml`
-# workflow with a `workflow_dispatch` trigger, so a developer working on lint,
-# on the release guards or on secret scanning can run just that one.
+# The library's own pipeline, counterpart of ci-templates/.gitlab-ci.yml.
+# An aggregator only: each dimension lives in its own `self-*.yml`, dispatchable alone.
 
 on:
   pull_request:
@@ -32,11 +31,7 @@ jobs:
     uses: ./.github/workflows/self-lint.yml
     secrets: inherit
 
-  # Calls secret-scanning.yml directly rather than through self-secret-scan.yml,
-  # for the same reason `guards` calls check.yml directly: self-secret-scan.yml
-  # only forwards one input, and the extra hop made this read
-  # "Security / Secret Scan / Secret Scan". It still exists for a standalone
-  # dispatch with full-history on.
+  # Calls secret-scanning.yml directly; the self- hop only repeats the job name.
   secret-scan:
     name: Security
     uses: ./.github/workflows/secret-scanning.yml
@@ -47,10 +42,7 @@ jobs:
     uses: ./.github/workflows/self-version.yml
     secrets: inherit
 
-  # Calls check.yml directly rather than through self-check.yml. Each reusable
-  # hop prefixes the job name, and "Check / Release Guards / Check: Migration
-  # Guide" said one thing three times. self-check.yml still exists for a
-  # standalone dispatch.
+  # Calls check.yml directly; the self- hop only repeats the job name.
   guards:
     name: Guards
     needs: version

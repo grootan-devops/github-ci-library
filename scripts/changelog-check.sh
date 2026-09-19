@@ -1,16 +1,6 @@
 #!/usr/bin/env bash
-# Verifies the release version has a changelog entry and renders that entry as
-# a Microsoft Teams Adaptive Card fragment.
-#
-# Port of the GitLab `Changelog:Check Existence` job. The awk extraction, the
-# full-file fallback and the jq card rendering are byte-for-byte the same.
-#
-# Required environment:
-#   RELEASE_VERSION                     version whose section must exist
-# Optional:
-#   CHANGELOG_FILE_NAME                 default ./CHANGELOG.md
-#   RELEASE_CHANGELOG_FILE_NAME         default RELEASE_CHANGELOG.md
-#   RELEASE_CHANGELOG_CARD_FILE_NAME    default RELEASE_CHANGELOG_CARD.json
+# Verifies the release version has a changelog entry and renders it as a Teams
+# Adaptive Card fragment. GitLab counterpart: `Changelog:Check Existence`.
 set -euo pipefail
 
 : "${RELEASE_VERSION:?RELEASE_VERSION must be set}"
@@ -93,8 +83,7 @@ jq -Rs '
     )
 ' "${RELEASE_CHANGELOG_FILE_NAME}" > "${RELEASE_CHANGELOG_CARD_FILE_NAME}"
 
-# `jq -e` on its own exits 1 with nothing on stdout or stderr, so a card that
-# rendered to an empty array used to fail the job with no sentence at all.
+# `jq -e` fails silently, so an empty card needs its own message.
 if ! jq -e 'length > 0' "${RELEASE_CHANGELOG_CARD_FILE_NAME}" > /dev/null; then
   echo "::error title=Changelog::The ${RELEASE_VERSION} section rendered to an empty Teams card."
   summarise "### 📋 Changelog

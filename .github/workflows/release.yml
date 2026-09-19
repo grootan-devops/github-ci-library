@@ -1,25 +1,10 @@
 name: Release / Publish & Notify
 
-# Counterpart of the GitLab Release:Upload -> Release -> Release:Notification:Teams
-# chain.
+# Counterpart of the GitLab Release:Upload -> Release -> Notification chain.
+# The release is assembled from the candidate run's artifacts, not a fresh build.
 #
-# The release is assembled from the artifacts the pre-merge run produced, not
-# from a fresh build: the scan reports attached here describe the exact bytes
-# that were promoted.
-#
-# CONCURRENCY -- THE CALLER'S RESPONSIBILITY. GitLab pins `interruptible: false`
-# on every release job so that `auto_cancel.on_new_commit: conservative` can
-# never cancel a promotion in flight. A reusable workflow cannot declare
-# `concurrency:`, so the calling workflow must:
-#
-#   concurrency:
-#     group: "release-${{ github.ref }}"
-#     cancel-in-progress: false
-#
-# Leave it at `cancel-in-progress: true` and a second push to the release branch
-# cancels this run part-published: the git tag and GitHub Release can already
-# exist while the assets and the Teams card never arrive -- a release nobody was
-# told about, which the next run will not re-cut because the tag is now taken.
+# A reusable workflow cannot declare `concurrency:`, so the caller must set
+# `cancel-in-progress: false` or a cancelled run leaves a release part-published.
 
 on:
   workflow_call:
@@ -72,12 +57,8 @@ env:
 jobs:
   collect:
     name: Collect Artifacts
-    # GitLab marks Release:Upload `allow_failure: true`: a package-registry
-    # hiccup must never cost the release. The assets are a convenience, the tag
-    # and the notes are the contract. So this job is allowed to fail without
-    # failing the run, and `publish` keys off its *result* rather than its
-    # success. The guard that must still bite -- a missing tag -- is deliberately
-    # left to `publish`: swallowing it here would cut a release with no version.
+    # Assets are a convenience; the tag and the notes are the contract. `publish`
+    # keys off this job's result, not its success.
     continue-on-error: true
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
@@ -211,10 +192,6 @@ jobs:
 
           echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') release assets."
 
-      # Which assets reached the release is the whole point of this job, and it
-      # is allow-failure — so the names go here on a green run too. A release
-      # missing its scan report is otherwise only discoverable by opening the
-      # release page and counting.
       - name: Publish Collection Summary
         if: always()
         run: |
@@ -251,8 +228,7 @@ jobs:
   publish:
     name: Publish
     needs: collect
-    # `collect` may fail, so wait for it to finish rather than to succeed. An
-    # empty tag is the one unrecoverable case: there is no version to cut.
+    # `collect` may fail, so wait for it to finish rather than to succeed.
     if: ${{ !cancelled() && inputs.tag != '' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
@@ -276,8 +252,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # `collect` is allowed to fail, so the payload may be absent or empty.
-          # The notes degrade; the release itself does not.
           NOTES_FILE=payload/CONSOLIDATED_RELEASE_CHANGELOG.md
           if [[ ! -s "${NOTES_FILE}" ]]; then
             echo "::warning title=Release::No consolidated release notes were collected. Publishing '${TAG}' with a minimal body."
@@ -295,13 +269,7 @@ jobs:
           ASSETS=(payload/_release_assets/*)
           shopt -u nullglob
 
-          # A re-run of a release that already exists updates it rather than
-          # failing, which keeps the release job idempotent.
-          #
-          # `gh` reports a refused release precisely — a protected tag, a token
-          # without `contents: write`, an asset over the size limit — and that
-          # sentence has to survive into the summary, because a half-published
-          # release is the worst thing to have to diagnose from an exit code.
+          # Re-running an existing release updates it rather than failing.
           set +e
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "::notice title=Release::'${TAG}' already exists. Updating it."
@@ -359,9 +327,7 @@ jobs:
     name: Notify Teams
     if: ${{ inputs.notify }}
     needs: publish
-    # GitLab applies `allow_failure: true` to Release:Notification:Teams through
-    # .teams-adaptivecard-notification-vars. A Teams outage must not turn an
-    # already-published release red.
+    # A Teams outage must not turn an already-published release red.
     continue-on-error: true
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10

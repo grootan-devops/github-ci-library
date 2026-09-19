@@ -1,7 +1,7 @@
 name: Lint · Library
+run-name: "Lint · ${{ github.ref_name }} · #${{ github.run_number }}"
 
-# One dimension of the library's own pipeline, callable on its own so a change
-# to a linter or a script can be verified without running the whole CI run.
+# Lint dimension of the library's own pipeline, callable on its own.
 
 on:
   workflow_dispatch:
@@ -28,10 +28,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # run_linted is the same helper markdown-lint.sh and yaml-lint.sh use, so
-      # the library's own lint reports exactly as a consumer's does — findings
-      # in the summary, not an exit code. `-color` is dropped: ANSI escapes in
-      # a fenced markdown block are noise.
+      # run_linted reports findings in the step summary rather than as an exit code.
       - name: Run ${{ matrix.tool }}
         env:
           TOOL: ${{ matrix.tool }}

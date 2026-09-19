@@ -1,14 +1,9 @@
 name: Terraform / Module Test
 
-# Counterpart of the GitLab Terraform:Module:Test and
-# Terraform:Module:Test:Destroy jobs. The destroy job runs when the test job
-# fails or is cancelled, so a test that provisioned real infrastructure and then
-# stopped does not leave it behind.
-#
-# GitLab pinned `interruptible: false` on both jobs. The GitHub equivalent is on
-# the caller: the workflow calling this one must set `cancel-in-progress: false`
-# in its concurrency group, or a superseded run is force-cancelled before the
-# teardown job can claim a runner and the fixtures stay provisioned.
+# Counterpart of the GitLab Terraform:Module:Test jobs: destroy runs when the
+# test fails or is cancelled, so real infrastructure is not left behind. The
+# caller must set `cancel-in-progress: false`, or a superseded run is cancelled
+# before teardown can claim a runner and the fixtures stay provisioned.
 
 on:
   workflow_call:
@@ -36,10 +31,7 @@ env:
   TF_INPUT: "0"
 
 jobs:
-  # GitLab gates the module test on `exists: ${PROJECT_PATH}/main.tf`. An empty
-  # matrix is the GitHub equivalent, and here it is a safety gate rather than a
-  # tidiness one: this workflow provisions real infrastructure, so a repository
-  # with no root module must produce no test job at all.
+  # An empty matrix runs no job at all: no root module, nothing provisioned.
   discover:
     name: Detect Terraform Root Module
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -127,9 +119,6 @@ jobs:
           OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
-          # The suite already wrote its own transcript to tf_test.log, and
-          # `go test -v` ends with its PASS/FAIL/ok lines. Reuse those rather
-          # than re-running anything to count.
           LOG="tests/${TF_LOG_FILE_NAME}"
           TALLY="$(grep -aE '^(--- FAIL|--- PASS|FAIL|ok|PASS)' "${LOG}" 2>/dev/null | tail -n 15 || true)"
           {
@@ -165,11 +154,8 @@ jobs:
   destroy:
     name: Test Teardown
     needs: test
-    # A passing test tears down its own fixtures; this covers the two cases that
-    # cannot. Cancellation is one of them — GitLab pinned `interruptible: false`
-    # precisely so a cancelled run could not strand real infrastructure — so the
-    # condition must not be `failure()` alone. `skipped` means the test never ran
-    # and there is nothing provisioned to destroy.
+    # A cancelled run strands infrastructure too, so this cannot be `failure()`
+    # alone; `skipped` means the test never ran and there is nothing to destroy.
     if: ${{ inputs.destroy-on-failure && (failure() || cancelled()) && needs.test.result != 'skipped' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
@@ -195,9 +181,6 @@ jobs:
         id: teardown
         run: |
           set -uo pipefail
-          # Capture as well as stream: this is the one job whose outcome has to
-          # be trusted without reading logs, because what it leaves behind
-          # costs money. Terraform's own count line is the proof.
           {
             terraform init -input=false -no-color &&
             terraform destroy -auto-approve -input=false -no-color
@@ -211,7 +194,6 @@ jobs:
         run: |
           set -euo pipefail
           LOG="${RUNNER_TEMP}/tf-destroy.log"
-          # Terraform prints "Destroy complete! N resources destroyed." itself.
           DESTROYED="$(grep -aE 'Destroy complete!' "${LOG}" 2>/dev/null | tail -n 1 || true)"
           {
             echo "### 🧹 Terraform test teardown"

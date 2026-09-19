@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# Fails when chart/README.md is out of date with values.yaml.
-#
-# Port of the GitLab `Chart:Check:README` job: regenerate with helm-docs and
-# compare checksums, so the committed README is always the generated one.
-#
-# Optional environment:
-#   CHART_DIR   default ./chart
+# Fails when chart/README.md is out of date with values.yaml: regenerate with
+# helm-docs and compare checksums. GitLab counterpart: `Chart:Check:README`.
 set -euo pipefail
 
 : "${CHART_DIR:=./chart}"
@@ -31,8 +26,7 @@ helm-docs -c ${CHART_DIR}/ ${HELM_DOCS_ARGS[*]}
 fi
 
 MD5_CHART_DOCS=$(md5sum README.md)
-# helm-docs aborts on a malformed README.gotmpl or values.yaml. Without its own
-# words the reader sees only that the docs check failed, not that it never ran.
+# Capture helm-docs' own words: a parse failure is not a stale README.
 if ! HELM_DOCS_OUTPUT="$(helm-docs "${HELM_DOCS_ARGS[@]}" 2>&1)"; then
   echo "${HELM_DOCS_OUTPUT}" >&2
   echo "::error title=Chart docs::helm-docs could not regenerate ${CHART_DIR}/README.md."

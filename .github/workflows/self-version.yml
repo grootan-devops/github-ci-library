@@ -1,7 +1,7 @@
 name: Version · Library
+run-name: "Version · ${{ github.ref_name }} · #${{ github.run_number }}"
 
-# Resolves the version the library would release. Shared by every other
-# dimension so the VERSION contract is validated in exactly one place.
+# Resolves the version the library would release; the one place VERSION is validated.
 
 on:
   workflow_dispatch:

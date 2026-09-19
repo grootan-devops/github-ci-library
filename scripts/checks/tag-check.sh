@@ -38,5 +38,5 @@ if [[ -n "${MATCH}" ]]; then
   exit 1
 fi
 
-echo "Git tag '${TAG}' is available."
-{ echo "### 🏷️ Git tag"; echo; echo "✅ \`${TAG}\` is available."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+echo "No git tag '${TAG}' exists yet; the release may create it."
+{ echo "### 🏷️ Git tag"; echo; echo "✅ No git tag \`${TAG}\` yet — free to create."; echo; } >> "${GITHUB_STEP_SUMMARY}"

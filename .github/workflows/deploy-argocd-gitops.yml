@@ -171,9 +171,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Every refusal below stops the whole deploy before anything is
-          # committed, so each one has to say which input was wrong rather than
-          # leaving an exit code in front of an unchanged environment.
           refuse() {
             {
               echo "### 🔎 Deployment prerequisites"
@@ -316,9 +313,7 @@ jobs:
           fi
           echo "Image ${TARGET} verified."
 
-      # Every failing path above writes its own section naming what could not
-      # be resolved, so this one only reports the success case — which carries
-      # the chart and image a reviewer would otherwise have to dig for.
+      # Failing paths write their own section; this one only reports success.
       - name: Publish Validation Summary
         if: ${{ success() }}
         env:
@@ -376,9 +371,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # A deploy that stops here leaves the environment on its previous
-          # version with no commit to point at, so each refusal names the path
-          # it could not find and lists what the repository does contain.
           gitops_refuse() {
             {
               echo "### 🚢 GitOps commit"
@@ -402,8 +394,6 @@ jobs:
               echo "::error::Manifest file not found: ${MANIFEST_PATH}"
               gitops_refuse "\`${MANIFEST_PATH}\` does not exist in the GitOps repository. These are at its root:" "$(ls -1)"
             fi
-            # What it was, not only what it becomes: "what is running now" is
-            # only half the answer when a deploy has to be reasoned about.
             PREVIOUS="$(yq -r '.spec.template.spec.containers[0].image // .spec.containers[0].image // ""' "${MANIFEST_PATH}" 2>/dev/null || echo "")"
             yq eval '(.spec.template.spec.containers[0].image // .spec.containers[0].image) = "'"${NEW_IMG}"'"' -i "${MANIFEST_PATH}"
             {
@@ -427,8 +417,6 @@ jobs:
             fi
 
             echo "Updating ${CHART_NAME:-chart} (${APP_PATH}) to ${TARGET_VERSION} in ${VALUES_PATH}..."
-            # What it was, not only what it becomes: "what is running now" is
-            # only half the answer when a deploy has to be reasoned about.
             PREVIOUS="$(yq -r "${APP_PATH}.chart.version // \"\"" "${VALUES_PATH}" 2>/dev/null || echo "")"
             if [[ -n "${CHART_REPO_URL}" ]]; then
               yq eval "${APP_PATH}.chart.repoURL = \"${CHART_REPO_URL}\"" -i "${VALUES_PATH}"
@@ -498,9 +486,7 @@ jobs:
           UPDATE_OUTCOME: ${{ steps.update.outcome }}
         run: |
           set -euo pipefail
-          # A refusal inside the update step has already written its own
-          # section naming the path it could not find; only a failure that
-          # happened elsewhere still needs one here.
+          # The update step already wrote its own section on a refusal.
           {
             echo "### 🚢 GitOps commit"
             echo ""

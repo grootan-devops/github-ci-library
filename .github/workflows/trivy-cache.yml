@@ -27,10 +27,8 @@ jobs:
     name: Warm Cache
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
-    # Permissions are deliberately inherited rather than declared. Declaring
-    # actions: write here would force every caller to grant it or fail the run
-    # at startup, and that is too much to ask for a cache refresh. A caller that
-    # grants it gets refreshes; one that does not still gets restores.
+    # No `permissions:` block on purpose: declaring actions: write would force
+    # every caller to grant it or fail at startup. Restores work without it.
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:
@@ -68,9 +66,8 @@ jobs:
           JAVA_DB="skipped — no pom.xml and enable-java-db is not \`true\`"
           if [[ "${WANT_JAVA}" == "true" ]]; then
             echo "Warming trivy-java-db for downstream image and SBOM scans..."
-            # Downstream scans pass --skip-java-db-update, which Trivy treats
-            # as fatal on a cold cache. A failure here is therefore a failure
-            # of every later scan of a Java image, not a cache optimisation.
+            # Downstream scans pass --skip-java-db-update, which Trivy treats as
+            # fatal on a cold cache, so a failure here fails every later Java scan.
             if trivy image --download-java-db-only --skip-version-check 2>&1 | tee "${RUNNER_TEMP}/java-db.log"; then
               JAVA_DB="downloaded"
             else
@@ -82,11 +79,9 @@ jobs:
           fi
           echo "java_db=${JAVA_DB}" >> "${GITHUB_OUTPUT}"
 
-      # GitLab keys this cache "trivy-db" and pushes over it every pipeline.
-      # GitHub caches are immutable, so the entry has to be deleted before the
-      # same key can be written again — otherwise "trivy-db" would be frozen at
-      # whatever the first run stored and the databases would go stale forever.
-      # Refresh at most once a day; every other run just restores.
+      # GitHub caches are immutable, so a stable key must be deleted before it can
+      # be rewritten, or `trivy-db` freezes at whatever the first run stored.
+      # Deleting needs actions: write; without it the existing entry just stays.
       - name: Refresh Cache Entry
         id: refresh
         if: ${{ !cancelled() }}
@@ -98,9 +93,7 @@ jobs:
           STAMP=".trivycache/.warmed-on"
           TODAY="$(date -u +%Y-%m-%d)"
 
-          # NOTE: the caches API matches `key` as a PREFIX, so a query for
-          # "trivy-db" also returns "trivy-db-anything". Filter for the exact
-          # key or an unrelated entry will be mistaken for ours.
+          # The caches API matches `key` as a PREFIX, so filter for the exact key.
           EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" \
             --jq '[.actions_caches[] | select(.key == "trivy-db")] | length' 2>/dev/null || echo 0)"
 
@@ -117,9 +110,6 @@ jobs:
             exit 0
           fi
 
-          # GitHub caches are immutable: the entry has to go before the same key
-          # can be written again. Deleting needs actions: write, which a caller
-          # may not grant — then the existing entry simply stays.
           mkdir -p .trivycache && echo "${TODAY}" > "${STAMP}"
           if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" >/dev/null 2>&1; then
             echo "Replaced the 'trivy-db' entry with today's databases."
@@ -136,9 +126,6 @@ jobs:
           path: .trivycache
           key: trivy-db
 
-      # Restored-versus-rebuilt is the whole point of the job: a run that keeps
-      # rebuilding is paying for a ~1.2GB download every time, and nothing else
-      # in the graph reports it.
       - name: Publish Cache Summary
         if: always()
         env:

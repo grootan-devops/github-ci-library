@@ -1,7 +1,6 @@
 name: Python / Lint
 
-# Counterpart of the GitLab Python:Lint:Ruff / :MyPy / :ISort / :PyCodeStyle jobs.
-# One matrix leg per linter so all four run in parallel and each names itself.
+# GitLab counterpart: Python:Lint:Ruff / :MyPy / :ISort / :PyCodeStyle — one matrix leg each.
 
 on:
   workflow_call:
@@ -42,9 +41,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # For scripts/lint-summary.sh: every linter reports through run_linted, so
-      # a failing check puts its own findings in the summary instead of an
-      # exit code the reader has to go and decode in the raw log.
       - name: Checkout CI Library
         uses: actions/checkout@v7
         with:
@@ -60,9 +56,6 @@ jobs:
           key: py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) }}
           restore-keys: py-
 
-      # A resolution failure names the package and the constraint that could not
-      # be satisfied, and that sentence is the whole answer. A successful sync
-      # says nothing worth a section, so it writes none.
       - name: Sync Dependencies
         run: |
           set -uo pipefail

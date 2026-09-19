@@ -1,32 +1,11 @@
 name: Image / Buildah Build, Push & Promote
 
 # Counterpart of the GitLab buildah Image:Build job, plus the shared push and
-# promote steps. Builds a minimal image from a base image without a Dockerfile,
-# inside the organisation's buildah/podman build container.
+# promote steps. Builds a minimal image from a base image without a Dockerfile.
 #
-# ⚠️ THE SCAN IS THE CALLER'S RESPONSIBILITY, AND IT IS NOT OPTIONAL.
-#
-# GitLab's Image:Build saved the image to a tar that Image:Push and Image:Scan
-# both consumed, so nothing reached a registry before it had been scanned. This
-# port deliberately drops the tar — the scan pulls the candidate back from the
-# registry by digest instead — which means `build` pushes as it builds, and the
-# candidate exists in the dev repository from that moment on.
-#
-# Nothing in this file can stop a vulnerable candidate being promoted: `promote`
-# has no `needs`, because the scan job lives in the caller's workflow, not here.
-# The caller MUST put it between the two:
-#
-#   build:    uses: <org>/ci-library/.github/workflows/buildah.yml@<ref>
-#   scan:     needs: build
-#             uses: <org>/ci-library/.github/workflows/scan.yml@<ref>
-#             with: { scan-type: image, image-ref: "${{ needs.build.outputs.image-ref-digest }}" }
-#   promote:  needs: [build, scan]          # <-- omit `scan` here and a failing
-#             uses: <org>/ci-library/.github/workflows/buildah.yml@<ref>
-#             with: { is-release: true, ... }
-#
-# Omitting `scan` from promote's `needs` is silent: the promotion succeeds and
-# the vulnerable image is tagged into production. Pushing the candidate to the
-# dev repository is not the exposure — promoting it is.
+# ⚠️ `promote` has no `needs` on the scan — that job lives in the caller's
+# workflow. The caller must run it between build and promote and pass its
+# result through `scan-result`, or a vulnerable image promotes silently.
 
 on:
   workflow_call:
@@ -206,9 +185,6 @@ jobs:
           CONTAINER_CMD: ${{ inputs.container-cmd }}
         run: |
           set -uo pipefail
-          # Capture as well as stream: the script is a chain of buildah and dnf
-          # calls, and the one that aborted names the package or the mount it
-          # could not resolve. That sentence is the whole answer.
           bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah-build.sh" 2>&1 | tee "${RUNNER_TEMP}/buildah.log"
           exit "${PIPESTATUS[0]}"
 
@@ -221,9 +197,6 @@ jobs:
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
         run: |
           set -uo pipefail
-          # Capture as well as stream: podman says whether the registry refused
-          # the credential, the quota or the tag, and the summary needs that
-          # rather than an exit code.
           {
             podman login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}" &&
             podman tag "${IMAGE_NAME}" "${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}" &&
@@ -271,10 +244,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # buildah-build.sh writes the package table, and the push step writes the
-      # digest table — both only on success. A failed build would otherwise
-      # report nothing about which base image it was assembling from, so the
-      # aborted step's own output goes here alongside the target it was for.
       - name: Publish Build Failure Summary
         if: failure()
         env:
@@ -317,9 +286,8 @@ jobs:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
     steps:
-      # Fails closed, and fails LOUD. A skipped job reads as success to the
-      # caller's graph, so refusing by condition would let a release carry on
-      # with no image promoted and nothing to show for it.
+      # A skipped job reads as success to the caller's graph, so this refuses
+      # with a failing step rather than an `if:` condition.
       - name: Verify The Candidate Was Scanned
         env:
           REQUIRE_SCAN: ${{ inputs.require-scan }}
@@ -398,9 +366,6 @@ jobs:
 
           SOURCE_DIGEST="$(crane digest "${SOURCE}")"
           echo "📦 Promoting ${SOURCE} (${SOURCE_DIGEST}) to ${PROD_IMAGE}:${TAG}"
-          # Capture as well as stream: a registry that refuses the retag says
-          # whether it was the credential, an immutable tag or a quota, and
-          # that sentence is what decides who has to fix it.
           if ! MUTATE_OUTPUT="$(crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}" 2>&1)"; then
             echo "${MUTATE_OUTPUT}" >&2
             echo "::error title=Image promote::${PROD_IMAGE}:${TAG} was refused by the registry."
@@ -431,9 +396,8 @@ jobs:
             echo "| **Promoted from** | \`${SOURCE}\` |"
             echo "| **Released as** | \`${PROD_IMAGE}:${TAG}\` |"
             echo "| **Digest** | \`$(crane digest "${PROD_IMAGE}:${TAG}")\` |"
-            # The digest the scan cleared. `crane mutate` rewrites the version
-            # label, so this is expected to differ from the released digest —
-            # it is here as the provenance link back to the scan.
+            # `crane mutate` rewrites the version label, so the scanned
+            # candidate's digest differs from the released one by design.
             echo "| **Scanned candidate digest** | \`${SOURCE_DIGEST}\` |"
             echo ""
           } > "${IMAGE_INFO_FILE_NAME}"
@@ -447,9 +411,6 @@ jobs:
           path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
           if-no-files-found: ignore
           retention-days: 7
-      # `crane mutate` writes the promotion table only once the production tag
-      # exists, so a run that found no candidate — or was refused by the
-      # registry — would report nothing at all where it matters most.
       - name: Publish Promotion Failure Summary
         if: failure()
         env:

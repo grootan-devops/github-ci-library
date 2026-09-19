@@ -1,17 +1,6 @@
 #!/usr/bin/env bash
 # Posts a Microsoft Teams Adaptive Card for a release.
-#
-# Port of the GitLab `Release:Notification:Teams` job. The card template, the
-# markdown-to-TextBlock fallback renderer and the multi-webhook fan-out are
-# unchanged; only the links and fact set point at GitHub.
-#
-# Required environment:
-#   TAG                                    release tag
-# Optional:
-#   RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL    comma-separated webhook URLs; unset = skip
-#   RELEASE_CHANGELOG_CARD_FILE_NAME       pre-rendered card fragment
-#   RELEASE_CHANGELOG_FILE_NAME            markdown fallback source
-#   SONAR_EXTERNAL_URL / SONAR_PROJECT_KEY adds a SonarQube button
+# GitLab counterpart: `Release:Notification:Teams`.
 set -euo pipefail
 
 : "${TAG:?TAG must be set}"
@@ -93,7 +82,6 @@ jq -n \
     actions: $actions
   }' > message_template.json
 
-# Render the card body from markdown when the check job did not already do it.
 if [[ ! -s "${RELEASE_CHANGELOG_CARD_FILE_NAME}" ]]; then
   if [[ -f "${RELEASE_CHANGELOG_FILE_NAME}" ]]; then
     jq -R -s -c '
@@ -157,8 +145,7 @@ for URL in "${WEBHOOKS[@]}"; do
   fi
 
   echo "Sending notification to Teams Workflow..."
-  # Keep the response body: Teams answers a rejected card with a reason, and the
-  # notify job is allow-failure, so the summary is the only place it will show.
+  # Keep the response body: Teams' rejection reason shows up nowhere else.
   RESPONSE_FILE="$(mktemp)"
   if ! HTTP_CODE="$(curl -sS -o "${RESPONSE_FILE}" -w "%{http_code}" -X POST \
       -H "Content-Type: application/json" \

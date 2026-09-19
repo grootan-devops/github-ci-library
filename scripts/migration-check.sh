@@ -1,18 +1,7 @@
 #!/usr/bin/env bash
 # Verifies MIGRATION.md documents the upgrade path into the release version and
 # extracts that section for the release notes.
-#
-# Port of the GitLab `Migration:Check Existence` job. The awk section matcher —
-# range headings, single-version headings and major-to-major headings — is
-# unchanged; only previous-version discovery uses the GitHub API instead of the
-# GitLab one.
-#
-# Optional environment:
-#   RELEASE_VERSION                version being released (required)
-#   PREVIOUS_RELEASE_VERSION       skips discovery when set
-#   MIGRATION_FILE_NAME            default ./MIGRATION.md
-#   RELEASE_MIGRATION_FILE_NAME    default RELEASE_MIGRATION.md
-#   GH_TOKEN                       enables release/tag discovery via the API
+# GitLab counterpart: `Migration:Check Existence`.
 set -euo pipefail
 
 : "${RELEASE_VERSION:?RELEASE_VERSION must be set}"
@@ -28,7 +17,6 @@ if [[ -z "${CURRENT_MAJOR}" ]]; then
   exit 1
 fi
 
-# 1. Discover previous release version
 if [[ -z "${PREVIOUS_RELEASE_VERSION}" ]]; then
   API_TAGS=""
   if [[ -n "${GH_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
@@ -58,7 +46,6 @@ summarise() {
   fi
 }
 
-# 2. Initial release needs no migration guide
 if [[ -z "${PREVIOUS_RELEASE_VERSION}" ]]; then
   echo "ℹ️ Notice: No previous release found in repository. Initial release detected."
   echo "Migration guide check is skipped for initial release."
@@ -72,7 +59,6 @@ PREVIOUS_MAJOR=$(grep -Eo '^[0-9]+' <<<"${PREVIOUS_RELEASE_VERSION}" || true)
 echo "🔍 Verifying migration documentation: ${PREVIOUS_RELEASE_VERSION} -> ${RELEASE_VERSION}"
 echo "Every release (major, minor, or patch) requires documented migration/compatibility notes in ${MIGRATION_FILE_NAME}."
 
-# 3. The file itself must exist
 if [[ ! -f "${MIGRATION_FILE_NAME}" ]]; then
   echo "::error title=Migration guide::Migration file '${MIGRATION_FILE_NAME}' is missing. Release ${PREVIOUS_RELEASE_VERSION} -> ${RELEASE_VERSION} cannot proceed without it."
   summarise "### 🧭 Migration guide
@@ -80,7 +66,6 @@ if [[ ! -f "${MIGRATION_FILE_NAME}" ]]; then
   exit 1
 fi
 
-# 4. Extract the section covering previous -> current
 AWK_EXIT=0
 awk -v p_ver="${PREVIOUS_RELEASE_VERSION}" \
     -v p_maj="${PREVIOUS_MAJOR}" \
@@ -129,7 +114,6 @@ covering upgrade instructions and breaking changes (or stating 'No migration req
   exit 1
 fi
 
-# 5. The section must carry substance, not just a heading
 BODY_LINES=$(grep -v "^##" "${RELEASE_MIGRATION_FILE_NAME}" | grep -c '[^[:space:]]' || true)
 if [[ "${BODY_LINES}" -lt 1 ]]; then
   echo "::error title=Migration guide::The section for ${PREVIOUS_RELEASE_VERSION}...${RELEASE_VERSION} lacks content. At minimum, state 'No migration required'."

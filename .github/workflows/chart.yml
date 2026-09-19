@@ -2,9 +2,6 @@ name: Chart / Lint, Package, Push & Promote
 
 # Counterpart of the GitLab chart module: Chart:Check:README, Chart:Lint,
 # Chart:Build, Chart:Push and Chart:Promote.
-#
-# Lint and the documentation check start together. Packaging waits on lint, and
-# the push waits on the package — so a lint failure costs one job, not three.
 
 on:
   workflow_call:
@@ -147,8 +144,6 @@ jobs:
           HELM_TEST_VALUES: ${{ inputs.helm-values }}
         run: |
           set -uo pipefail
-          # Capture as well as stream: `helm lint --strict` names the template
-          # and the field it rejected, and that is the whole answer.
           if [[ -z "${HELM_TEST_VALUES}" ]]; then
             helm lint --strict -f "${CHART_DIR}/values.yaml" "${CHART_DIR}/" 2>&1 | tee "${RUNNER_TEMP}/helm-lint.log"
           else
@@ -164,8 +159,6 @@ jobs:
           LINT_OUTCOME: ${{ steps.helmlint.outcome }}
         run: |
           set -euo pipefail
-          # helm lint ends with its own tally ("1 chart(s) linted, 0 chart(s)
-          # failed") — already computed, so the count costs nothing to carry.
           TALLY="$(grep -E 'chart\(s\) linted' "${RUNNER_TEMP}/helm-lint.log" 2>/dev/null | tail -n 1 || true)"
           {
             echo "### ⎈ Chart lint"
@@ -188,9 +181,6 @@ jobs:
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # Optional counterpart of .Chart:UnitTest. Off by default: this is for repositories
-  # that SHIP a chart others depend on -- a library chart, or a widely reused component.
-  # An application chart has nothing to assert that lint does not already cover.
   # Requires the `unittest` Helm plugin in the job image.
   unittest:
     name: Unit Test
@@ -228,8 +218,6 @@ jobs:
           OUTCOME: ${{ steps.unittest.outcome }}
         run: |
           set -euo pipefail
-          # helm-unittest prints its own Charts/Test Suites/Tests tallies at the
-          # end of the run. Reuse them rather than re-parsing the JUnit file.
           TALLY="$(grep -E '^(Charts|Test Suites|Tests|Snapshot):' "${RUNNER_TEMP}/helm-unittest.log" 2>/dev/null || true)"
           {
             echo "### 📘 Chart unit tests"
@@ -299,8 +287,6 @@ jobs:
           CHART_APP_VERSION: ${{ inputs.chart-app-version }}
         run: |
           set -uo pipefail
-          # Capture as well as stream: Helm names the dependency it could not
-          # pull or the version string it rejected, and that is the answer.
           {
             helm dependency update "${CHART_DIR}/" &&
             helm package "${CHART_DIR}/" --version "${CHART_VERSION}" --app-version "${CHART_APP_VERSION}"
@@ -393,8 +379,6 @@ jobs:
 
           TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}"
           echo "Pushing ${PACKAGE} to ${TARGET}..."
-          # Capture as well as stream: a registry that refuses the push says
-          # whether it was the credential, the quota or an immutable tag.
           if ! PUSH_OUTPUT="$(helm push "${PACKAGE}" "${TARGET}" 2>&1)"; then
             echo "${PUSH_OUTPUT}" >&2
             echo "::error title=Chart push::${TARGET} refused ${PACKAGE}."
@@ -412,13 +396,8 @@ jobs:
           fi
           echo "${PUSH_OUTPUT}"
 
-          # GitLab's Chart:Push mirrors a *stable* push into the dev channel so a
-          # chart that was promoted still resolves for consumers pinned to the
-          # candidate repository. The guard is the same one GitLab uses: a
-          # candidate already lives in dev, so only a push whose target is not
-          # the dev repository is mirrored. The mirror is a convenience -- the
-          # bytes it duplicates are published above -- so a failure is a notice,
-          # not an error.
+          # Mirror a stable push into the dev channel so consumers pinned there
+          # still resolve it. A convenience: a failed mirror warns, not fails.
           MIRROR_STATE="not applicable"
           if [[ -n "${CHART_DEV_REPOSITORY}" && "${CHART_REPOSITORY}" != "${CHART_DEV_REPOSITORY}" ]]; then
             DEV_TARGET="oci://${REGISTRY_HOST}/${CHART_DEV_REPOSITORY}"
@@ -428,9 +407,6 @@ jobs:
               MIRROR_STATE="\`${DEV_TARGET}\`"
             else
               echo "::warning title=Chart push::Optional dev mirror push failed for '${PACKAGE}'. The chart is published at ${TARGET}."
-              # A consumer pinned to the candidate repository will not resolve
-              # this version, so the reader has to be told even though the job
-              # goes green.
               MIRROR_STATE="⚠️ failed — consumers pinned to \`${CHART_DEV_REPOSITORY}\` will not resolve \`${CHART_VERSION}\`"
             fi
           fi

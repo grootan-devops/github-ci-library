@@ -1,8 +1,7 @@
 name: Go / Dependency, Build & Test
 
-# Counterpart of the GitLab Go module: Go:Dependency:Download -> build + test.
-# The module cache is resolved once; build and test then run in parallel against
-# it, both hard-dependent on that resolution.
+# GitLab counterpart: Go:Dependency:Download -> build + test.
+# Modules resolve once; build and test run in parallel against that cache.
 
 on:
   workflow_call:
@@ -57,9 +56,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # hashFiles returns "" when go.sum is absent, collapsing the key
-      # onto the bare `go-` restore-keys prefix — a half-populated module tree
-      # every later run would then prefix-match, valid go.sum or not.
+      # hashFiles returns "" for a missing go.sum, collapsing the key onto the bare `go-` prefix.
       - name: Compute Module Cache Key
         id: key
         run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
@@ -76,17 +73,11 @@ jobs:
         id: download
         run: |
           set -uo pipefail
-          # Capture as well as stream: `go mod download` names the module and
-          # the checksum or proxy error that stopped it, and that sentence is
-          # the whole answer. An exit code on its own is not.
           go mod download 2>&1 | tee "${RUNNER_TEMP}/go-mod-download.log"
           exit "${PIPESTATUS[0]}"
 
-      # GitLab inherits `when: always` here, which is safe there because a cache
-      # key is rewritable — a partial tree from a failed resolve is overwritten
-      # by the next green run. GitHub entries are immutable, so the same write
-      # would freeze a half-populated tree under a perfectly valid key until
-      # go.sum changes, and the build and test jobs would keep restoring it.
+      # Cache entries are immutable: saving after a failed resolve would freeze a
+      # half-populated tree under a valid key until go.sum changes.
       - name: Save Module Cache
         if: ${{ success() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -94,10 +85,6 @@ jobs:
           path: .go-cache
           key: ${{ steps.key.outputs.key }}
 
-      # Cache hit or miss is worth stating on a green run: it is what explains
-      # the job's duration, and a key that never hits points at a go.sum that
-      # keeps changing. On a failure the resolution error goes here too, since
-      # no other job in the graph will report it.
       - name: Publish Dependency Summary
         if: always()
         env:
@@ -163,8 +150,7 @@ jobs:
         id: compile
         run: |
           set -uo pipefail
-          # Braces, not a bare pipe: a build command may end in its own
-          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
           { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
           exit "${PIPESTATUS[0]}"
 
@@ -189,8 +175,6 @@ jobs:
             echo "### 📦 Go build"
             echo ""
             if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
-              # "No binaries were produced" is a symptom. The compiler already
-              # named the file and the line, so that is what goes here.
               echo "❌ \`${BUILD_COMMAND}\` failed. The compiler reported:"
               echo ""
               echo '```'
@@ -260,15 +244,11 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p "${TEST_REPORT_DIR}"
-          # Braces, not a bare pipe: the default test command ends in its own
-          # redirect into the JUnit file, and `cmd > file | tee` would hand tee
-          # an empty stream.
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
           { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
           exit "${PIPESTATUS[0]}"
 
-      # junit-report.sh reports the cases a JUnit file records. A test command
-      # that never wrote one — a compile error, a missing runner — leaves it
-      # nothing to report, so its own output has to be what explains the job.
+      # junit-report.sh has nothing to show when the runner never wrote a JUnit file.
       - name: Explain Test Runner Failure
         if: ${{ failure() && steps.unit.outcome == 'failure' }}
         env:

@@ -1,14 +1,13 @@
 name: CD · Tag, Release & Notify
+run-name: "CD · ${{ github.ref_name }} · #${{ github.run_number }}"
 
-# Release side of the library's own pipeline. Merging to master tags the
-# repository, publishes the GitHub Release with the changelog and migration
-# sections, and posts the Microsoft Teams Adaptive Card.
+# Release side of the library's own pipeline: merging to master tags the repo,
+# publishes the GitHub Release, and posts the Teams card.
 
 on:
   push:
     branches: [master, main]
-    # A change confined to the pipeline itself is verified by the pull request
-    # that introduced it. It must never cut a release on its own.
+    # A pipeline-only change is verified by its own PR; it must never cut a release.
     paths-ignore:
       - ".github/**"
   workflow_dispatch:
@@ -23,12 +22,8 @@ permissions:
   checks: write
 
 jobs:
-  # GitLab refuses a release from a manual pipeline outright
-  # (`.release-rules`: `$CI_PIPELINE_SOURCE =~ /^(web|api)$/ → when: never`).
-  # A workflow_dispatch is worse still, because it can target ANY ref — a
-  # release cut from a feature branch would tag and publish work that never
-  # passed the pull request. Keep the deliberate-release button, but refuse
-  # any ref that is not the default branch.
+  # workflow_dispatch can target ANY ref, so a release cut from a feature branch
+  # would publish work that never passed a PR. Refuse any non-default ref.
   guard-ref:
     name: Verify Ref
     if: ${{ github.event_name == 'workflow_dispatch' }}
@@ -59,15 +54,12 @@ jobs:
   version:
     name: Version
     needs: [guard-ref]
-    # guard-ref is skipped on a push, and a skipped dependency would skip this
-    # too — so accept skipped, refuse only an actual failure.
+    # guard-ref is skipped on a push, which would skip this job too: accept skipped, refuse failure.
     if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
     uses: ./.github/workflows/self-version.yml
     secrets: inherit
 
-  # Runs again on master so the release is gated on the same guards the pull
-  # request passed, and so the changelog and migration sections it extracts
-  # become the release notes.
+  # Re-runs on master: gates the release and extracts the release notes.
   check:
     name: Release Guards
     needs: version

@@ -1,24 +1,7 @@
 #!/usr/bin/env bash
-# Publishes JUnit XML as a GitHub check run, a job summary, or both.
-#
-# Replaces a third-party JUnit-reporting action. Organisations commonly allow
-# only GitHub-authored and Marketplace-verified actions, and a blocked action
-# fails the whole run at startup, before a single job begins — so the library
-# reports its own results through the Checks API using the yq, jq and gh that
-# already ship in the build container.
-#
-# Required environment:
-#   REPORT_GLOB       glob matching the JUnit XML reports to publish
-#   CHECK_NAME        title of the check run and of the summary section
-#
-# Optional environment:
-#   GH_TOKEN          token with checks:write. Without it the check run is
-#                     skipped and only the job summary is written.
-#   JOB_SUMMARY       true  writes a summary table (default true)
-#   FAIL_ON_FAILURE   true  exits non-zero when a test failed (default false)
-#   ANNOTATION_LEVEL  failure | warning | notice (default failure)
-#   MAX_ANNOTATIONS   cap on annotations sent (default 50, GitHub's per-request limit)
-#   MAX_LISTED_FAILURES  cap on failures listed in the job summary (default 20)
+# Publishes JUnit XML as a GitHub check run and/or a job summary, via the Checks API.
+# GH_TOKEN needs checks:write; without it only the job summary is written.
+# MAX_ANNOTATIONS caps at 50, GitHub's per-request annotation limit.
 set -euo pipefail
 
 : "${REPORT_GLOB:?REPORT_GLOB is required}"
@@ -47,9 +30,8 @@ if [[ ${#REPORTS[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# yq reads XML natively, so the reports are parsed rather than pattern-matched.
-# Attribute names arrive with yq's `+@` prefix. `[] // []` normalises the
-# single-element case, which XML-to-JSON collapses into an object.
+# yq prefixes XML attributes with `+@`; XML-to-JSON collapses a single element
+# into an object, which `arr` normalises.
 # shellcheck disable=SC2016 # a jq program, not a shell expansion
 NORMALISE='
   def arr: if . == null then [] elif type == "array" then . else [.] end;
@@ -79,7 +61,6 @@ PASSED=$(( TOTAL - SKIPPED - FAILED ))
 
 echo "Parsed ${TOTAL} test case(s): ${PASSED} passed, ${FAILED} failed, ${SKIPPED} skipped."
 
-# ------------------------------------------------------------- job summary
 if [[ "${JOB_SUMMARY}" == "true" ]]; then
   {
     echo "### ${CHECK_NAME}"
@@ -89,9 +70,6 @@ if [[ "${JOB_SUMMARY}" == "true" ]]; then
     echo "| ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} |"
     echo ""
     if [[ "${FAILED}" -gt 0 ]]; then
-      # A broken suite can fail in the hundreds. The counts above are the
-      # answer; this is a bounded sample to recognise the shape of it by, and
-      # the uploaded JUnit XML carries every case.
       echo "<details><summary>Failures (showing up to ${MAX_LISTED_FAILURES} of ${FAILED})</summary>"
       echo ""
       jq -r --argjson max "${MAX_LISTED_FAILURES}" '[.[] | select(.failure != null)] | .[0:$max] | .[]
@@ -107,7 +85,6 @@ if [[ "${JOB_SUMMARY}" == "true" ]]; then
   } >> "${GITHUB_STEP_SUMMARY}"
 fi
 
-# ---------------------------------------------------------------- check run
 if [[ -n "${GH_TOKEN:-}" ]]; then
   ANNOTATIONS="$(
     jq -c --arg level "${ANNOTATION_LEVEL}" --argjson max "${MAX_ANNOTATIONS}" '

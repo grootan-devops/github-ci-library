@@ -9,7 +9,7 @@ CHART_DIR="${CHART_DIR:-./chart}"
 if [[ -z "${CHART_VERSION:-}" ]]; then
   if [[ -f "${PROJECT_PATH}/${CHART_DIR}/Chart.yaml" ]]; then
     echo "Local chart present; nothing published to collide with."
-    { echo "### ⎈ Chart version"; echo; echo "✅ Working-tree chart present, no published version to collide with."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+    { echo "### ⎈ Chart version"; echo; echo "✅ Working-tree chart present; no published version to collide with."; echo; } >> "${GITHUB_STEP_SUMMARY}"
     exit 0
   fi
   echo "::error title=Chart::No chart-version supplied and no chart at ${PROJECT_PATH}/${CHART_DIR}/Chart.yaml."
@@ -23,8 +23,7 @@ if [[ ! "${CHART_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 0
 fi
 
-# A login that fails aborts the guard, and "exit code 1" would leave the reader
-# unable to tell a bad credential from an unreachable registry. Helm knows.
+# Capture helm's words: a bad credential and an unreachable registry both exit 1.
 if ! LOGIN_OUTPUT="$(printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin 2>&1)"; then
   echo "::error title=Chart::Could not authenticate to ${REGISTRY_HOST}."
   echo "${LOGIN_OUTPUT}" >&2
@@ -55,8 +54,8 @@ fi
 
 if [[ "${EXISTS}" == "true" ]]; then
   echo "::error title=Chart::Version '${CHART_VERSION}' already exists at ${TARGET}. Bump the chart version."
-  { echo "### ⎈ Chart version"; echo; echo "❌ \`${TARGET}:${CHART_VERSION}\` is already published. Bump the chart version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+  { echo "### ⎈ Chart version"; echo; echo "❌ \`${TARGET}:${CHART_VERSION}\` is already taken by a published chart. Bump the chart version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
-echo "Chart version '${CHART_VERSION}' is available at ${TARGET}."
-{ echo "### ⎈ Chart version"; echo; echo "✅ \`${TARGET}:${CHART_VERSION}\` is available."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+echo "Chart version '${CHART_VERSION}' is unpublished at ${TARGET}; the release may push it."
+{ echo "### ⎈ Chart version"; echo; echo "✅ \`${TARGET}:${CHART_VERSION}\` is unpublished — free to push."; echo; } >> "${GITHUB_STEP_SUMMARY}"

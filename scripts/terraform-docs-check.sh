@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# Fails when a Terraform README.md is out of date with its module inputs.
-#
-# Port of the GitLab `Terraform:Check:README` job: every directory under
-# modules/ plus the repository root.
-#
-# Optional environment:
-#   TF_README_FILE_NAME   default README.md
+# Fails when a Terraform README.md is out of date with its module inputs — every
+# directory under modules/ plus the root. GitLab counterpart: `Terraform:Check:README`.
 set -euo pipefail
 
 : "${TF_README_FILE_NAME:=README.md}"
@@ -24,8 +19,7 @@ check_dir() {
 
   local BEFORE AFTER OUTPUT
   BEFORE=$(md5sum "${README_FILE}")
-  # terraform-docs aborts on a module it cannot parse. Its own words say which
-  # file and which line; "the docs check failed" says neither.
+  # Capture terraform-docs' own words: a module it cannot parse is not a stale README.
   if ! OUTPUT="$(terraform-docs markdown table "${DIR}" --output-file "${TF_README_FILE_NAME}" --required 2>&1)"; then
     echo "${OUTPUT}" >&2
     echo "::error title=Terraform docs::terraform-docs could not read ${DIR}."

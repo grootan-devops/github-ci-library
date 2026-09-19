@@ -1,13 +1,8 @@
 name: Check / Release Prerequisites
 
-# Counterpart of the GitLab `check` stage: Tag:Tag Existence,
-# Changelog:Check Existence, Migration:Check Existence, Chart:Check Existence,
-# Chart:Check:Dependency and Image:Check Existence.
-#
-# A `discover` job decides which guards actually apply to this repository and
-# emits them as a matrix, so a guard whose subject does not exist never appears
-# in the run graph at all — no permanently skipped chart or image jobs in a
-# repository that has neither.
+# Counterpart of the GitLab `check` stage. `discover` emits only the guards
+# whose subject exists here, so a guard that does not apply never appears in
+# the run graph rather than showing up permanently skipped.
 
 on:
   workflow_call:
@@ -53,7 +48,6 @@ on:
         description: "Run the MIGRATION.md release guard. Disable for artifacts with no migration contract."
 
 jobs:
-  # ------------------------------------------------------------- discovery
   discover:
     name: Discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -81,7 +75,7 @@ jobs:
           set -euo pipefail
           cd "${PROJECT_PATH}"
 
-          TARGETS='[{"name":"Git Tag","subject":"tag","script":"tag-check.sh"}]'
+          TARGETS='[{"name":"Git Tag Unused","subject":"tag","script":"tag-check.sh"}]'
 
           if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
             TARGETS="$(jq -c '. + [{"name":"Changelog","subject":"changelog","script":"changelog-check.sh"}]' <<< "${TARGETS}")"
@@ -94,18 +88,15 @@ jobs:
           fi
 
           if [[ -n "${CHART_NAME}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Chart Not Published","subject":"chart-version","script":"chart-version-check.sh"},{"name":"Chart Dependencies","subject":"chart-dependency","script":"chart-dependency-check.sh"}]' <<< "${TARGETS}")"
+            TARGETS="$(jq -c '. + [{"name":"Chart Version Unused","subject":"chart-version","script":"chart-version-check.sh"},{"name":"Chart Dependencies","subject":"chart-dependency","script":"chart-dependency-check.sh"}]' <<< "${TARGETS}")"
           fi
 
           if [[ -n "${IMAGE_TAG}" && -n "${IMAGE_REPOSITORY}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Image Not Published","subject":"image-tag","script":"image-tag-check.sh"}]' <<< "${TARGETS}")"
+            TARGETS="$(jq -c '. + [{"name":"Image Tag Unused","subject":"image-tag","script":"image-tag-check.sh"}]' <<< "${TARGETS}")"
           fi
 
-          # No job summary here on purpose: the guards it would list are the
-          # jobs the run graph is about to show by name anyway.
           echo "include=${TARGETS}" >> "${GITHUB_OUTPUT}"
 
-  # ---------------------------------------------------------------- guards
   guard:
     name: "${{ matrix.name }}"
     needs: discover
@@ -187,7 +178,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # --------------------------------------------------------------- verdict
   verdict:
     name: Verdict
     if: always()

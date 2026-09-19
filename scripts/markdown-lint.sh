@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
 # markdownlint-cli2 with the organisation's baseline rule exclusions.
-#
 # Port of the GitLab `.MD:Lint` job template.
-#
-# Optional environment:
-#   LINT_MD_FILES        files/globs to lint (default: every tracked *.md)
-#   MD_LINT_IGNORE_RULE  space-separated extra rules to exclude, e.g. "MD033 MD041"
+# Env: LINT_MD_FILES (globs, default every tracked *.md), MD_LINT_IGNORE_RULE (extra rules).
 set -euo pipefail
 
 : "${LINT_MD_FILES:=}"
@@ -17,14 +13,11 @@ trap 'rm -f "${MARKDOWNLINT_CONFIG}"; rmdir "${MARKDOWNLINT_CONFIG_DIR}"' EXIT
 
 {
   echo "config:"
-  # MD013 line length, MD024 duplicate headings, MD007 list indent and MD047
-  # trailing newline conflict with keepachangelog.com formatting.
+  # These four conflict with keepachangelog.com formatting.
   echo "  MD013: false"
   echo "  MD024: false"
   echo "  MD007: false"
   echo "  MD047: false"
-  # MD060 was introduced after the previous mdl baseline and would make this
-  # migration unexpectedly enforce table-column alignment.
   echo "  MD060: false"
   for RULE in ${MD_LINT_IGNORE_RULE}; do
     echo "  ${RULE}: false"

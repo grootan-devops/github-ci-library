@@ -1,19 +1,8 @@
 #!/usr/bin/env bash
 # Unified Trivy security, misconfiguration, SBOM and license scanner.
-#
-# Port of the GitLab `.scan-script` job template. Behaviour, exit codes, report
-# layout and the ignored-findings contract are identical; only the artifact and
-# summary plumbing is GitHub Actions specific.
-#
-# Required environment:
-#   SCAN_TYPE                 image | config | license | sbom
-#   CONFIG_TYPE               chart | terraform   (config scans only)
-#   TRIVY_SCAN_REPORT_NAME    report basename, e.g. image_trivy_scan_report
-#
-# Exit codes:
-#   0  clean
-#   1  errors (active fixable findings, stale or unjustified suppressions)
-#   2  warnings only (unfixable findings, justified suppressions)
+# Port of the GitLab `.scan-script` job template; same exit codes and contract.
+# Exit codes: 0 clean, 1 errors (fixable findings, stale or unjustified
+# suppressions), 2 warnings only (unfixable findings, justified suppressions).
 # Nameref indirection and jq-driven word splitting are deliberate throughout.
 # shellcheck disable=SC2034,SC2178,SC2207
 set -uo pipefail
@@ -92,9 +81,7 @@ print_separator() {
   echo "========================================"
 }
 
-# The scan's own summary is written at the very end, so a run that never gets
-# that far — a bad SCAN_TYPE, a Trivy that produced no report — would leave the
-# job summary blank. These failures get a section of their own instead.
+# Early failures never reach publish_step_summary, so they write their own section.
 summarise_abort() {
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
@@ -185,10 +172,7 @@ validate_config_type() {
   fi
   log_info "Config type: ${CONFIG_TYPE}"
 }
-# Skipping the Java DB update is only safe once a Java DB is actually cached.
-# Trivy treats "skip the update" on a cold cache as fatal rather than as a cue
-# to fetch it, so a first run against any image containing Java dies with
-# "The first run cannot skip downloading Java DB". Skip only what is present.
+# Trivy treats --skip-java-db-update on a cold cache as fatal, so skip only what is cached.
 TRIVY_ARGS=""
 if [[ -n "${TRIVY_CACHE_DIR:-}" ]] && compgen -G "${TRIVY_CACHE_DIR}/java-db/*" > /dev/null 2>&1; then
   TRIVY_ARGS="--skip-java-db-update"
@@ -198,8 +182,6 @@ build_trivy_command() {
   case "${SCAN_TYPE}" in
     image)
       if [[ -n "${IMAGE_REF}" ]]; then
-        # An exact reference — preferably registry/repo@sha256:... — pins the scan
-        # to the bytes the build produced, with no tag-resolution ambiguity.
         log_info "Scanning pinned image reference: ${IMAGE_REF}" >&2
         BASE_CMD="trivy image --scanners vuln ${TRIVY_ARGS} ${IMAGE_REF}"
       else
@@ -249,9 +231,6 @@ execute_trivy_scan() {
     fi
   fi
 
-  # Capture Trivy's own diagnostics. "Trivy scan failed" on its own sends the
-  # reader to the raw log to find the sentence that actually explains it, and
-  # into the job summary it goes too, so the cause is where the failure is.
   local TRIVY_LOG="trivy-scan.log"
   if ! ${TRIVY_CMD} --format json --ignorefile .trivyignore --skip-version-check --timeout "${TRIVY_TIMEOUT}" --output "${TRIVY_SCAN_REPORT_NAME}.json" 2>&1 | tee "${TRIVY_LOG}"; then
     local REASON
@@ -722,8 +701,7 @@ print_license_summary() {
 print_array_summary() {
   local TITLE="${1}"
   local ARRAY_NAME="${2}"
-  # Optional: three of the six call sites pass no reason map, and `set -u`
-  # makes a bare ${3} fatal rather than empty.
+  # ${3:-}, not ${3}: set -u makes a bare third arg fatal at call sites that omit it.
   local REASON_ARRAY="${3:-}"
   local -n _PRINT_REF="${ARRAY_NAME}"
   local COUNT=${#_PRINT_REF[@]}
@@ -1037,11 +1015,6 @@ setup_temp_files() {
   trap cleanup EXIT
 }
 
-# The report tables count what Trivy found. This one counts what is left to act
-# on once the ignore file has been applied, which is what decided the verdict —
-# and it stays one table however many findings there are, where a truncated list
-# would hide the only number that matters. "No longer present" is the stale
-# suppression case: ignored-cves.yml has rotted and is now failing the scan.
 generate_action_table() {
   case "${SCAN_TYPE}" in
     license)
@@ -1063,9 +1036,6 @@ generate_action_table() {
   esac
 }
 
-# The scan already writes a markdown summary file (the same one that is attached
-# to the release); the job summary reuses it verbatim so the run page and the
-# release notes never disagree.
 publish_step_summary() {
   if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
     return
@@ -1092,8 +1062,6 @@ publish_step_summary() {
     generate_action_table
     if [[ ${#REASONS[@]} -gt 0 ]]; then
       echo ""
-      # Reasons say what to do about each bucket, so on a failure they are the
-      # remedy and belong open, not folded away behind a disclosure triangle.
       if [[ ${EXIT_CODE} -eq 1 ]]; then
         printf -- '- %s\n' "${REASONS[@]}"
       else
@@ -1105,8 +1073,6 @@ publish_step_summary() {
       fi
     fi
     echo ""
-    # Every individual finding is in the report the run uploads; the summary
-    # points at it rather than reprinting a list nobody reads in a table.
     echo "Full findings: \`${TRIVY_SCAN_REPORT_NAME}.md\` in this run's artifacts."
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"

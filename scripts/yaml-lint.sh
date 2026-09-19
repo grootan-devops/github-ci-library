@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 # yamllint, using the project's own config when it ships one.
-#
 # Port of the GitLab `.YAML:Lint` job template.
-#
-# Optional environment:
-#   LINT_YAML_FILES   files/globs to lint (default: every tracked *.yml / *.yaml)
+# Env: LINT_YAML_FILES (globs, default every tracked *.yml / *.yaml).
 set -euo pipefail
 
 : "${LINT_YAML_FILES:=}"

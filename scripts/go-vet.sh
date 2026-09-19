@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # go vet, honouring a `// govet:ignore` pragma on the line above a finding.
-#
-# Port of the GitLab `Go:Vet` job. go vet has no native suppression mechanism,
-# so findings are filtered against the preceding source line.
+# Port of the GitLab `Go:Vet` job.
+# go vet has no native suppression, so findings are filtered on the preceding line.
 set -euo pipefail
 
 GO_VET_OUTPUT=$(go vet ./... 2>&1 || true)
@@ -37,8 +36,6 @@ summarise() {
 if grep -qv '^[[:space:]]*$' <<<"${GO_VET_FILTERED_OUTPUT}"; then
   printf "%s" "${GO_VET_FILTERED_OUTPUT}" >&2
   echo "::error title=go vet::go vet reported findings. Fix them, or annotate an accepted one with '// govet:ignore' on the preceding line."
-  # The findings are go vet's own words, and the suppressed ones have already
-  # been filtered out — so what lands here is exactly what has to be fixed.
   summarise "### 🐹 Go lint: vet
 
 ❌ \`go vet ./...\` reported findings:

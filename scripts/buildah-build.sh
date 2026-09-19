@@ -1,24 +1,7 @@
 #!/usr/bin/env bash
-# Builds a minimal OCI image from a base image with buildah, installing only the
-# packages the image needs and then removing the package manager itself.
-#
-# Port of the GitLab buildah Image:Build job. The dnf --installroot flow, the
-# protected-package overrides, the documentation/systemd/PAM strip and the final
-# non-root USER 10001 are unchanged.
-#
-# Required environment:
-#   BASE_IMAGE_REPO / BASE_IMAGE_TAG    base image to start from
-#   IMAGE_NAME                          name to commit the image as
-#   REGISTRY_USERNAME / REGISTRY_PASSWORD
-# Optional:
-#   CONTAINER_ENV_VARS   space-separated names of env vars to bake in
-#   INSTALL_PKGS         packages to microdnf install
-#   REQUIRED_RPMS        RPM URLs/paths to rpm -Uvh
-#   REQUIRED_PKGS        packages to keep when the package manager is removed
-#   FORCE_REMOVE_PKGS    extra packages to remove
-#   CONTAINER_PATH_ENV   prepended to the image's PATH
-#   CONTAINER_ENTRYPOINT / CONTAINER_CMD
-#   BUILDAH_SCRIPT_FILE_NAME  project hook sourced mid-build (default buildah.sh)
+# Builds a minimal OCI image with buildah: install only what the image needs,
+# then remove the package manager and commit as non-root UID 10001.
+# Port of the GitLab buildah Image:Build job.
 set -euo pipefail
 
 : "${BASE_IMAGE_REPO:?BASE_IMAGE_REPO must be set}"
@@ -72,8 +55,7 @@ if [[ -n "${REQUIRED_RPMS}" ]]; then
   buildah run "${BASE_CONTAINER}" bash -c "rpm -Uvh --excludedocs ${REQUIRED_RPMS}"
 fi
 
-# Project hook: runs with BASE_CONTAINER and CONTAINER_MOUNT in scope so a
-# project can copy its own artifacts in without owning the whole build.
+# Sourced, not executed: the hook needs BASE_CONTAINER and CONTAINER_MOUNT in scope.
 if [[ -f "./${BUILDAH_SCRIPT_FILE_NAME}" ]]; then
   echo "Sourcing project hook ./${BUILDAH_SCRIPT_FILE_NAME}"
   # shellcheck disable=SC1090 # path is project-supplied by design
@@ -98,8 +80,7 @@ if [[ -n "${CONTAINER_CMD}" ]]; then
   buildah config --cmd "${CONTAINER_CMD}" "${BASE_CONTAINER}"
 fi
 
-# dnf protects these from removal; the final image runs no package manager and
-# no init system, so the protections are dropped before the purge.
+# dnf protects these from removal; the final image has no package manager or init.
 rm -f "${CONTAINER_MOUNT}"/etc/dnf/protected.d/systemd.conf
 rm -f "${CONTAINER_MOUNT}"/etc/dnf/protected.d/pam.conf
 rm -f "${CONTAINER_MOUNT}"/etc/dnf/protected.d/bash.conf

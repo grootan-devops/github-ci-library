@@ -1,7 +1,6 @@
 name: Java / Dependency, Build & Test
 
-# Counterpart of the GitLab Java module: Java:Dependency:Download ->
-# Java:Build + Java:Test:Unit, on the organisation's JDK build container.
+# GitLab counterpart: Java:Dependency:Download -> Java:Build + Java:Test:Unit.
 
 on:
   workflow_call:
@@ -59,9 +58,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # hashFiles returns "" when pom.xml is absent, collapsing the key
-      # onto the bare `m2-` restore-keys prefix — a half-populated repository
-      # every later run would then prefix-match, valid pom.xml or not.
+      # hashFiles returns "" for a missing pom.xml, collapsing the key onto the bare `m2-` prefix.
       - name: Compute Dependency Cache Key
         id: key
         run: echo "key=m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
@@ -78,17 +75,11 @@ jobs:
         id: resolve
         run: |
           set -uo pipefail
-          # Capture as well as stream: Maven names the artifact coordinate and
-          # the repository that refused it, and that sentence is the whole
-          # answer. An exit code on its own is not.
           mvn -B dependency:go-offline -q 2>&1 | tee "${RUNNER_TEMP}/mvn-resolve.log"
           exit "${PIPESTATUS[0]}"
 
-      # GitLab inherits `when: always` here, which is safe there because a cache
-      # key is rewritable — a partial tree from a failed resolve is overwritten
-      # by the next green run. GitHub entries are immutable, so the same write
-      # would freeze a half-populated tree under a perfectly valid key until
-      # pom.xml changes, and the build and test jobs would keep restoring it.
+      # Cache entries are immutable: saving after a failed resolve would freeze a
+      # half-populated repository under a valid key until pom.xml changes.
       - name: Save Maven Repository
         if: ${{ success() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -96,10 +87,6 @@ jobs:
           path: .m2
           key: ${{ steps.key.outputs.key }}
 
-      # Cache hit or miss is worth stating on a green run: it is what explains
-      # the job's duration, and a key that never hits points at a pom.xml that
-      # keeps changing. On a failure Maven's own words go here too, since no
-      # other job in the graph will report them.
       - name: Publish Dependency Summary
         if: always()
         env:
@@ -165,8 +152,7 @@ jobs:
         id: compile
         run: |
           set -uo pipefail
-          # Braces, not a bare pipe: a build command may end in its own
-          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
           { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
           exit "${PIPESTATUS[0]}"
 
@@ -192,8 +178,6 @@ jobs:
             echo "### 📦 Java build"
             echo ""
             if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
-              # "No artifacts were produced" is a symptom. javac already named
-              # the file and the line, so that is what goes here.
               echo "❌ \`${BUILD_COMMAND}\` failed. Maven reported:"
               echo ""
               echo '```'
@@ -262,14 +246,11 @@ jobs:
         id: unit
         run: |
           set -uo pipefail
-          # Braces, not a bare pipe: a test command may end in its own
-          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
           { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
           exit "${PIPESTATUS[0]}"
 
-      # junit-report.sh reports the cases Surefire records. A run that never got
-      # that far — a compile error in the test sources, a missing plugin —
-      # leaves it nothing to report, so Maven's own output explains the job.
+      # junit-report.sh has nothing to show when Surefire never wrote a report.
       - name: Explain Test Runner Failure
         if: ${{ failure() && steps.unit.outcome == 'failure' }}
         env:

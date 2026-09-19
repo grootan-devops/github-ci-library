@@ -1,7 +1,6 @@
 name: Go / Lint
 
-# Counterpart of the GitLab Go:Fmt, Go:Vet, Go:Lint and Go:Security:Scan jobs.
-# One matrix leg per check, all running in parallel off the shared module cache.
+# GitLab counterpart: Go:Fmt, Go:Vet, Go:Lint, Go:Security:Scan — one matrix leg each.
 
 on:
   workflow_call:
@@ -48,8 +47,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # Not only for `vet` any more: every leg reports through run_linted, so
-      # the shared summary helper has to be on disk whichever one is running.
       - name: Checkout CI Library
         uses: actions/checkout@v7
         with:
@@ -65,10 +62,6 @@ jobs:
           key: go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) }}
           restore-keys: go-
 
-      # Each leg now reports its own findings into the job summary rather than
-      # leaving an exit code behind: go-vet.sh writes its own section, and the
-      # single-command legs go through run_linted, which is what markdown-lint
-      # and yaml-lint already use.
       - name: Run ${{ matrix.linter }}
         env:
           LINTER: ${{ matrix.linter }}
@@ -79,8 +72,6 @@ jobs:
           source "${GITHUB_WORKSPACE}/.ci-library/scripts/lint-summary.sh"
           case "${LINTER}" in
             fmt)
-              # Two commands and a diff, so not a run_linted shape: what has to
-              # reach the summary is the diff `go fmt` produced, not its stdout.
               go fmt ./...
               DRIFT="$(git --no-pager diff)"
               if [[ -n "${DRIFT}" ]]; then

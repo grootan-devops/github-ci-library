@@ -1,9 +1,7 @@
 name: Python / Dependency, Build & Test
 
-# Counterpart of the GitLab Python module: Python:Dependency:Download ->
-# Python:Build + Python:Test:Unit. Dependencies resolve once and are shared;
-# build and test then run in parallel, both hard-dependent on that resolution so
-# a dependency failure costs one job instead of three.
+# GitLab counterpart: Python:Dependency:Download -> Python:Build + Python:Test:Unit.
+# Dependencies resolve once; build and test run in parallel against that cache.
 
 on:
   workflow_call:
@@ -41,8 +39,6 @@ env:
   UV_VENV_RELOCATABLE: "1"
 
 jobs:
-  # Warms the dependency cache once. Everything downstream pulls it read-only,
-  # exactly as the GitLab `policy: pull-push` / `policy: pull` split does.
   dependency:
     name: Dependency Download
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -60,9 +56,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # hashFiles returns "" when uv.lock is absent, collapsing the key
-      # onto the bare `py-` restore-keys prefix — a half-populated environment
-      # every later run would then prefix-match, valid uv.lock or not.
+      # hashFiles returns "" for a missing uv.lock, collapsing the key onto the bare `py-` prefix.
       - name: Compute Dependency Cache Key
         id: key
         run: echo "key=py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
@@ -79,17 +73,11 @@ jobs:
         id: resolve
         run: |
           set -uo pipefail
-          # Capture as well as stream: uv names the package and the constraint
-          # it could not satisfy, and that sentence is the whole answer. An
-          # exit code on its own is not.
           uv sync --frozen --no-install-project --no-install-workspace 2>&1 | tee "${RUNNER_TEMP}/uv-sync.log"
           exit "${PIPESTATUS[0]}"
 
-      # GitLab inherits `when: always` here, which is safe there because a cache
-      # key is rewritable — a partial tree from a failed resolve is overwritten
-      # by the next green run. GitHub entries are immutable, so the same write
-      # would freeze a half-populated tree under a perfectly valid key until
-      # uv.lock changes, and the build and test jobs would keep restoring it.
+      # Cache entries are immutable: saving after a failed resolve would freeze a
+      # half-populated tree under a valid key until uv.lock changes.
       - name: Save uv Cache
         if: ${{ success() && steps.cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
@@ -97,10 +85,6 @@ jobs:
           path: .uv-cache
           key: ${{ steps.key.outputs.key }}
 
-      # Cache hit or miss is worth stating on a green run: it is what explains
-      # the job's duration, and a key that never hits points at a uv.lock that
-      # keeps changing. On a failure uv's own words go here too, since no other
-      # job in the graph will report them.
       - name: Publish Dependency Summary
         if: always()
         env:
@@ -171,8 +155,7 @@ jobs:
         id: compile
         run: |
           set -uo pipefail
-          # Braces, not a bare pipe: a build command may end in its own
-          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
           { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
           exit "${PIPESTATUS[0]}"
 
@@ -196,8 +179,6 @@ jobs:
             echo "### 📦 Python build"
             echo ""
             if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
-              # "No artifacts were produced" is a symptom. The build backend
-              # already named the file and the reason, so that is what goes here.
               echo "❌ \`${BUILD_COMMAND}\` failed. It reported:"
               echo ""
               echo '```'
@@ -270,15 +251,11 @@ jobs:
         run: |
           set -uo pipefail
           mkdir -p "${TEST_REPORT_DIR}" coverage
-          # Braces, not a bare pipe: a test command may end in its own redirect
-          # into the JUnit file, and `cmd > file | tee` would hand tee an empty
-          # stream.
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
           { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
           exit "${PIPESTATUS[0]}"
 
-      # junit-report.sh reports the cases a JUnit file records. A test command
-      # that never wrote one — a collection error, a missing plugin — leaves it
-      # nothing to report, so its own output has to be what explains the job.
+      # junit-report.sh has nothing to show when the runner never wrote a JUnit file.
       - name: Explain Test Runner Failure
         if: ${{ failure() && steps.unit.outcome == 'failure' }}
         env:

@@ -1,43 +1,12 @@
 name: Image / Docker Build, Push & Promote
 
 # Counterpart of the GitLab Image:Build, Image:Push and Image:Promote jobs.
+# `build` pushes the candidate as it builds; `promote` retags it for release.
+# `build` runs on the runner, not in the build container: it needs buildkit.
 #
-# ⚠️ THE SCAN IS THE CALLER'S RESPONSIBILITY, AND IT IS NOT OPTIONAL.
-#
-# GitLab's Image:Build saved the image to a tar that Image:Push and Image:Scan
-# both consumed, so nothing reached a registry before it had been scanned. This
-# port deliberately drops the tar — the scan pulls the candidate back from the
-# registry by digest instead — which means `build` pushes as it builds, and the
-# candidate exists in the dev repository from that moment on.
-#
-# Nothing in this file can stop a vulnerable candidate being promoted: `promote`
-# has no `needs`, because the scan job lives in the caller's workflow, not here.
-# The caller MUST put it between the two:
-#
-#   build:    uses: <org>/ci-library/.github/workflows/docker.yml@<ref>
-#   scan:     needs: build
-#             uses: <org>/ci-library/.github/workflows/scan.yml@<ref>
-#             with: { scan-type: image, image-ref: "${{ needs.build.outputs.image-ref-digest }}" }
-#   promote:  needs: [build, scan]          # <-- omit `scan` here and a failing
-#             uses: <org>/ci-library/.github/workflows/docker.yml@<ref>
-#             with: { is-release: true, ... }
-#
-# Omitting `scan` from promote's `needs` is silent: the promotion succeeds and
-# the vulnerable image is tagged into production. Pushing the candidate to the
-# dev repository is not the exposure — promoting it is.
-#
-# Unlike every other workflow in this library, the build job does not run inside
-# the organisation build container: building an image needs the daemon/buildkit
-# on the runner itself.
-#
-# The Dockerfile lint is deliberately NOT here. A caller depends on this whole
-# workflow, so a lint job inside it would put every downstream job — the scan,
-# the release guards — behind hadolint. lint.yml already discovers and lints the
-# Dockerfile; a caller runs it alongside this workflow rather than through it.
-#
-# Every organisation base image is passed to the build as a build argument, so a
-# packaging Dockerfile pins nothing itself — bumping a base image is a change to
-# one organisation variable, not to every Dockerfile.
+# ⚠️ `promote` has no `needs` on the scan — that job lives in the caller's
+# workflow. The caller must run it between build and promote and pass its
+# result through `scan-result`, or a vulnerable image promotes silently.
 
 on:
   workflow_call:
@@ -187,13 +156,8 @@ jobs:
           REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
         run: |
           set -euo pipefail
-          # docker/login-action stores the credential under exactly the key it
-          # is given, but BuildKit resolves Docker Hub against the canonical
-          # "https://index.docker.io/v1/". Passing "registry-1.docker.io" leaves
-          # the push unauthenticated, and an anonymous token can pull a public
-          # repository but not push to it — which surfaces as "access token has
-          # insufficient scopes", not as a login failure. An empty registry
-          # makes the action use Docker Hub's canonical key.
+          # docker/login-action stores the credential under the key it is GIVEN;
+          # BuildKit resolves Docker Hub as https://index.docker.io/v1/.
           case "${REGISTRY_HOST}" in
             docker.io|index.docker.io|registry-1.docker.io) VALUE="" ;;
             *) VALUE="${REGISTRY_HOST}" ;;
@@ -291,15 +255,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # The digest table is written by the step after the push, so a build that
-      # fails leaves the run summary empty — the one case where the reader most
-      # needs to be told which target was being built before opening the log.
-      #
-      # BuildKit's own error cannot be reproduced here: it is printed inside
-      # docker/build-push-action's step, and a composite action's output is not
-      # readable from a later step. What this can do is name every input the
-      # build was given, so the reader knows which Dockerfile, stage and base
-      # images to look at before opening the log.
       - name: Publish Build Failure Summary
         if: failure()
         env:
@@ -359,13 +314,7 @@ jobs:
           REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
         run: |
           set -euo pipefail
-          # docker/login-action stores the credential under exactly the key it
-          # is given, but BuildKit resolves Docker Hub against the canonical
-          # "https://index.docker.io/v1/". Passing "registry-1.docker.io" leaves
-          # the push unauthenticated, and an anonymous token can pull a public
-          # repository but not push to it — which surfaces as "access token has
-          # insufficient scopes", not as a login failure. An empty registry
-          # makes the action use Docker Hub's canonical key.
+          # Empty registry = Docker Hub's canonical key; see the build job.
           case "${REGISTRY_HOST}" in
             docker.io|index.docker.io|registry-1.docker.io) VALUE="" ;;
             *) VALUE="${REGISTRY_HOST}" ;;
@@ -401,9 +350,6 @@ jobs:
             exit 1
           fi
 
-          # Capture as well as stream: the script's own output is the only
-          # thing that says WHY the image does not work — a missing shared
-          # library, a binary that is not on PATH, a wrong entrypoint.
           docker run --rm -a STDOUT -a STDERR \
             -v "${PWD}/${MOUNT}:/tmp/image-test:ro" \
             --entrypoint "${TEST_SHELL}" \
@@ -418,8 +364,7 @@ jobs:
           OUTCOME: ${{ steps.smoke.outcome }}
         run: |
           set -euo pipefail
-          # A missing script already wrote its own section above; only add one
-          # here when the script actually ran.
+          # The missing-script case already wrote its own section above.
           [[ -f "${RUNNER_TEMP}/smoke.log" ]] || exit 0
           {
             echo "### 🧪 Image smoke test"
@@ -450,9 +395,8 @@ jobs:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
     steps:
-      # Fails closed, and fails LOUD. A skipped job reads as success to the
-      # caller's graph, so refusing by condition would let a release carry on
-      # with no image promoted and nothing to show for it.
+      # A skipped job reads as success to the caller's graph, so this refuses
+      # with a failing step rather than an `if:` condition.
       - name: Verify The Candidate Was Scanned
         env:
           REQUIRE_SCAN: ${{ inputs.require-scan }}
@@ -532,9 +476,6 @@ jobs:
           SOURCE_DIGEST="$(crane digest "${SOURCE}")"
           echo "📦 Promoting ${SOURCE} (${SOURCE_DIGEST}) to ${PROD_IMAGE}:${TAG}"
 
-          # Capture as well as stream: a registry that refuses the retag says
-          # whether it was the credential, an immutable tag or a quota, and
-          # that sentence is what decides who has to fix it.
           if ! MUTATE_OUTPUT="$(crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}" 2>&1)"; then
             echo "${MUTATE_OUTPUT}" >&2
             echo "::error title=Image promote::${PROD_IMAGE}:${TAG} was refused by the registry."
@@ -568,10 +509,8 @@ jobs:
             echo "| **Released as** | \`${PROD_IMAGE}:${TAG}\` |"
             echo "| **Aliases** | \`latest\`${MAJOR:+, \`${MAJOR}\`}${MINOR:+, \`${MINOR}\`} |"
             echo "| **Digest** | \`${PROD_DIGEST}\` |"
-            # The digest the scan cleared. `crane mutate` rewrites the version
-            # label, so this is expected to differ from the released digest —
-            # it is here as the provenance link back to the scan, which the
-            # release page cannot otherwise show.
+            # `crane mutate` rewrites the version label, so the scanned
+            # candidate's digest differs from the released one by design.
             echo "| **Scanned candidate digest** | \`${SOURCE_DIGEST}\` |"
             echo ""
           } > "${IMAGE_INFO_FILE_NAME}"
@@ -585,9 +524,6 @@ jobs:
           path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
           if-no-files-found: ignore
           retention-days: 7
-      # `crane mutate` writes the promotion table only once the production tag
-      # exists, so a run that found no candidate — or was refused by the
-      # registry — would report nothing at all where it matters most.
       - name: Publish Promotion Failure Summary
         if: failure()
         env:

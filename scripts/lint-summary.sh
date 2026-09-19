@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # Runs a linter, and on failure puts the linter's own output in the job summary.
 #
-# "Process completed with exit code 1" tells the reader nothing — the sentence
-# that explains the failure is the linter's, and it belongs where the failure is
-# shown rather than buried in the raw log.
-#
 # Usage: run_linted "<summary heading>" <command> [args...]
 run_linted() {
   local TITLE="${1}"; shift
@@ -24,14 +20,12 @@ run_linted() {
       if [[ "${RESULT}" -eq 0 ]]; then
         echo "✅ No findings."
       elif [[ -z "${OUTPUT}" ]]; then
-        # An empty fenced block is a dead end. A linter that fails silently is
-        # usually a missing binary or an unreadable config, so say which it was.
         echo "❌ Failed (exit ${RESULT}) without printing anything. Check that \`${1}\` is installed in the job image and that its configuration is readable."
       else
         echo "❌ Failed (exit ${RESULT}). The linter reported:"
         echo ""
         echo '```'
-        # Cap it: a summary has a 1MB budget and a wall of findings helps nobody.
+        # GITHUB_STEP_SUMMARY has a 1MB budget.
         echo "${OUTPUT}" | tail -n 50
         echo '```'
       fi

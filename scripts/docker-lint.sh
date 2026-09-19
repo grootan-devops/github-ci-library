@@ -1,13 +1,7 @@
 #!/usr/bin/env bash
 # hadolint with the organisation's baseline ignore set.
-#
-# Port of the GitLab `Docker:Lint` job. The default ignores cover rules that a
-# packaging-only Dockerfile legitimately trips (pinned versions come from the
-# base image, not from the package manager invocation).
-#
-# Optional environment:
-#   DOCKERFILE        default Dockerfile
-#   HADOLINT_IGNORE   comma-separated extra rules, e.g. "DL3059,SC2086"
+# Port of the GitLab `Docker:Lint` job.
+# Env: DOCKERFILE (default Dockerfile), HADOLINT_IGNORE (comma-separated extra rules).
 set -euo pipefail
 
 : "${DOCKERFILE:=Dockerfile}"
@@ -44,9 +38,6 @@ done
 
 echo "hadolint ${HADOLINT_ARGS[*]} --disable-ignore-pragma ${DOCKERFILE}"
 
-# Capture rather than stream, so the findings can go to the job summary as well
-# as the log. Every other check in the library reports into the summary; the
-# Dockerfile lint should not be the one that makes you open the raw log.
 set +e
 FINDINGS="$(hadolint "${HADOLINT_ARGS[@]}" --disable-ignore-pragma "${DOCKERFILE}" 2>&1)"
 RESULT=$?
@@ -65,14 +56,12 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     if [[ "${RESULT}" -eq 0 ]]; then
       echo "✅ No findings."
     elif [[ -z "${FINDINGS}" ]]; then
-      # An empty fenced block is a dead end; hadolint that exits without a word
-      # has usually failed to parse the file rather than found something.
       echo "❌ hadolint exited ${RESULT} without printing anything. Check that \`${DOCKERFILE}\` is a parseable Dockerfile."
     else
       echo "❌ hadolint reported findings:"
       echo ""
       echo '```'
-      # Cap it: a summary has a 1MB budget and a wall of findings helps nobody.
+      # GITHUB_STEP_SUMMARY has a 1MB budget.
       echo "${FINDINGS}" | tail -n 50
       echo '```'
     fi

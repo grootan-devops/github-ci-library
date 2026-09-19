@@ -1,10 +1,8 @@
 name: Terraform / Init, Validate & Lint
 
-# Counterpart of the GitLab Terraform:Init, Terraform:Validate, Terraform:Lint
-# and Terraform:Check:README jobs. Init runs once; validate and tflint then run
-# in parallel against the initialised working directory. The docs check reads
-# only the sources, so — like GitLab's Terraform:Check:README, which needs only
-# Common:Init — it runs beside init instead of behind it.
+# Counterpart of the GitLab Terraform:Init/Validate/Lint/Check:README jobs.
+# Init runs once; validate and tflint then run in parallel behind it. The docs
+# check reads only the sources, so it runs beside init rather than behind it.
 
 on:
   workflow_call:
@@ -31,9 +29,7 @@ env:
   TF_INPUT: "0"
 
 jobs:
-  # GitLab gates every Terraform job on `exists: ${PROJECT_PATH}/main.tf`. An
-  # empty matrix is the GitHub equivalent: a repository with no root module gets
-  # no Terraform jobs at all, rather than a `terraform init` that fails hard.
+  # An empty matrix runs no jobs at all: no root module, no Terraform jobs.
   discover:
     name: Detect Terraform Root Module
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -113,9 +109,8 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # hashFiles returns "" when the lock file is absent, collapsing the
-      # key onto the bare `tf-` restore-keys prefix — an unpinned provider
-      # set every later run would then fall back to and never invalidate.
+      # hashFiles returns "" for a missing lock file, which would collapse the
+      # key onto the bare `tf-` restore-keys prefix and never invalidate.
       - name: Compute Provider Cache Key
         id: key
         run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
@@ -137,9 +132,6 @@ jobs:
         run: |
           set -uo pipefail
           SLUG="${GITHUB_REPOSITORY//\//_}"
-          # Capture as well as stream: `terraform init` says whether it was the
-          # backend, a provider constraint or a credential that stopped it, and
-          # "check the backend configuration" is a guess by comparison.
           terraform init -input=false -no-color -reconfigure \
             -backend-config="workspace_key_prefix=${SLUG}/${TF_STATE_NAME}" 2>&1 | tee "${RUNNER_TEMP}/tf-init.log"
           exit "${PIPESTATUS[0]}"
@@ -212,9 +204,6 @@ jobs:
           CHECK: ${{ matrix.check }}
         run: |
           set -uo pipefail
-          # Capture as well as stream: both tools name the file, the line and
-          # the rule. `terraform fmt -check` says nothing at all beyond the
-          # file list, so the diff it would have applied goes in too.
           LOG="${RUNNER_TEMP}/tf-check.log"
           case "${CHECK}" in
             validate)
@@ -252,9 +241,7 @@ jobs:
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # Deliberately not `needs: init`: the check only reads the module sources, so
-  # a backend or credential failure in `terraform init` must not hide stale
-  # generated documentation. The script writes its own step summary.
+  # Deliberately not `needs: init`: an init failure must not hide stale docs.
   docs:
     name: Documentation
     needs: discover

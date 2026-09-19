@@ -1,8 +1,7 @@
 name: Lint / Config & Documentation
 
-# Counterpart of the GitLab `lint` stage: Docker:Lint, YAML:Lint, Chart:Values:Lint,
-# Changelog:Lint and Migration:Lint. Each linter is its own job so they run in
-# parallel and the run graph names whichever one failed.
+# Counterpart of the GitLab `lint` stage. Each linter is its own job, so they
+# run in parallel and the run graph names whichever one failed.
 
 on:
   workflow_call:
@@ -85,8 +84,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-    # fail-fast off: a linting run should report every problem at once, not stop
-    # at whichever linter happened to finish first.
     strategy:
       fail-fast: false
       matrix:
@@ -159,10 +156,8 @@ jobs:
         if: ${{ steps.target.outputs.skip != 'true' }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/${{ matrix.script }}"
 
-      # Every linter script writes its own section, with the rule and the line
-      # the tool named — repeating "✅ Passed" here would only push that further
-      # down the page. What is left is what no linter can report: a subject that
-      # is not present, and a job that died before the linter was reached.
+      # Linters write their own summary sections; only a skipped subject or a
+      # failure before the linter ran needs one here.
       - name: Publish Lint Summary
         if: always()
         env:

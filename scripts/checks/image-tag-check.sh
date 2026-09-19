@@ -12,8 +12,7 @@ if [[ ! "${IMAGE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 if [[ -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
-  # A login that fails aborts the guard, and "exit code 1" would leave the
-  # reader unable to tell a bad credential from an unreachable registry.
+  # Capture crane's words: a bad credential and an unreachable registry both exit 1.
   if ! LOGIN_OUTPUT="$(crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}" 2>&1)"; then
     echo "::error title=Image::Could not authenticate to ${REGISTRY_HOST}."
     echo "${LOGIN_OUTPUT}" >&2
@@ -36,9 +35,9 @@ fi
 TARGET="${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
 if crane manifest "${TARGET}" >/dev/null 2>&1; then
   echo "::error title=Image::'${TARGET}' already exists in the production repository. Bump the application version."
-  { echo "### 🐳 Image tag"; echo; echo "❌ \`${TARGET}\` is already published. Bump the application version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+  { echo "### 🐳 Image tag"; echo; echo "❌ \`${TARGET}\` is already taken by a published image. Bump the application version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
 
-echo "Container image tag '${IMAGE_TAG}' is available."
-{ echo "### 🐳 Image tag"; echo; echo "✅ \`${TARGET}\` is available."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+echo "Nothing is published at '${TARGET}' yet; the release may claim it."
+{ echo "### 🐳 Image tag"; echo; echo "✅ Nothing is published at \`${TARGET}\` — free to publish."; echo; } >> "${GITHUB_STEP_SUMMARY}"

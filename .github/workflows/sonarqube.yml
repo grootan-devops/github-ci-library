@@ -44,8 +44,7 @@ jobs:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
 
     steps:
-      # Sonar attributes issues to authors and measures new code against a
-      # baseline, so it needs the whole history, not a shallow clone.
+      # Sonar needs full history to attribute issues and measure new code.
       - name: Checkout Full History
         uses: actions/checkout@v7
         with:
@@ -120,26 +119,18 @@ jobs:
           [[ -n "${PROJECT_VERSION}" ]] && SCANNER_ARGS+=("-Dsonar.projectVersion=${PROJECT_VERSION}")
           [[ -f sonar.properties ]] && SCANNER_ARGS+=("-Dproject.settings=sonar.properties")
 
-          # The key has to reach the summary whether or not the scanner
-          # succeeds — it is what the dashboard link is built from.
+          # Exported before the scanner runs: the summary needs the key even on failure.
           echo "SONAR_PROJECT_KEY=${PROJECT_KEY}" >> "${GITHUB_ENV}"
 
-          # Capture as well as stream: a failed quality gate is reported by the
-          # scanner as the conditions that were not met, and an unreachable
-          # server as an HTTP error. Both belong in the summary verbatim.
           set +e
           sonar-scanner "${SCANNER_ARGS[@]}" 2>&1 | tee "${RUNNER_TEMP}/sonar-scanner.log"
           SCANNER_RESULT="${PIPESTATUS[0]}"
           set -e
           exit "${SCANNER_RESULT}"
 
-      # GitLab keeps this cache on a stable key with `policy: pull-push`, so
-      # every pipeline writes the newest analysis data back. GitHub caches are
-      # immutable, so a stable key silently freezes at whatever the first run
-      # stored — the save simply fails to reserve from then on. Delete the entry
-      # before rewriting it, at most once a day, and the key stays stable while
-      # the contents stay current. Needs `actions: write`; without it the older
-      # entry survives and restores keep working.
+      # GitHub caches are immutable, so a stable key freezes at whatever the first
+      # run stored. Delete the entry before rewriting it, at most once a day.
+      # Needs `actions: write`; without it the older entry survives and restores.
       - name: Refresh Cache Entry
         id: refresh
         if: ${{ !cancelled() }}
@@ -152,8 +143,7 @@ jobs:
           STAMP=".sonar/.cached-on"
           TODAY="$(date -u +%Y-%m-%d)"
 
-          # The caches API matches `key` as a PREFIX, so filter for the exact
-          # key or a neighbouring entry is mistaken for this one.
+          # The caches API matches `key` as a PREFIX, so filter for the exact key.
           EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" \
             --jq "[.actions_caches[] | select(.key == \"${CACHE_KEY}\")] | length" 2>/dev/null || echo 0)"
 
@@ -192,9 +182,6 @@ jobs:
         run: |
           set -euo pipefail
           LOG="${RUNNER_TEMP}/sonar-scanner.log"
-          # The scanner prints the gate verdict itself ("QUALITY GATE STATUS:
-          # FAILED") followed by the conditions that were not met. Reuse those
-          # lines rather than querying the API a second time for the same fact.
           GATE="$(grep -aE 'QUALITY GATE STATUS|^\s*-\s' "${LOG}" 2>/dev/null | tail -n 12 || true)"
           {
             echo "### 🔍 SonarQube"
@@ -217,8 +204,6 @@ jobs:
               echo "${GATE}"
               echo '```'
             elif [[ "${OUTCOME}" != "success" && -s "${LOG}" ]]; then
-              # No gate verdict means the scanner never reached one — the
-              # analysis itself broke, so its last words are the explanation.
               echo ""
               echo '```'
               tail -n 30 "${LOG}"

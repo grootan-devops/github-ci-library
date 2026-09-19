@@ -1,23 +1,8 @@
 name: Mono / Changed Project Discovery
 
-# Counterpart of the GitLab monorepo parent pipeline (mono/.gitlab-ci.yml and
-# common/.mono.gitlab-ci.yml).
-#
-# GitHub Actions has no child pipelines: a reusable workflow cannot be invoked
-# from a matrix. So instead of triggering children, this workflow answers the
-# question the parent pipeline existed to answer — which projects changed — and
-# returns a matrix the caller fans its own jobs out over.
-#
-#   discover:
-#     uses: <org>/ci-library/.github/workflows/mono.yml@<ref>
-#   build:
-#     needs: discover
-#     if: ${{ needs.discover.outputs.any-changed == 'true' }}
-#     strategy:
-#       matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-#     uses: <org>/ci-library/.github/workflows/python-build.yml@<ref>
-#     with:
-#       project-path: ${{ matrix.path }}
+# Counterpart of the GitLab monorepo parent pipeline. GitHub Actions cannot
+# call a reusable workflow from a matrix, so this returns the changed-project
+# matrix for the caller to fan its own jobs out over (see README, "mono").
 
 on:
   workflow_call:
@@ -114,11 +99,8 @@ jobs:
             echo "always-run-all is set — selecting every project."
             SELECTED="${PROJECTS}"
           else
-            # GitLab's `changes:` spans the whole pushed range
-            # (CI_COMMIT_BEFORE_SHA..HEAD), not just the tip commit: a push of
-            # three commits that touched a project only in the first one still
-            # builds it. github.event.before is that same boundary — all zeroes
-            # on a branch's first push, where there is nothing to compare to.
+            # Compare over the whole pushed range, not just the tip commit.
+            # github.event.before is all zeroes on a branch's first push.
             if [[ -n "${BASE_SHA}" ]]; then
               COMPARE_BASE="${BASE_SHA}"
             elif [[ -n "${BEFORE_SHA}" && ! "${BEFORE_SHA}" =~ ^0+$ ]]; then
@@ -127,11 +109,8 @@ jobs:
               COMPARE_BASE="$(git rev-parse HEAD~1 2>/dev/null || true)"
             fi
 
-            # A base that is not in this checkout — a force-pushed target branch,
-            # a rewritten history — would otherwise abort the step. GitLab treats
-            # a `changes:` rule it cannot evaluate as true and runs the job, and
-            # that is the only safe direction: skipping a project that did change
-            # is the one outcome a monorepo gate must never produce.
+            # Fail open: an unusable base selects every project, because skipping a
+            # project that did change is the one outcome a monorepo gate must not produce.
             if [[ -n "${COMPARE_BASE}" ]] && ! git cat-file -e "${COMPARE_BASE}^{commit}" 2>/dev/null; then
               echo "::warning title=Monorepo::Comparison base ${COMPARE_BASE} is not in this checkout. Selecting every project."
               COMPARE_BASE=""
@@ -148,10 +127,8 @@ jobs:
               echo "Comparing against ${COMPARE_BASE} — ${CHANGED_COUNT} changed files."
               RANGE="\`${COMPARE_BASE:0:7}..HEAD\` — ${CHANGED_COUNT} changed file(s)"
 
-              # GitLab's convention writes these paths as `./backend`, while
-              # `git diff --name-only` prints `backend/...`. A projects list
-              # carried over from the GitLab config verbatim would then match
-              # nothing at all and quietly build no project, so normalise first.
+              # GitLab writes these paths as `./backend`; git diff prints `backend/...`.
+              # Without normalising, nothing matches.
               SELECTED="$(jq -c --arg files "${CHANGED_FILES}" '
                 ($files | split("\n") | map(select(length > 0))) as $changed
                 | map(
@@ -176,9 +153,6 @@ jobs:
             echo "CHANGED_COUNT=${COUNT}"
           } >> "${GITHUB_OUTPUT}"
 
-          # Selecting nothing is a legitimate outcome and a silent failure look
-          # alike from the outside, so the comparison range and the declared
-          # count are stated either way — that is what tells them apart.
           {
             echo "### 📦 Monorepo: changed projects"
             echo ""

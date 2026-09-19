@@ -1,8 +1,8 @@
 name: Check · Library Release Guards
+run-name: "Check · ${{ github.ref_name }} · #${{ github.run_number }}"
 
 # The release guards applied to the library itself, callable on its own.
-# The library ships no Dockerfile and no chart, so check.yml discovers only the
-# git-tag, changelog and migration guards — no image or chart jobs are created.
+# No Dockerfile or chart here, so check.yml creates only the tag/changelog/migration guards.
 
 on:
   workflow_dispatch:

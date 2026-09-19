@@ -25,6 +25,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The release guards no longer report a free tag as "available", which read as
+  "the artifact exists and can be pulled" — the opposite of what passing means.
+  A passing guard now says nothing is published at that reference yet. The guard
+  names carry the same statement: `Git Tag Unused`, `Image Tag Unused`,
+  `Chart Version Unused`.
+- Comments cut from 954 lines to 296. What remains is what the code cannot say:
+  linter pragmas with their reason, and the platform behaviours that would
+  otherwise be re-broken.
+
+
 - `check.yml` discovers the guards that apply to the repository and runs them as
   a matrix, so a repository with no chart or no Dockerfile no longer gets
   permanently skipped chart and image jobs in its run graph.

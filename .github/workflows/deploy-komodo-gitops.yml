@@ -1,22 +1,9 @@
 name: Deploy / GitOps Komodo Synchronization
 
-# Counterpart of the GitLab Deploy:Komodo:Validate:Image:<env> -> Deploy:Komodo:<env>
-# chain. The image is proven to exist before the GitOps compose file is touched,
-# so a deploy can never commit a reference that will not resolve.
-#
-# CONCURRENCY -- THE CALLER'S RESPONSIBILITY. GitLab pins `interruptible: false`
-# on Deploy:Komodo:<env> so that `auto_cancel.on_new_commit: conservative` can
-# never cancel a deploy in flight. A reusable workflow cannot declare
-# `concurrency:`, so the calling workflow must:
-#
-#   concurrency:
-#     group: "deploy-${{ inputs.environment }}"
-#     cancel-in-progress: false
-#
-# Leave it at `cancel-in-progress: true` and a second dispatch cancels this run
-# mid-deploy: the GitOps commit can already be pushed while the Komodo redeploy
-# is never triggered or never polled, leaving the stack pinned to an image the
-# repository no longer describes and no job reporting the drift.
+# Counterpart of the GitLab Deploy:Komodo chain: the image is proven to exist
+# before the GitOps compose file is touched. A reusable workflow cannot declare
+# `concurrency:`, so the caller must set `cancel-in-progress: false` — otherwise
+# a cancelled run can push the GitOps commit without triggering the redeploy.
 
 on:
   workflow_call:
@@ -178,8 +165,7 @@ jobs:
           fi
           echo "Image ${TARGET} verified."
 
-      # Both failing paths above write their own section naming what could not
-      # be resolved, so this one only reports the success case.
+      # Failing paths write their own section; this one only reports success.
       - name: Publish Validation Summary
         if: ${{ success() }}
         env:
@@ -231,8 +217,7 @@ jobs:
           YQ_PATH: ${{ inputs.gitops-service-image-yq-path }}
           STACK_NAME: ${{ inputs.komodo-stack-name }}
           GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN || github.token }}
-          # Reuse the reference `validate` proved resolvable rather than
-          # recomputing it, so the two jobs cannot disagree about the target.
+          # Reuse the reference validate proved resolvable; recomputing can drift.
           NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
         run: |
           set -euo pipefail
@@ -283,8 +268,6 @@ jobs:
           fi
 
           echo "commit_sha=${COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
-          # What it was, not only what it becomes: "what is running now" is
-          # only half the answer when a deploy has to be reasoned about.
           echo "previous_image=${CURRENT_IMAGE}" >> "${GITHUB_OUTPUT}"
           echo "NEW_IMAGE_REF=${NEW_IMAGE}" >> "${GITHUB_ENV}"
 

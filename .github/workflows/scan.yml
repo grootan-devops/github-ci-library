@@ -1,14 +1,8 @@
 name: Scan / Trivy Security, Config, SBOM & License
 
-# Counterpart of the GitLab `.scan-script` template and the Image:Scan,
-# Chart:Scan, Terraform:Scan, License:Scan and SBOM:Scan jobs that extend it.
-#
-# The engine itself lives in scripts/trivy-scan.sh — one implementation, shared
-# by every scan type and covered by shellcheck, instead of a copy per workflow.
-#
-# Suppressions live in the project's ignored-cves.yml, keyed by scan type, and
-# each entry needs a substantive reason. A suppression for a finding that is no
-# longer present fails the scan, so the file cannot rot.
+# Counterpart of the GitLab `.scan-script` template and the jobs extending it.
+# The scan engine is scripts/trivy-scan.sh, shared by every scan type.
+# Suppressions live in the project's ignored-cves.yml, keyed by scan type.
 
 on:
   workflow_call:
@@ -80,9 +74,7 @@ env:
   TRIVY_TIMEOUT: ${{ vars.TRIVY_TIMEOUT || '60m' }}
   TRIVY_IGNORE_CONFIG_FILE: ${{ vars.TRIVY_IGNORE_CONFIG_FILE || 'ignored-cves.yml' }}
   TRIVY_IGNORED_LICENSE_CLASSIFICATIONS: ${{ vars.TRIVY_IGNORED_LICENSE_CLASSIFICATIONS || 'notice,permissive,unencumbered' }}
-  # KSV-0011 CPU limit, KSV-0014 read-only root FS, KSV-0015/0016 requests,
-  # KSV-0018 memory limit, KSV-0110/0113 default namespace, KSV-0125 registry.
-  # These are set by the platform at deploy time, not by the chart under scan.
+  # These KSV checks are set by the platform at deploy time, not by the chart.
   TRIVY_IGNORE_CVES: ${{ vars.TRIVY_IGNORE_CVES || 'KSV-0011 KSV-0014 KSV-0015 KSV-0016 KSV-0018 KSV-0110 KSV-0113 KSV-0125' }}
   TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
   TRIVY_HOST: ${{ vars.TRIVY_HOST }}
@@ -141,11 +133,7 @@ jobs:
           key: trivy-db
           restore-keys: trivy-db
 
-      # GitLab's Terraform:Scan carries a second cache, key `terraform`, policy
-      # pull-push. Without it `trivy config` on a Terraform module re-downloads
-      # every provider before it can resolve a single module reference. The key
-      # and prefix are terraform-lint.yml's verbatim so both share one entry:
-      # whichever job runs first pays for the providers, the other restores.
+      # Key and prefix match terraform-lint.yml verbatim so both share one entry.
       - name: Restore Terraform Provider Cache
         if: ${{ inputs.scan-type == 'config' && inputs.config-type == 'terraform' }}
         uses: actions/cache/restore@v6
@@ -173,10 +161,8 @@ jobs:
           mkdir -p ~/.docker
           AUTH="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_PASSWORD}" | base64 -w0)"
 
-          # Docker Hub is reached under several hostnames, and a client looks up
-          # whichever one it resolved. Writing the canonical key alongside the
-          # configured host means the credential is found either way, instead of
-          # silently falling back to an anonymous token.
+          # Docker Hub is reached under several hostnames; write every key so the
+          # credential is found whichever one the client resolved.
           case "${IMAGE_REGISTRY}" in
             docker.io|index.docker.io|registry-1.docker.io)
               jq -n --arg auth "${AUTH}" '{auths: {
@@ -249,9 +235,6 @@ jobs:
             2)
               if [[ "${FAIL_ON_WARNINGS}" == "true" ]]; then
                 echo "::error title=Scan::Warnings present and fail-on-warnings is enabled."
-                # trivy-scan.sh has already written the bucket table and the
-                # reason for each warning; this only records that the warnings
-                # were fatal here, which is this workflow's decision, not its.
                 # shellcheck disable=SC2016 # backticks are markdown, not command substitution
                 printf '\n> The scan itself passed with warnings. `fail-on-warnings` is enabled for this job, so the warnings above fail it.\n\n' >> "${GITHUB_STEP_SUMMARY}"
                 exit 1
@@ -284,17 +267,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CHECK_NAME: "Trivy ${{ inputs.scan-type }} findings"
           REPORT_GLOB: "*_trivy_scan_report.junit"
-          # trivy-scan.sh already writes the findings table, so this only adds
-          # the inline annotations. A CVE is a warning here; whether the scan
-          # passes is the scan step's decision, not this reporter's.
+          # A CVE is a warning here; the scan step decides whether it passes.
           JOB_SUMMARY: "false"
           FAIL_ON_FAILURE: "false"
           ANNOTATION_LEVEL: "warning"
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
 
-      # The write half of GitLab's pull-push policy. Runs even when the scan
-      # failed: the providers are just as valid, and re-downloading them on the
-      # retry is pure cost.
+      # !cancelled(), not success(): the providers are valid even after a failed scan.
       - name: Save Terraform Provider Cache
         if: ${{ !cancelled() && inputs.scan-type == 'config' && inputs.config-type == 'terraform' }}
         uses: actions/cache/save@v6

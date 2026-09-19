@@ -1,9 +1,8 @@
 name: SBOM / Generate & Scan
 
 # Counterpart of the GitLab SBOM:Generate -> SBOM:Scan pair. Generation and the
-# vulnerability scan of the generated document are separate jobs, so a scan
-# failure is distinguishable from a generation failure and the SBOM is published
-# as an artifact either way.
+# scan are separate jobs, so a scan failure is distinguishable from a
+# generation failure and the SBOM is published either way.
 
 on:
   workflow_call:
@@ -76,9 +75,6 @@ jobs:
             fi
           fi
 
-          # Capture as well as stream: Trivy names the lock file it could not
-          # parse or the analyser that failed, and the summary needs that
-          # rather than an exit code.
           set +e
           TRIVY_OUTPUT="$(trivy fs --format cyclonedx --output "${SBOM_FILE}" \
             --skip-version-check --skip-db-update --skip-java-db-update . 2>&1)"
@@ -109,9 +105,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # The component count is worth carrying on a green run: it is the one
-      # number that shows the SBOM actually described the project rather than
-      # an empty tree, and nothing downstream reports it.
       - name: Publish SBOM Summary
         if: ${{ always() && steps.generate.outcome == 'success' }}
         run: |
@@ -132,10 +125,8 @@ jobs:
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # Deliberately not a nested `uses: ./.github/workflows/scan.yml`: a relative
-  # reusable-workflow path resolves against the caller's repository, not this
-  # library's, so it would break for every consumer. The scan engine is shared
-  # as a script instead.
+  # Not a nested `uses: ./.github/workflows/scan.yml`: a relative reusable-workflow
+  # path resolves against the caller's repository, not this library's.
   scan:
     name: Scan
     if: ${{ inputs.scan }}
@@ -196,9 +187,6 @@ jobs:
             2)
               if [[ "${FAIL_ON_WARNINGS}" == "true" ]]; then
                 echo "::error title=SBOM scan::Warnings present and fail-on-warnings is enabled."
-                # trivy-scan.sh has already written the bucket table and the
-                # reason for each warning; this only records that the warnings
-                # were fatal here, which is this workflow's decision, not its.
                 # shellcheck disable=SC2016 # backticks are markdown, not command substitution
                 printf '\n> The scan itself passed with warnings. `fail-on-warnings` is enabled for this job, so the warnings above fail it.\n\n' >> "${GITHUB_STEP_SUMMARY}"
                 exit 1

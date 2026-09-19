@@ -1,7 +1,6 @@
 name: Node / Lint
 
-# Counterpart of the GitLab Node:Lint job. Biome is the single source of truth
-# for formatting and linting, so the project must declare biome.json.
+# GitLab counterpart: Node:Lint. Biome is the only formatter and linter, so biome.json is required.
 
 on:
   workflow_call:
@@ -83,9 +82,6 @@ jobs:
           OUTCOME: ${{ steps.biome.outcome }}
         run: |
           set -euo pipefail
-          # Biome ends its report with its own tallies ("Checked N files",
-          # "Found N errors"). Those lines are the count, already computed — no
-          # second pass over the diagnostics to arrive at the same number.
           TALLY="$(grep -E '^(Checked|Found|Fixed|Skipped) ' "${BIOME_REPORT}" 2>/dev/null | tail -n 5 || true)"
           {
             echo "### 📗 Node lint: biome"
