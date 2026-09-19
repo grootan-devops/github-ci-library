@@ -50,8 +50,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: trivy-db-${{ github.run_id }}
-          restore-keys: trivy-db-
+          key: trivy-db
+          restore-keys: trivy-db
 
       - name: Restore Maven Repository
         if: ${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) != '' }}
@@ -150,8 +150,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: trivy-db-${{ github.run_id }}
-          restore-keys: trivy-db-
+          key: trivy-db
+          restore-keys: trivy-db
 
       - name: Scan SBOM
         env:
