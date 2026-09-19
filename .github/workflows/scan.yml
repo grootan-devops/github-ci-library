@@ -259,4 +259,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CHECK_NAME: "Trivy ${{ inputs.scan-type }} findings"
           REPORT_GLOB: "*_trivy_scan_report.junit"
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/publish-findings.sh"
+          # trivy-scan.sh already writes the findings table, so this only adds
+          # the inline annotations. A CVE is a warning here; whether the scan
+          # passes is the scan step's decision, not this reporter's.
+          JOB_SUMMARY: "false"
+          FAIL_ON_FAILURE: "false"
+          ANNOTATION_LEVEL: "warning"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
