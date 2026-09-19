@@ -18,7 +18,7 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `self-version.yml`, `self-lint.yml`, `self-check.yml` and `self-secret-scan.yml`:
   the library's own pipeline split into independently dispatchable dimensions, so
-  a developer working on one of them can run just that one. `ci.yml` is now only
+  a developer working on one of them can run just that one. `self-ci.yml` is now only
   an aggregator over them.
 - `scripts/checks/`: the git-tag, chart-version, chart-dependency and image-tag
   guards extracted into standalone scripts.
@@ -31,10 +31,23 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `init.yml` normalises a path-style development repository suffix to a tag-style
   one on Docker Hub (`/dev` becomes `-dev`), which has no nested repositories.
   Consumers no longer have to set `IMAGE_DEV_REPOSITORY_SUFFIX` per registry.
-- `ci.yml` also runs on `dev` pull requests and filters on `.github/**`.
-- `cd.yml` ignores `.github/**` on the default branch, so a change confined to
+- `self-ci.yml` also runs on `dev` pull requests and filters on `.github/**`.
+- `self-cd.yml` ignores `.github/**` on the default branch, so a change confined to
   the pipeline is verified by its pull request and never cuts a release on its
   own, and gains a `workflow_dispatch` trigger for a deliberate release.
+- `ci.yml` and `cd.yml` are now `self-ci.yml` and `self-cd.yml`. Every other
+  workflow in `.github/workflows/` is a `workflow_call` reusable workflow a
+  consumer references by path; these two are the library's own entry points,
+  and the `self-` prefix makes that boundary visible in the directory listing.
+  Their `name:` fields are unchanged, so no status check name moves.
+- Every failure writes what happened to the job summary instead of leaving
+  `Process completed with exit code 1` behind: a linter's findings, a
+  compiler's error, a registry's refusal. Scans and test suites, whose output
+  is structured and can run to hundreds of entries, report a count table and
+  point at the uploaded report rather than truncating a list.
+- Leaf job names drop the category prefix the caller already supplies, so a
+  reusable-workflow chain reads `Guards / Migration Guide` rather than
+  `Check / Release Guards / Check: Migration Guide`. Job IDs are unchanged.
 - Every job pins its runner to `ubuntu-26.04` instead of tracking
   `ubuntu-latest`, so the platform's migration to Ubuntu 26 cannot change the
   build environment underneath a release. `vars.CI_RUNNER` still overrides it.
@@ -62,7 +75,7 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- A manual `workflow_dispatch` of `cd.yml` could cut a release from any ref,
+- A manual `workflow_dispatch` of `self-cd.yml` could cut a release from any ref,
   including a feature branch. GitLab refuses a manual release outright
   (`.release-rules` sends `web`/`api` pipelines to `when: never`); the dispatch
   trigger stays, but a ref that is not the default branch is now refused.

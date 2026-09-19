@@ -79,7 +79,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   lint:
-    name: "Lint: ${{ matrix.name }}"
+    name: ${{ matrix.name }}
     needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
@@ -155,28 +155,28 @@ jobs:
           fi
 
       - name: Run ${{ matrix.name }} Linter
+        id: lint
         if: ${{ steps.target.outputs.skip != 'true' }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/${{ matrix.script }}"
 
+      # Every linter script writes its own section, with the rule and the line
+      # the tool named — repeating "✅ Passed" here would only push that further
+      # down the page. What is left is what no linter can report: a subject that
+      # is not present, and a job that died before the linter was reached.
       - name: Publish Lint Summary
         if: always()
         env:
           NAME: ${{ matrix.name }}
           SKIPPED: ${{ steps.target.outputs.skip }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
           OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
-          {
-            echo "### 🧹 Lint: ${NAME}"
-            echo ""
-            if [[ "${SKIPPED}" == "true" ]]; then
-              echo "⏭️ Nothing to lint — subject not present in this repository."
-            else
-              case "${OUTCOME}" in
-                success) echo "✅ Passed." ;;
-                failure) echo "❌ Failed. See the job log for the exact rule and line." ;;
-                *)       echo "Status: ${OUTCOME}" ;;
-              esac
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+          if [[ "${SKIPPED}" == "true" ]]; then
+            printf '### 🧹 Lint: %s\n\n⏭️ Nothing to lint — subject not present in this repository.\n\n' \
+              "${NAME}" >> "${GITHUB_STEP_SUMMARY}"
+          elif [[ "${OUTCOME}" == "failure" && "${LINT_OUTCOME}" != "failure" ]]; then
+            printf '### 🧹 Lint: %s\n\n❌ The job failed before %s could run (the linter step was `%s`). The failing step in the log is the checkout or the target resolution, not the linter.\n\n' \
+              "${NAME}" "${NAME}" "${LINT_OUTCOME}" >> "${GITHUB_STEP_SUMMARY}"
+          fi

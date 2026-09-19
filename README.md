@@ -1787,14 +1787,14 @@ Consuming projects are expected to follow the same standard the library applies 
 
 ### The library's own pipeline
 
-`ci.yml` (pull request) and `cd.yml` (push to master) are this library's counterpart of
+`self-ci.yml` (pull request) and `self-cd.yml` (push to master) are this library's counterpart of
 `ci-templates/.gitlab-ci.yml`. They run the library against itself:
 
 | Phase | Jobs |
 |---|---|
 | Lint | `actionlint`, `shellcheck`, plus `lint.yml` for YAML, changelog and migration guide |
 | Check | `check.yml` — git tag availability, changelog section, migration section |
-| Release | `cd.yml` → `release.yml` — tags the repository, publishes the GitHub Release with the extracted notes, posts the Teams card |
+| Release | `self-cd.yml` → `release.yml` — tags the repository, publishes the GitHub Release with the extracted notes, posts the Teams card |
 
 The released version is the contents of `VERSION`. Bump it in the pull request that ships
 the change, the same way `RELEASE_VERSION` is bumped in the GitLab library's own

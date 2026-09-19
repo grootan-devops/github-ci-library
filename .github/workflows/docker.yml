@@ -137,7 +137,7 @@ env:
 
 jobs:
   build:
-    name: "Image: Build & Push"
+    name: Build & Push
     if: ${{ !inputs.is-release }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
@@ -294,11 +294,22 @@ jobs:
       # The digest table is written by the step after the push, so a build that
       # fails leaves the run summary empty — the one case where the reader most
       # needs to be told which target was being built before opening the log.
+      #
+      # BuildKit's own error cannot be reproduced here: it is printed inside
+      # docker/build-push-action's step, and a composite action's output is not
+      # readable from a later step. What this can do is name every input the
+      # build was given, so the reader knows which Dockerfile, stage and base
+      # images to look at before opening the log.
       - name: Publish Build Failure Summary
         if: failure()
         env:
           REPO: ${{ inputs.image-repository }}
           TAG: ${{ inputs.image-tag }}
+          BUILD_CONTEXT: ${{ inputs.build-context || inputs.project-path || vars.PROJECT_PATH || '.' }}
+          BUILD_FILE: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ vars.DOCKERFILE || 'Dockerfile' }}
+          BUILD_TARGET: ${{ inputs.target }}
+          BUILD_ARGS: ${{ steps.args.outputs.args }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
         run: |
           set -euo pipefail
           {
@@ -306,10 +317,29 @@ jobs:
             echo ""
             echo "❌ \`${REGISTRY_HOST}/${REPO}:${TAG}\` was not built. No candidate exists for the scan or the promotion to consume."
             echo ""
+            echo "| Input | Value |"
+            echo "|---|---|"
+            echo "| **Dockerfile** | \`${BUILD_FILE}\` |"
+            echo "| **Context** | \`${BUILD_CONTEXT}\` |"
+            echo "| **Stage** | \`${BUILD_TARGET:-(final)}\` |"
+            echo "| **Build & push step** | \`${PUSH_OUTCOME}\` |"
+            echo ""
+            if [[ -n "${BUILD_ARGS}" ]]; then
+              echo "<details><summary>Build arguments the base images resolved to</summary>"
+              echo ""
+              echo '```'
+              echo "${BUILD_ARGS}"
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+            fi
+            echo "BuildKit's own error is in the **Build & Push Image** step of the log; a composite action's output cannot be read back from here."
+            echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   test:
-    name: "Image: Smoke Test"
+    name: Smoke Test
     needs: build
     if: ${{ !cancelled() && inputs.test && !inputs.is-release && needs.build.result == 'success' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -350,44 +380,64 @@ jobs:
           password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
 
       - name: Run Smoke Test Inside The Image
+        id: smoke
         env:
           IMAGE_REF: ${{ needs.build.outputs.IMAGE_REF_DIGEST }}
           TEST_SCRIPT: ${{ inputs.test-script }}
           TEST_PATH: ${{ inputs.test-path }}
           TEST_SHELL: ${{ inputs.test-shell }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           MOUNT="${TEST_PATH:-.}"
 
           if [[ ! -f "${MOUNT}/${TEST_SCRIPT}" ]]; then
             echo "::error title=Image test::${MOUNT}/${TEST_SCRIPT} not found. Provide the script, or set test: false."
+            {
+              echo "### 🧪 Image smoke test"
+              echo ""
+              echo "❌ \`${MOUNT}/${TEST_SCRIPT}\` does not exist, so nothing was run inside \`${IMAGE_REF}\`. Add the script, point \`test-script\`/\`test-path\` at it, or set \`test: false\`."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
+          # Capture as well as stream: the script's own output is the only
+          # thing that says WHY the image does not work — a missing shared
+          # library, a binary that is not on PATH, a wrong entrypoint.
           docker run --rm -a STDOUT -a STDERR \
             -v "${PWD}/${MOUNT}:/tmp/image-test:ro" \
             --entrypoint "${TEST_SHELL}" \
-            "${IMAGE_REF}" -c "cd /tmp/image-test && ./${TEST_SCRIPT}"
+            "${IMAGE_REF}" -c "cd /tmp/image-test && ./${TEST_SCRIPT}" 2>&1 | tee "${RUNNER_TEMP}/smoke.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Publish Smoke Test Summary
-        if: always()
+        if: ${{ always() && steps.smoke.outcome != 'skipped' }}
         env:
-          OUTCOME: ${{ job.status }}
+          IMAGE_REF: ${{ needs.build.outputs.IMAGE_REF_DIGEST }}
+          TEST_SCRIPT: ${{ inputs.test-script }}
+          OUTCOME: ${{ steps.smoke.outcome }}
         run: |
           set -euo pipefail
+          # A missing script already wrote its own section above; only add one
+          # here when the script actually ran.
+          [[ -f "${RUNNER_TEMP}/smoke.log" ]] || exit 0
           {
             echo "### 🧪 Image smoke test"
             echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ Passed inside the built image." ;;
-              failure) echo "❌ Failed inside the built image. See the job log." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ \`${TEST_SCRIPT}\` passed inside \`${IMAGE_REF}\`."
+            else
+              echo "❌ \`${TEST_SCRIPT}\` failed inside \`${IMAGE_REF}\`. It reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/smoke.log"
+              echo '```'
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   promote:
-    name: "Image: Promote"
+    name: Promote
     if: ${{ inputs.is-release }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
@@ -422,13 +472,15 @@ jobs:
 
           if [[ -z "${SCAN_RESULT}" ]]; then
             echo "::error title=Promotion refused::No scan result was passed. The scan runs in your workflow, so this one cannot depend on it directly — pass the scan job's result through the 'scan-result' input, or set 'require-scan: false' if this artifact has no scan."
+            REASON="no \`scan-result\` was passed. The scan runs in your workflow, so this one cannot depend on it directly — pass the scan job's \`result\` through the \`scan-result\` input, or set \`require-scan: false\` if this artifact has no scan."
           else
             echo "::error title=Promotion refused::The scan did not succeed (result: ${SCAN_RESULT}). Refusing to promote an image that failed or skipped its scan."
+            REASON="the scan job reported \`${SCAN_RESULT}\`, not \`success\`. Fix the scan, or justify its findings in \`ignored-cves.yml\`, before promoting."
           fi
           {
             echo "### 🚫 Promotion refused"
             echo ""
-            echo "The candidate image was not confirmed scanned, so it has not been promoted."
+            echo "The candidate image has not been promoted: ${REASON}"
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
           exit 1
@@ -462,13 +514,43 @@ jobs:
 
           if [[ -z "${SOURCE}" ]]; then
             echo "::error title=Image promote::No candidate image found in ${DEV_IMAGE} for ${TAG}. Nothing was scanned that could be promoted."
+            {
+              echo "### 🐳 Container Image"
+              echo ""
+              echo "❌ \`${TAG}\` was not promoted: no candidate in \`${DEV_IMAGE}\` matched \`${CANDIDATE_TAG:-${TAG}-*}\`. The production tag is unchanged."
+              echo ""
+              echo "Tags that do exist in the candidate repository:"
+              echo ""
+              echo '```'
+              crane ls "${DEV_IMAGE}" 2>&1 | tail -n 20 || echo "(the candidate repository could not be listed either)"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
           SOURCE_DIGEST="$(crane digest "${SOURCE}")"
           echo "📦 Promoting ${SOURCE} (${SOURCE_DIGEST}) to ${PROD_IMAGE}:${TAG}"
 
-          crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}"
+          # Capture as well as stream: a registry that refuses the retag says
+          # whether it was the credential, an immutable tag or a quota, and
+          # that sentence is what decides who has to fix it.
+          if ! MUTATE_OUTPUT="$(crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}" 2>&1)"; then
+            echo "${MUTATE_OUTPUT}" >&2
+            echo "::error title=Image promote::${PROD_IMAGE}:${TAG} was refused by the registry."
+            {
+              echo "### 🐳 Container Image"
+              echo ""
+              echo "❌ \`${PROD_IMAGE}:${TAG}\` was refused. The scanned candidate \`${SOURCE}\` (\`${SOURCE_DIGEST}\`) is unchanged in the dev repository, so a re-run can promote it once this is fixed. crane reported:"
+              echo ""
+              echo '```'
+              tail -n 30 <<< "${MUTATE_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "${MUTATE_OUTPUT}"
 
           crane tag "${PROD_IMAGE}:${TAG}" latest
           MAJOR="$(grep -Eo '^[0-9]+' <<<"${TAG}" || true)"
@@ -486,6 +568,11 @@ jobs:
             echo "| **Released as** | \`${PROD_IMAGE}:${TAG}\` |"
             echo "| **Aliases** | \`latest\`${MAJOR:+, \`${MAJOR}\`}${MINOR:+, \`${MINOR}\`} |"
             echo "| **Digest** | \`${PROD_DIGEST}\` |"
+            # The digest the scan cleared. `crane mutate` rewrites the version
+            # label, so this is expected to differ from the released digest —
+            # it is here as the provenance link back to the scan, which the
+            # release page cannot otherwise show.
+            echo "| **Scanned candidate digest** | \`${SOURCE_DIGEST}\` |"
             echo ""
           } > "${IMAGE_INFO_FILE_NAME}"
           cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"

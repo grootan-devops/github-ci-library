@@ -81,7 +81,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   test:
-    name: "Terraform: Module Test"
+    name: Module Test
     needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 90
@@ -127,6 +127,11 @@ jobs:
           OUTCOME: ${{ job.status }}
         run: |
           set -euo pipefail
+          # The suite already wrote its own transcript to tf_test.log, and
+          # `go test -v` ends with its PASS/FAIL/ok lines. Reuse those rather
+          # than re-running anything to count.
+          LOG="tests/${TF_LOG_FILE_NAME}"
+          TALLY="$(grep -aE '^(--- FAIL|--- PASS|FAIL|ok|PASS)' "${LOG}" 2>/dev/null | tail -n 15 || true)"
           {
             echo "### 🌍 Terraform module test"
             echo ""
@@ -136,11 +141,29 @@ jobs:
               cancelled) echo "🚫 Cancelled — the destroy job will tear down anything the test provisioned." ;;
               *)         echo "Status: ${OUTCOME}" ;;
             esac
+            if [[ -n "${TALLY}" ]]; then
+              echo ""
+              echo '```'
+              echo "${TALLY}"
+              echo '```'
+            fi
+            if [[ "${OUTCOME}" != "success" && -s "${LOG}" ]]; then
+              echo ""
+              echo "<details><summary>Last of the test transcript</summary>"
+              echo ""
+              echo '```'
+              tail -n 50 "${LOG}"
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+              echo "The whole transcript is \`tf_test.log\` in the \`terraform-test-artifacts\` artifact."
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   destroy:
-    name: "Terraform: Test Teardown"
+    name: Test Teardown
     needs: test
     # A passing test tears down its own fixtures; this covers the two cases that
     # cannot. Cancellation is one of them — GitLab pinned `interruptible: false`
@@ -169,24 +192,40 @@ jobs:
           path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
 
       - name: Destroy Test Infrastructure
+        id: teardown
         run: |
-          set -euo pipefail
-          terraform init -input=false -no-color
-          terraform destroy -auto-approve -input=false -no-color
+          set -uo pipefail
+          # Capture as well as stream: this is the one job whose outcome has to
+          # be trusted without reading logs, because what it leaves behind
+          # costs money. Terraform's own count line is the proof.
+          {
+            terraform init -input=false -no-color &&
+            terraform destroy -auto-approve -input=false -no-color
+          } 2>&1 | tee "${RUNNER_TEMP}/tf-destroy.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Publish Teardown Summary
         if: always()
         env:
-          OUTCOME: ${{ job.status }}
+          OUTCOME: ${{ steps.teardown.outcome }}
         run: |
           set -euo pipefail
+          LOG="${RUNNER_TEMP}/tf-destroy.log"
+          # Terraform prints "Destroy complete! N resources destroyed." itself.
+          DESTROYED="$(grep -aE 'Destroy complete!' "${LOG}" 2>/dev/null | tail -n 1 || true)"
           {
             echo "### 🧹 Terraform test teardown"
             echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ Test infrastructure destroyed." ;;
-              failure) echo "❌ Teardown failed — check for orphaned infrastructure manually." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ ${DESTROYED:-Test infrastructure destroyed.}"
+            else
+              echo "❌ **Teardown did not complete — infrastructure may still be running and billing.** Terraform reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${LOG}" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+              echo ""
+              echo "The state file is in the \`terraform-test-artifacts\` artifact; destroy from it by hand."
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

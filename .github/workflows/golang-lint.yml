@@ -29,7 +29,7 @@ env:
 
 jobs:
   lint:
-    name: "Go Lint: ${{ matrix.linter }}"
+    name: ${{ matrix.linter }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 75
     permissions:
@@ -48,8 +48,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # Not only for `vet` any more: every leg reports through run_linted, so
+      # the shared summary helper has to be on disk whichever one is running.
       - name: Checkout CI Library
-        if: ${{ matrix.linter == 'vet' }}
         uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
@@ -64,51 +65,58 @@ jobs:
           key: go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) }}
           restore-keys: go-
 
+      # Each leg now reports its own findings into the job summary rather than
+      # leaving an exit code behind: go-vet.sh writes its own section, and the
+      # single-command legs go through run_linted, which is what markdown-lint
+      # and yaml-lint already use.
       - name: Run ${{ matrix.linter }}
         env:
           LINTER: ${{ matrix.linter }}
           GOLANGCI_TIMEOUT: ${{ inputs.golangci-timeout }}
         run: |
           set -euo pipefail
+          # shellcheck source=scripts/lint-summary.sh
+          source "${GITHUB_WORKSPACE}/.ci-library/scripts/lint-summary.sh"
           case "${LINTER}" in
             fmt)
+              # Two commands and a diff, so not a run_linted shape: what has to
+              # reach the summary is the diff `go fmt` produced, not its stdout.
               go fmt ./...
-              if [[ -n "$(git --no-pager diff)" ]]; then
-                git --no-pager diff
+              DRIFT="$(git --no-pager diff)"
+              if [[ -n "${DRIFT}" ]]; then
+                echo "${DRIFT}"
                 echo "::error title=go fmt::Formatting drift. Run 'go fmt ./...' and 'go mod tidy' locally and push the result."
+                {
+                  echo "### 🐹 Go lint: fmt"
+                  echo ""
+                  echo "❌ \`go fmt ./...\` rewrote these files, so the committed source is not gofmt-clean:"
+                  echo ""
+                  echo '```'
+                  git --no-pager diff --stat
+                  echo '```'
+                  echo ""
+                  echo "Run \`go fmt ./...\` and \`go mod tidy\` locally and push the result."
+                  echo ""
+                } >> "${GITHUB_STEP_SUMMARY}"
                 exit 1
               fi
               echo "Formatting and dependency check passed."
+              printf '### 🐹 Go lint: fmt\n\n✅ Already gofmt-clean.\n\n' >> "${GITHUB_STEP_SUMMARY}"
               ;;
             vet)
               bash "${GITHUB_WORKSPACE}/.ci-library/scripts/go-vet.sh"
               ;;
             golangci-lint)
-              golangci-lint run --timeout "${GOLANGCI_TIMEOUT}"
+              run_linted "🐹 Go lint: golangci-lint" golangci-lint run --timeout "${GOLANGCI_TIMEOUT}"
               ;;
             gosec)
-              gosec -exclude-generated -exclude-dir=.go-cache ./...
+              run_linted "🐹 Go lint: gosec" gosec -exclude-generated -exclude-dir=.go-cache ./...
               ;;
             *)
               echo "::error title=Lint::Unknown Go check '${LINTER}'."
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf '### 🐹 Go lint: %s\n\n❌ `%s` is not a Go check this workflow knows. The `linters` input accepts: fmt, vet, golangci-lint, gosec.\n\n' \
+                "${LINTER}" "${LINTER}" >> "${GITHUB_STEP_SUMMARY}"
               exit 1
               ;;
           esac
-
-      - name: Publish Lint Summary
-        if: always()
-        env:
-          LINTER: ${{ matrix.linter }}
-          OUTCOME: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          {
-            echo "### 🐹 Go lint: ${LINTER}"
-            echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ Passed." ;;
-              failure) echo "❌ Failed. See the job log for the offending files." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"

@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   version:
-    name: "Version: Resolve"
+    name: Resolve
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
@@ -35,11 +35,19 @@ jobs:
           set -euo pipefail
           if [[ ! -s VERSION ]]; then
             echo "::error title=Version::VERSION file is missing or empty."
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            printf '### 🏷️ Library version\n\n❌ `VERSION` is missing or empty, so nothing downstream has a tag to work with. It must hold a bare semantic version, e.g. `2.4.0`.\n\n' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           TAG="$(tr -d '[:space:]' < VERSION)"
           if [[ ! "${TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error title=Version::'${TAG}' is not a semantic version."
+            {
+              echo "### 🏷️ Library version"
+              echo ""
+              echo "❌ \`VERSION\` holds \`${TAG}\`, which is not \`MAJOR.MINOR.PATCH\`. The release guards and the git tag both derive from it, so the run stops here."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           echo "TAG=${TAG}" >> "${GITHUB_OUTPUT}"

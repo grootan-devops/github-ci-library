@@ -28,10 +28,30 @@ while IFS= read -r LINE; do
   GO_VET_FILTERED_OUTPUT+="${LINE}"$'\n'
 done <<< "${GO_VET_OUTPUT}"
 
+summarise() {
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '%s\n\n' "${1}" >> "${GITHUB_STEP_SUMMARY}"
+  fi
+}
+
 if grep -qv '^[[:space:]]*$' <<<"${GO_VET_FILTERED_OUTPUT}"; then
   printf "%s" "${GO_VET_FILTERED_OUTPUT}" >&2
   echo "::error title=go vet::go vet reported findings. Fix them, or annotate an accepted one with '// govet:ignore' on the preceding line."
+  # The findings are go vet's own words, and the suppressed ones have already
+  # been filtered out — so what lands here is exactly what has to be fixed.
+  summarise "### 🐹 Go lint: vet
+
+❌ \`go vet ./...\` reported findings:
+
+\`\`\`
+$(printf '%s' "${GO_VET_FILTERED_OUTPUT}" | tail -n 50)
+\`\`\`
+
+Fix them, or annotate an accepted one with \`// govet:ignore\` on the preceding line."
   exit 1
 fi
 
 echo "go vet passed."
+summarise "### 🐹 Go lint: vet
+
+✅ No findings."

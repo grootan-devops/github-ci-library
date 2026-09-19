@@ -171,6 +171,19 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Every refusal below stops the whole deploy before anything is
+          # committed, so each one has to say which input was wrong rather than
+          # leaving an exit code in front of an unchanged environment.
+          refuse() {
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed to **${ENVIRONMENT}**: ${1}"
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          }
+
           MISSING=()
           [[ -z "${ARGOCD_APP_NAME}" ]] && MISSING+=("argocd-app-name")
           [[ -z "${ARGOCD_SERVER}" ]] && MISSING+=("argocd-server (or vars.ARGOCD_SERVER)")
@@ -179,6 +192,15 @@ jobs:
           [[ -z "${GITOPS_BRANCH}" ]] && MISSING+=("gitops-branch")
           if [[ ${#MISSING[@]} -gt 0 ]]; then
             echo "::error::[HARD FAILURE] Missing mandatory deployment configuration: ${MISSING[*]}"
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed to **${ENVIRONMENT}**. These are not configured:"
+              echo ""
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf -- '- `%s`\n' "${MISSING[@]}"
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
@@ -190,20 +212,20 @@ jobs:
           if [[ -n "${MANIFEST_FILE}" ]]; then
             if [[ -n "${MODE}" ]]; then
               echo "::error::[HARD FAILURE] Both Helm parameters (chart-values-file/chart-app-yq-path) and Manifest parameters (manifest-file) are configured. Choose either Helm or Manifest deployment."
-              exit 1
+              refuse "both the Helm inputs (\`chart-values-file\`/\`chart-app-yq-path\`) and the manifest input (\`manifest-file\`) are set, so the target is ambiguous. Choose one."
             fi
             MODE="manifest"
           fi
 
           if [[ -z "${MODE}" ]]; then
             echo "::error::[HARD FAILURE] Either chart-values-file (for Helm) or manifest-file (for Manifest) must be configured."
-            exit 1
+            refuse "neither \`chart-values-file\` (Helm) nor \`manifest-file\` (Manifest) is set, so there is nothing to update in the GitOps repository."
           fi
 
           if [[ "${MODE}" == "helm" ]]; then
             if [[ -z "${RESOLVED_CHART_APP_YQ_PATH}" ]]; then
               echo "::error::[HARD FAILURE] chart-app-yq-path (or app-path) is mandatory when chart-values-file is specified."
-              exit 1
+              refuse "\`chart-values-file\` is set but \`chart-app-yq-path\` is not, so there is no path in the values file to write the version to."
             fi
             if [[ -n "${IMAGE_VALUES_FILE}" ]]; then
               HELM_IMG_MISSING=()
@@ -211,13 +233,13 @@ jobs:
               [[ -z "${IMAGE_TAG_YQ_PATH}" ]] && HELM_IMG_MISSING+=("image-tag-yq-path")
               if [[ ${#HELM_IMG_MISSING[@]} -gt 0 ]]; then
                 echo "::error::[HARD FAILURE] When image-values-file is used with chart-values-file, the following are mandatory: ${HELM_IMG_MISSING[*]}"
-                exit 1
+                refuse "\`image-values-file\` is set, which also requires: ${HELM_IMG_MISSING[*]}."
               fi
             fi
           elif [[ "${MODE}" == "manifest" ]]; then
             if [[ -z "${NEW_IMAGE_INPUT}" ]]; then
               echo "::error::[HARD FAILURE] new-image is mandatory when manifest-file is specified."
-              exit 1
+              refuse "\`manifest-file\` is set but \`new-image\` is not, so there is no image reference to write into the manifest."
             fi
           fi
 
@@ -247,8 +269,22 @@ jobs:
           printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
 
           TARGET="oci://${{ steps.resolve.outputs.chart_repo_url }}/${CHART_NAME}"
-          if ! helm show chart "${TARGET}" --version "${{ steps.resolve.outputs.target_version }}" >/dev/null 2>&1; then
-            echo "::error::Helm chart '${CHART_NAME}' version '${{ steps.resolve.outputs.target_version }}' does not exist at ${TARGET}. Refusing to commit a GitOps change that cannot resolve."
+          VERSION="${{ steps.resolve.outputs.target_version }}"
+          if ! CHART_OUTPUT="$(helm show chart "${TARGET}" --version "${VERSION}" 2>&1)"; then
+            echo "${CHART_OUTPUT}" >&2
+            echo "::error::Helm chart '${CHART_NAME}' version '${VERSION}' does not exist at ${TARGET}. Refusing to commit a GitOps change that cannot resolve."
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed: \`${TARGET}\` has no version \`${VERSION}\`, so the GitOps commit would point ArgoCD at a chart that does not exist. Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 20 <<< "${CHART_OUTPUT}"
+              echo '```'
+              echo ""
+              echo "Check that the chart job published \`${VERSION}\` to the candidate repository before this deploy ran."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           echo "Chart ${CHART_NAME}:${{ steps.resolve.outputs.target_version }} verified at ${TARGET}."
@@ -263,29 +299,46 @@ jobs:
           set -euo pipefail
           crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
           TARGET="${{ steps.resolve.outputs.new_image }}"
-          if ! crane manifest "${TARGET}" >/dev/null 2>&1; then
+          if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
+            echo "${MANIFEST_OUTPUT}" >&2
             echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed: \`${TARGET}\` does not resolve, so the GitOps commit would point at an image that cannot be pulled. crane reported:"
+              echo ""
+              echo '```'
+              tail -n 20 <<< "${MANIFEST_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           echo "Image ${TARGET} verified."
 
+      # Every failing path above writes its own section naming what could not
+      # be resolved, so this one only reports the success case — which carries
+      # the chart and image a reviewer would otherwise have to dig for.
       - name: Publish Validation Summary
-        if: always()
+        if: ${{ success() }}
         env:
-          OUTCOME: ${{ job.status }}
           ENVIRONMENT: ${{ inputs.environment }}
           VERSION: ${{ steps.resolve.outputs.target_version }}
           MODE: ${{ steps.resolve.outputs.mode }}
+          NEW_IMAGE: ${{ steps.resolve.outputs.new_image }}
+          CHART_REPO_URL: ${{ steps.resolve.outputs.chart_repo_url }}
         run: |
           set -euo pipefail
           {
             echo "### 🔎 Deployment prerequisites"
             echo ""
-            if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ \`${VERSION}\` verified in the registry — ready to deploy to **${ENVIRONMENT}** (${MODE} mode)."
-            else
-              echo "❌ Refused to commit a GitOps change that cannot resolve. Check that \`${VERSION}\` was published."
-            fi
+            echo "✅ Verified in the registry — ready to deploy to **${ENVIRONMENT}** (${MODE} mode)."
+            echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| **Chart version** | \`${VERSION:-n/a}\` |"
+            echo "| **Chart repository** | \`${CHART_REPO_URL:-n/a}\` |"
+            echo "| **Image** | \`${NEW_IMAGE:-n/a}\` |"
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -323,6 +376,23 @@ jobs:
         run: |
           set -euo pipefail
 
+          # A deploy that stops here leaves the environment on its previous
+          # version with no commit to point at, so each refusal names the path
+          # it could not find and lists what the repository does contain.
+          gitops_refuse() {
+            {
+              echo "### 🚢 GitOps commit"
+              echo ""
+              echo "❌ \`${GITOPS_REPO}\` was not updated: ${1}"
+              echo ""
+              echo '```'
+              echo "${2}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          }
+
           MODE="${{ needs.validate.outputs.mode }}"
           if [[ "${MODE}" == "manifest" ]]; then
             MANIFEST_PATH="${{ needs.validate.outputs.manifest-file }}"
@@ -330,11 +400,18 @@ jobs:
             echo "Updating manifest ${MANIFEST_PATH} -> image = ${NEW_IMG}..."
             if [[ ! -f "${MANIFEST_PATH}" ]]; then
               echo "::error::Manifest file not found: ${MANIFEST_PATH}"
-              exit 1
+              gitops_refuse "\`${MANIFEST_PATH}\` does not exist in the GitOps repository. These are at its root:" "$(ls -1)"
             fi
+            # What it was, not only what it becomes: "what is running now" is
+            # only half the answer when a deploy has to be reasoned about.
+            PREVIOUS="$(yq -r '.spec.template.spec.containers[0].image // .spec.containers[0].image // ""' "${MANIFEST_PATH}" 2>/dev/null || echo "")"
             yq eval '(.spec.template.spec.containers[0].image // .spec.containers[0].image) = "'"${NEW_IMG}"'"' -i "${MANIFEST_PATH}"
-            echo "skip=false" >> "${GITHUB_OUTPUT}"
-            echo "commit_msg=chore(deploy): update ${MANIFEST_PATH} image to ${NEW_IMG} [skip ci]" >> "${GITHUB_OUTPUT}"
+            {
+              echo "previous=${PREVIOUS}"
+              echo "current=${NEW_IMG}"
+              echo "skip=false"
+              echo "commit_msg=chore(deploy): update ${MANIFEST_PATH} image to ${NEW_IMG} [skip ci]"
+            } >> "${GITHUB_OUTPUT}"
           else
             VALUES_PATH="${{ needs.validate.outputs.chart-values-file }}"
             APP_PATH="${{ needs.validate.outputs.chart-app-yq-path }}"
@@ -346,10 +423,13 @@ jobs:
 
             if [[ ! -f "${VALUES_PATH}" ]]; then
               echo "::error::Values file not found: ${VALUES_PATH}"
-              exit 1
+              gitops_refuse "\`${VALUES_PATH}\` does not exist in the GitOps repository. These are at its root:" "$(ls -1)"
             fi
 
             echo "Updating ${CHART_NAME:-chart} (${APP_PATH}) to ${TARGET_VERSION} in ${VALUES_PATH}..."
+            # What it was, not only what it becomes: "what is running now" is
+            # only half the answer when a deploy has to be reasoned about.
+            PREVIOUS="$(yq -r "${APP_PATH}.chart.version // \"\"" "${VALUES_PATH}" 2>/dev/null || echo "")"
             if [[ -n "${CHART_REPO_URL}" ]]; then
               yq eval "${APP_PATH}.chart.repoURL = \"${CHART_REPO_URL}\"" -i "${VALUES_PATH}"
             fi
@@ -358,14 +438,18 @@ jobs:
             if [[ -n "${IMAGE_VALUES_FILE}" ]]; then
               if [[ ! -f "${IMAGE_VALUES_FILE}" ]]; then
                 echo "::error::Image values file not found: ${IMAGE_VALUES_FILE}"
-                exit 1
+                gitops_refuse "\`${IMAGE_VALUES_FILE}\` does not exist in the GitOps repository. These are at its root:" "$(ls -1)"
               fi
               echo "Updating image repo (${IMAGE_REPO_YQ_PATH}) and tag (${IMAGE_TAG_YQ_PATH}) in ${IMAGE_VALUES_FILE}..."
               yq eval "${IMAGE_REPO_YQ_PATH} = \"${CHART_REPO_URL}\"" -i "${IMAGE_VALUES_FILE}"
               yq eval "${IMAGE_TAG_YQ_PATH} = \"${TARGET_VERSION}\"" -i "${IMAGE_VALUES_FILE}"
             fi
-            echo "skip=false" >> "${GITHUB_OUTPUT}"
-            echo "commit_msg=chore(deploy): update ${CHART_NAME:-workload} to ${TARGET_VERSION} [skip ci]" >> "${GITHUB_OUTPUT}"
+            {
+              echo "previous=${PREVIOUS}"
+              echo "current=${TARGET_VERSION}"
+              echo "skip=false"
+              echo "commit_msg=chore(deploy): update ${CHART_NAME:-workload} to ${TARGET_VERSION} [skip ci]"
+            } >> "${GITHUB_OUTPUT}"
           fi
 
           git --no-pager diff
@@ -409,13 +493,21 @@ jobs:
           GITOPS_REPO: ${{ inputs.gitops-repo }}
           BRANCH: ${{ needs.validate.outputs.gitops-branch }}
           VERSION: ${{ needs.validate.outputs.target-version }}
+          PREVIOUS: ${{ steps.update.outputs.previous }}
+          CURRENT: ${{ steps.update.outputs.current }}
+          UPDATE_OUTCOME: ${{ steps.update.outcome }}
         run: |
           set -euo pipefail
+          # A refusal inside the update step has already written its own
+          # section naming the path it could not find; only a failure that
+          # happened elsewhere still needs one here.
           {
             echo "### 🚢 GitOps commit"
             echo ""
-            if [[ "${OUTCOME}" != "success" ]]; then
-              echo "❌ Failed to update \`${GITOPS_REPO}\`. See the job log."
+            if [[ "${OUTCOME}" != "success" && "${UPDATE_OUTCOME}" == "failure" ]]; then
+              exit 0
+            elif [[ "${OUTCOME}" != "success" ]]; then
+              echo "❌ \`${GITOPS_REPO}\` was not updated — the checkout or the push failed, so **${ENVIRONMENT} is still on \`${PREVIOUS:-its previous version}\`**. The failing step in the log says which."
             elif [[ -z "${SHA}" ]]; then
               echo "ℹ️ No change required — \`${GITOPS_REPO}\` already targets \`${VERSION}\`."
             else
@@ -424,7 +516,8 @@ jobs:
               echo "| **Repository** | \`${GITOPS_REPO}\` |"
               echo "| **Branch** | \`${BRANCH}\` |"
               echo "| **Commit** | \`${SHA}\` |"
-              echo "| **Version** | \`${VERSION}\` |"
+              echo "| **Previous** | \`${PREVIOUS:-none recorded}\` |"
+              echo "| **Now** | \`${CURRENT:-${VERSION}}\` |"
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -476,6 +569,12 @@ jobs:
 
           if [[ -z "${ARGOCD_AUTH_TOKEN}" ]]; then
             echo "::error::ARGOCD_AUTH_TOKEN is not configured. Refusing to report a successful deployment without performing one."
+            {
+              echo "## 🚢 Deployment Summary"
+              echo ""
+              echo "❌ **${ENVIRONMENT} was not synced.** \`ARGOCD_AUTH_TOKEN\` is not configured, so no sync was attempted — but the GitOps commit has already been pushed, so ArgoCD will pick the change up on its own refresh interval rather than now."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 

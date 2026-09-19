@@ -49,7 +49,7 @@ env:
 
 jobs:
   dependency:
-    name: "Node: Dependency Download"
+    name: Dependency Download
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
@@ -81,7 +81,14 @@ jobs:
           restore-keys: node-
 
       - name: Download Dependencies
-        run: npm ci --include=dev --prefer-offline --no-audit --no-fund
+        id: download
+        run: |
+          set -uo pipefail
+          # Capture as well as stream: npm names the package and the resolution
+          # or integrity error that stopped it, and that sentence is the whole
+          # answer. An exit code on its own is not.
+          npm ci --include=dev --prefer-offline --no-audit --no-fund 2>&1 | tee "${RUNNER_TEMP}/npm-ci.log"
+          exit "${PIPESTATUS[0]}"
 
       # GitLab inherits `when: always` here, which is safe there because a cache
       # key is rewritable — a partial tree from a failed resolve is overwritten
@@ -95,19 +102,37 @@ jobs:
           path: .npm
           key: ${{ steps.key.outputs.key }}
 
+      # Cache hit or miss is worth stating on a green run: it is what explains
+      # the job's duration, and a key that never hits points at a lock file
+      # that keeps changing. On a failure npm's own words go here too, since no
+      # other job in the graph will report them.
       - name: Publish Dependency Summary
         if: always()
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.key.outputs.key }}
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
         run: |
           set -euo pipefail
+          CACHE_STATE="rebuilt — no entry matched"
+          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
             echo "### 📗 Node dependencies"
             echo ""
-            echo "Cache key \`${{ steps.key.outputs.key }}\` (${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss — populated' }})."
+            if [[ "${DOWNLOAD_OUTCOME}" == "success" ]]; then
+              echo "✅ Dependencies installed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}."
+            else
+              echo "❌ \`npm ci\` failed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}. npm reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/npm-ci.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   build:
-    name: "Node: Build"
+    name: Build
     needs: dependency
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
@@ -146,7 +171,13 @@ jobs:
         run: npm ci --include=dev --prefer-offline --no-audit --no-fund
 
       - name: Build
-        run: ${{ inputs.build-command }}
+        id: compile
+        run: |
+          set -uo pipefail
+          # Braces, not a bare pipe: a build command may end in its own
+          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Upload Build Output
         if: ${{ !cancelled() }}
@@ -162,21 +193,31 @@ jobs:
         if: always()
         env:
           OUT_DIR: ${{ inputs.build-artifact-path }}
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
           {
             echo "### 📦 Node build"
             echo ""
-            if [[ -d "${OUT_DIR}" ]]; then
-              echo "Output \`${OUT_DIR}/\` — $(du -sh "${OUT_DIR}" | cut -f1) across $(find "${OUT_DIR}" -type f | wc -l | tr -d ' ') files."
+            if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
+              # "No build output" is a symptom. The bundler already named the
+              # module and the line, so that is what goes here.
+              echo "❌ \`${BUILD_COMMAND}\` failed. It reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            elif [[ -d "${OUT_DIR}" ]]; then
+              echo "✅ Output \`${OUT_DIR}/\` — $(du -sh "${OUT_DIR}" | cut -f1) across $(find "${OUT_DIR}" -type f | wc -l | tr -d ' ') files."
             else
-              echo "No build output at \`${OUT_DIR}/\`."
+              echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote nothing to \`${OUT_DIR}/\`, so the \`node-dist\` artifact will be empty."
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   test:
-    name: "Node: Unit Test"
+    name: Unit Test
     if: ${{ inputs.run-tests }}
     needs: dependency
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -227,10 +268,37 @@ jobs:
         run: npm ci --include=dev --prefer-offline --no-audit --no-fund
 
       - name: Run Unit Tests
+        id: unit
+        run: |
+          set -uo pipefail
+          mkdir -p "${TEST_REPORT_DIR}" coverage
+          # Braces, not a bare pipe: a test command may end in its own redirect
+          # into the JUnit file, and `cmd > file | tee` would hand tee an empty
+          # stream.
+          { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
+          exit "${PIPESTATUS[0]}"
+
+      # junit-report.sh reports the cases a JUnit file records. A test command
+      # that never wrote one — a compile error, a missing runner — leaves it
+      # nothing to report, so its own output has to be what explains the job.
+      - name: Explain Test Runner Failure
+        if: ${{ failure() && steps.unit.outcome == 'failure' }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
         run: |
           set -euo pipefail
-          mkdir -p "${TEST_REPORT_DIR}" coverage
-          ${{ inputs.test-command }}
+          {
+            echo "### 🧪 Node test command"
+            echo ""
+            echo "❌ \`${TEST_COMMAND}\` exited non-zero. It reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${RUNNER_TEMP}/test.log" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
+            echo ""
+            echo "Per-case results, where the run got far enough to produce any, are in the table below and in the \`node-test-reports\` artifact."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload Test & Coverage Reports
         if: ${{ !cancelled() }}

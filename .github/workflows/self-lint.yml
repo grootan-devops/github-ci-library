@@ -13,7 +13,7 @@ permissions:
 jobs:
   # actionlint and shellcheck ship in the organisation build container.
   self-lint:
-    name: "Self Lint: ${{ matrix.tool }}"
+    name: ${{ matrix.tool }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
@@ -28,36 +28,24 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # run_linted is the same helper markdown-lint.sh and yaml-lint.sh use, so
+      # the library's own lint reports exactly as a consumer's does — findings
+      # in the summary, not an exit code. `-color` is dropped: ANSI escapes in
+      # a fenced markdown block are noise.
       - name: Run ${{ matrix.tool }}
         env:
           TOOL: ${{ matrix.tool }}
         run: |
           set -euo pipefail
+          # shellcheck source=scripts/lint-summary.sh
+          source scripts/lint-summary.sh
           case "${TOOL}" in
-            actionlint)  actionlint -color ;;
-            shellcheck)  shellcheck scripts/*.sh scripts/checks/*.sh ;;
+            actionlint)  run_linted "🔧 Self lint: actionlint" actionlint ;;
+            shellcheck)  run_linted "🔧 Self lint: shellcheck" shellcheck scripts/*.sh scripts/checks/*.sh ;;
           esac
 
-      - name: Publish Self Lint Summary
-        if: always()
-        env:
-          TOOL: ${{ matrix.tool }}
-          OUTCOME: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          {
-            echo "### 🔧 Self lint: ${TOOL}"
-            echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ Passed." ;;
-              failure) echo "❌ Failed. See the job log." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
-
   lint:
-    name: Lint
+    name: Config & Docs
     uses: ./.github/workflows/lint.yml
     secrets: inherit
     with:

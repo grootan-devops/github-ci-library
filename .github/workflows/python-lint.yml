@@ -23,7 +23,7 @@ env:
 
 jobs:
   lint:
-    name: "Python Lint: ${{ matrix.linter }}"
+    name: ${{ matrix.linter }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
@@ -42,6 +42,17 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      # For scripts/lint-summary.sh: every linter reports through run_linted, so
+      # a failing check puts its own findings in the summary instead of an
+      # exit code the reader has to go and decode in the raw log.
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Restore uv Cache
         uses: actions/cache/restore@v6
         with:
@@ -49,43 +60,56 @@ jobs:
           key: py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) }}
           restore-keys: py-
 
+      # A resolution failure names the package and the constraint that could not
+      # be satisfied, and that sentence is the whole answer. A successful sync
+      # says nothing worth a section, so it writes none.
       - name: Sync Dependencies
-        run: uv sync --frozen --no-install-project --no-install-workspace
+        run: |
+          set -uo pipefail
+          SYNC_LOG="${RUNNER_TEMP}/uv-sync.log"
+          uv sync --frozen --no-install-project --no-install-workspace 2>&1 | tee "${SYNC_LOG}"
+          RESULT="${PIPESTATUS[0]}"
+          if [[ "${RESULT}" -ne 0 ]]; then
+            echo "::error title=Dependencies::uv could not resolve the locked dependencies."
+            {
+              echo "### 🐍 Python dependencies"
+              echo ""
+              echo "❌ \`uv sync --frozen\` failed (exit ${RESULT}). uv reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${SYNC_LOG}"
+              echo '```'
+              echo ""
+              echo "\`--frozen\` refuses to update \`uv.lock\`, so a drifted lock file has to be regenerated with \`uv lock\` and committed."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+          exit "${RESULT}"
 
       - name: Run ${{ matrix.linter }}
         env:
           LINTER: ${{ matrix.linter }}
         run: |
           set -euo pipefail
+          # shellcheck source=scripts/lint-summary.sh
+          source "${GITHUB_WORKSPACE}/.ci-library/scripts/lint-summary.sh"
           if ! uv run "${LINTER}" --version >/dev/null 2>&1; then
             echo "::error title=${LINTER}::Not available. Add it to the project's dev dependencies."
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            printf '### 🐍 Python lint: %s\n\n❌ `%s` is not installed in this environment. Add it to the dev dependency group in `pyproject.toml` and re-lock, or drop it from the `linters` input.\n\n' \
+              "${LINTER}" "${LINTER}" >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           case "${LINTER}" in
-            ruff)        uv run ruff check . ;;
-            mypy)        uv run mypy . ;;
-            isort)       uv run isort --check-only . ;;
-            pycodestyle) uv run pycodestyle --show-source . ;;
+            ruff)        run_linted "🐍 Python lint: ruff" uv run ruff check . ;;
+            mypy)        run_linted "🐍 Python lint: mypy" uv run mypy . ;;
+            isort)       run_linted "🐍 Python lint: isort" uv run isort --check-only --diff . ;;
+            pycodestyle) run_linted "🐍 Python lint: pycodestyle" uv run pycodestyle --show-source . ;;
             *)
               echo "::error title=Lint::Unknown linter '${LINTER}'."
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf '### 🐍 Python lint: %s\n\n❌ `%s` is not a linter this workflow knows. The `linters` input accepts: ruff, mypy, isort, pycodestyle.\n\n' \
+                "${LINTER}" "${LINTER}" >> "${GITHUB_STEP_SUMMARY}"
               exit 1
               ;;
           esac
-
-      - name: Publish Lint Summary
-        if: always()
-        env:
-          LINTER: ${{ matrix.linter }}
-          OUTCOME: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          {
-            echo "### 🐍 Python lint: ${LINTER}"
-            echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ Passed." ;;
-              failure) echo "❌ Failed. See the job log for the offending files." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"

@@ -30,7 +30,7 @@ jobs:
   # passed the pull request. Keep the deliberate-release button, but refuse
   # any ref that is not the default branch.
   guard-ref:
-    name: "Release: Verify Ref"
+    name: Verify Ref
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 5
@@ -44,7 +44,14 @@ jobs:
           set -euo pipefail
           if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
             echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            { echo "### 🚫 Release refused"; echo; echo "\`${GITHUB_REF_NAME}\` is not the default branch."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+            {
+              echo "### 🚫 Release refused"
+              echo ""
+              echo "\`${GITHUB_REF_NAME}\` is not the default branch (\`${DEFAULT_BRANCH}\`). A release cut from a feature branch would tag and publish work that never passed a pull request, so nothing was tagged or published."
+              echo ""
+              echo "Merge to \`${DEFAULT_BRANCH}\` and let the push trigger the release, or re-dispatch this workflow against \`${DEFAULT_BRANCH}\`."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           echo "Releasing from the default branch '${DEFAULT_BRANCH}'."

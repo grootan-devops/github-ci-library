@@ -49,7 +49,7 @@ on:
 
 jobs:
   discover:
-    name: "Mono: Discover Changed Projects"
+    name: Discover Changed Projects
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
@@ -81,13 +81,35 @@ jobs:
           PROJECTS="${PROJECTS_INPUT:-${PROJECTS_VAR:-}}"
           if [[ -z "${PROJECTS}" ]]; then
             echo "::error title=Monorepo::No projects declared. Set the 'projects' input or vars.MONO_PROJECTS to a JSON array of {name, path} objects."
+            {
+              echo "### 📦 Monorepo: changed projects"
+              echo ""
+              echo "❌ No projects are declared, so no child pipeline can run. Set the \`projects\` input or \`vars.MONO_PROJECTS\` to a JSON array of \`{name, path}\` objects, for example:"
+              echo ""
+              echo '```json'
+              echo '[{"name":"api","path":"services/api"},{"name":"web","path":"services/web"}]'
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           if ! jq -e 'type == "array" and length > 0' <<<"${PROJECTS}" >/dev/null 2>&1; then
             echo "::error title=Monorepo::'projects' is not a non-empty JSON array."
+            {
+              echo "### 📦 Monorepo: changed projects"
+              echo ""
+              echo "❌ The projects list is not a non-empty JSON array, so no child pipeline can run. jq reported:"
+              echo ""
+              echo '```'
+              jq . <<<"${PROJECTS}" 2>&1 | head -n 10
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
+          DECLARED="$(jq 'length' <<<"${PROJECTS}")"
+          RANGE="every project (always-run-all)"
           if [[ "${ALWAYS_RUN_ALL}" == "true" ]]; then
             echo "always-run-all is set — selecting every project."
             SELECTED="${PROJECTS}"
@@ -118,10 +140,13 @@ jobs:
             fi
 
             if [[ -z "${COMPARE_BASE}" ]]; then
+              RANGE="every project — no usable comparison base"
               SELECTED="${PROJECTS}"
             else
               CHANGED_FILES="$(git diff --name-only "${COMPARE_BASE}" HEAD)"
-              echo "Comparing against ${COMPARE_BASE} — $(grep -c . <<<"${CHANGED_FILES}" || true) changed files."
+              CHANGED_COUNT="$(grep -c . <<<"${CHANGED_FILES}" || true)"
+              echo "Comparing against ${COMPARE_BASE} — ${CHANGED_COUNT} changed files."
+              RANGE="\`${COMPARE_BASE:0:7}..HEAD\` — ${CHANGED_COUNT} changed file(s)"
 
               # GitLab's convention writes these paths as `./backend`, while
               # `git diff --name-only` prints `backend/...`. A projects list
@@ -151,11 +176,24 @@ jobs:
             echo "CHANGED_COUNT=${COUNT}"
           } >> "${GITHUB_OUTPUT}"
 
+          # Selecting nothing is a legitimate outcome and a silent failure look
+          # alike from the outside, so the comparison range and the declared
+          # count are stated either way — that is what tells them apart.
           {
             echo "### 📦 Monorepo: changed projects"
             echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| **Declared** | ${DECLARED} |"
+            echo "| **Selected** | ${COUNT} |"
+            echo "| **Compared over** | ${RANGE} |"
+            echo ""
             if [[ "${COUNT}" -eq 0 ]]; then
-              echo "No project changed — downstream jobs will not run."
+              echo "No declared project's path matched a changed file, so every downstream job is skipped. If that is wrong, check that the \`path\` values line up with the repository layout:"
+              echo ""
+              echo '```'
+              jq -r '.[] | .path' <<<"${PROJECTS}"
+              echo '```'
             else
               echo "| Project | Path |"
               echo "|---|---|"

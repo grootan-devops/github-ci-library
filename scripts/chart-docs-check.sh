@@ -13,13 +13,38 @@ HELM_DOCS_ARGS=(--template-files "README.gotmpl" --sort-values-order file --docu
 
 cd "${CHART_DIR}"
 
+summarise() {
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '%s\n\n' "${1}" >> "${GITHUB_STEP_SUMMARY}"
+  fi
+}
+
 if [[ ! -f README.md ]]; then
   echo "::error title=Chart docs::${CHART_DIR}/README.md is missing. Generate it with: helm-docs -c ${CHART_DIR}/ ${HELM_DOCS_ARGS[*]}"
+  summarise "### ⎈ Chart documentation
+❌ \`${CHART_DIR}/README.md\` does not exist. Generate and commit it:
+
+\`\`\`bash
+helm-docs -c ${CHART_DIR}/ ${HELM_DOCS_ARGS[*]}
+\`\`\`"
   exit 1
 fi
 
 MD5_CHART_DOCS=$(md5sum README.md)
-helm-docs "${HELM_DOCS_ARGS[@]}"
+# helm-docs aborts on a malformed README.gotmpl or values.yaml. Without its own
+# words the reader sees only that the docs check failed, not that it never ran.
+if ! HELM_DOCS_OUTPUT="$(helm-docs "${HELM_DOCS_ARGS[@]}" 2>&1)"; then
+  echo "${HELM_DOCS_OUTPUT}" >&2
+  echo "::error title=Chart docs::helm-docs could not regenerate ${CHART_DIR}/README.md."
+  summarise "### ⎈ Chart documentation
+❌ \`helm-docs\` could not regenerate \`${CHART_DIR}/README.md\`, so it could not be compared. helm-docs reported:
+
+\`\`\`
+$(tail -n 30 <<< "${HELM_DOCS_OUTPUT}")
+\`\`\`"
+  exit 1
+fi
+echo "${HELM_DOCS_OUTPUT}"
 MD5_NEW_CHART_DOCS=$(md5sum README.md)
 
 if [[ "${MD5_CHART_DOCS}" != "${MD5_NEW_CHART_DOCS}" ]]; then

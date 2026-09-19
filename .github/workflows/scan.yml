@@ -90,7 +90,7 @@ env:
 
 jobs:
   scan:
-    name: "Scan: ${{ inputs.scan-type }}${{ inputs.config-type && format(' ({0})', inputs.config-type) || '' }}"
+    name: ${{ inputs.scan-type }}${{ inputs.config-type && format(' ({0})', inputs.config-type) || '' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 90
     permissions:
@@ -121,11 +121,16 @@ jobs:
             image|config|license|sbom) ;;
             *)
               echo "::error title=Scan::Invalid scan-type '${SCAN_TYPE}'. Expected image, config, license or sbom."
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf '### 🛡️ Trivy scan\n\n❌ `%s` is not a scan type, so nothing was scanned. Pass `scan-type` as one of: `image`, `config`, `license`, `sbom`.\n\n' \
+                "${SCAN_TYPE}" >> "${GITHUB_STEP_SUMMARY}"
               exit 1
               ;;
           esac
           if [[ "${SCAN_TYPE}" == "config" && -z "${CONFIG_TYPE}" ]]; then
             echo "::error title=Scan::config-type is required when scan-type is 'config'. Expected chart or terraform."
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            printf '### 🛡️ Trivy config scan\n\n❌ `config-type` is required when `scan-type` is `config`, so nothing was scanned. Pass `chart` or `terraform`.\n\n' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
@@ -244,6 +249,11 @@ jobs:
             2)
               if [[ "${FAIL_ON_WARNINGS}" == "true" ]]; then
                 echo "::error title=Scan::Warnings present and fail-on-warnings is enabled."
+                # trivy-scan.sh has already written the bucket table and the
+                # reason for each warning; this only records that the warnings
+                # were fatal here, which is this workflow's decision, not its.
+                # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+                printf '\n> The scan itself passed with warnings. `fail-on-warnings` is enabled for this job, so the warnings above fail it.\n\n' >> "${GITHUB_STEP_SUMMARY}"
                 exit 1
               fi
               echo "::warning title=Scan::Completed with warnings only. See the job summary."

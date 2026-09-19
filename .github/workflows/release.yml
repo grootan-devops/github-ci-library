@@ -71,7 +71,7 @@ env:
 
 jobs:
   collect:
-    name: "Release: Collect Artifacts"
+    name: Collect Artifacts
     # GitLab marks Release:Upload `allow_failure: true`: a package-registry
     # hiccup must never cost the release. The assets are a convenience, the tag
     # and the notes are the contract. So this job is allowed to fail without
@@ -211,6 +211,10 @@ jobs:
 
           echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') release assets."
 
+      # Which assets reached the release is the whole point of this job, and it
+      # is allow-failure — so the names go here on a green run too. A release
+      # missing its scan report is otherwise only discoverable by opening the
+      # release page and counting.
       - name: Publish Collection Summary
         if: always()
         run: |
@@ -218,10 +222,17 @@ jobs:
           {
             echo "### 📥 Release payload"
             echo ""
-            if [[ -d _release_assets ]]; then
-              echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') asset(s) for the release."
+            if [[ -d _release_assets ]] && compgen -G "_release_assets/*" > /dev/null; then
+              echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') asset(s):"
+              echo ""
+              echo "| Asset | Size |"
+              echo "|---|---|"
+              for F in _release_assets/*; do
+                [[ -f "${F}" ]] || continue
+                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
+              done
             else
-              echo "⚠️ No assets were staged."
+              echo "⚠️ No assets were staged, so the release will carry notes only. The scan reports and chart packages come from the candidate run — check that \`upstream-run-id\` resolved."
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -238,7 +249,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: "Release: Publish"
+    name: Publish
     needs: collect
     # `collect` may fail, so wait for it to finish rather than to succeed. An
     # empty tag is the one unrecoverable case: there is no version to cut.
@@ -256,6 +267,7 @@ jobs:
           path: payload
 
       - name: Publish GitHub Release
+        id: gh_release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
@@ -285,18 +297,42 @@ jobs:
 
           # A re-run of a release that already exists updates it rather than
           # failing, which keeps the release job idempotent.
+          #
+          # `gh` reports a refused release precisely — a protected tag, a token
+          # without `contents: write`, an asset over the size limit — and that
+          # sentence has to survive into the summary, because a half-published
+          # release is the worst thing to have to diagnose from an exit code.
+          set +e
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "::notice title=Release::'${TAG}' already exists. Updating it."
-            gh release edit "${TAG}" "${ARGS[@]}"
-            if [[ ${#ASSETS[@]} -gt 0 ]]; then
-              gh release upload "${TAG}" "${ASSETS[@]}" --clobber
-            fi
+            GH_OUTPUT="$( { gh release edit "${TAG}" "${ARGS[@]}" &&
+              { [[ ${#ASSETS[@]} -eq 0 ]] || gh release upload "${TAG}" "${ASSETS[@]}" --clobber ; } ; } 2>&1 )"
           else
-            gh release create "${TAG}" "${ARGS[@]}" "${ASSETS[@]}"
+            GH_OUTPUT="$(gh release create "${TAG}" "${ARGS[@]}" "${ASSETS[@]}" 2>&1)"
+          fi
+          GH_RESULT=$?
+          set -e
+
+          [[ -n "${GH_OUTPUT}" ]] && echo "${GH_OUTPUT}"
+          if [[ "${GH_RESULT}" -ne 0 ]]; then
+            echo "::error title=Release::gh refused to publish '${TAG}'."
+            {
+              echo "## 🚀 Release ${TAG}"
+              echo ""
+              echo "❌ The release was not published. \`gh\` reported:"
+              echo ""
+              echo '```'
+              tail -n 30 <<< "${GH_OUTPUT}"
+              echo '```'
+              echo ""
+              echo "The git tag may already have been created by the release guards; check before re-running."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit "${GH_RESULT}"
           fi
 
       - name: Publish Release Summary
-        if: always()
+        if: ${{ always() && steps.gh_release.outcome == 'success' }}
         env:
           TAG: ${{ inputs.tag }}
         run: |
@@ -320,7 +356,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   notify:
-    name: "Release: Notify Teams"
+    name: Notify Teams
     if: ${{ inputs.notify }}
     needs: publish
     # GitLab applies `allow_failure: true` to Release:Notification:Teams through

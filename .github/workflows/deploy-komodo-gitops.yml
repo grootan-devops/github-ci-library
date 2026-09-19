@@ -134,6 +134,15 @@ jobs:
           [[ -z "${IMAGE_REPO}" ]] && MISSING+=("image-repository")
           if [[ ${#MISSING[@]} -gt 0 ]]; then
             echo "::error::[HARD FAILURE] Missing mandatory deployment configuration: ${MISSING[*]}"
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed. These inputs or secrets are not configured:"
+              echo ""
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf -- '- `%s`\n' "${MISSING[@]}"
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
@@ -152,30 +161,35 @@ jobs:
         run: |
           set -euo pipefail
           crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
-          if ! crane manifest "${TARGET}" >/dev/null 2>&1; then
+          if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
+            echo "${MANIFEST_OUTPUT}" >&2
             echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed: \`${TARGET}\` does not resolve, so the compose file would point at an image the stack cannot pull. crane reported:"
+              echo ""
+              echo '```'
+              tail -n 20 <<< "${MANIFEST_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           echo "Image ${TARGET} verified."
 
+      # Both failing paths above write their own section naming what could not
+      # be resolved, so this one only reports the success case.
       - name: Publish Validation Summary
-        if: always()
+        if: ${{ success() }}
         env:
-          OUTCOME: ${{ job.status }}
           ENVIRONMENT: ${{ inputs.environment }}
           TARGET: ${{ steps.resolve.outputs.new_image }}
         run: |
           set -euo pipefail
-          {
-            echo "### 🔎 Deployment prerequisites"
-            echo ""
-            if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ \`${TARGET}\` verified in the registry — ready to deploy to **${ENVIRONMENT}**."
-            else
-              echo "❌ Refused to commit a GitOps change that cannot resolve. Check that \`${TARGET}\` was published."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+          printf '### 🔎 Deployment prerequisites\n\n✅ `%s` verified in the registry — ready to deploy to **%s**.\n\n' \
+            "${TARGET}" "${ENVIRONMENT}" >> "${GITHUB_STEP_SUMMARY}"
 
   komodo-deploy:
     name: Sync Komodo Stack
@@ -232,6 +246,16 @@ jobs:
           TARGET_COMPOSE="${REPO_DIR}/${COMPOSE_FILE}"
           if [[ ! -f "${TARGET_COMPOSE}" ]]; then
             echo "::error::Compose file '${COMPOSE_FILE}' not found in GitOps repository."
+            {
+              echo "## 🦎 Komodo GitOps Deployment Summary"
+              echo ""
+              echo "❌ \`${COMPOSE_FILE}\` does not exist in \`${GITOPS_REPO}\` on \`${GITOPS_BRANCH}\`, so nothing was committed and the stack is unchanged. These are at the repository root:"
+              echo ""
+              echo '```'
+              ls -1 "${REPO_DIR}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
@@ -259,6 +283,9 @@ jobs:
           fi
 
           echo "commit_sha=${COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
+          # What it was, not only what it becomes: "what is running now" is
+          # only half the answer when a deploy has to be reasoned about.
+          echo "previous_image=${CURRENT_IMAGE}" >> "${GITHUB_OUTPUT}"
           echo "NEW_IMAGE_REF=${NEW_IMAGE}" >> "${GITHUB_ENV}"
 
       - name: Trigger Komodo Stack Deployment
@@ -272,6 +299,12 @@ jobs:
           set -euo pipefail
           if [[ -z "${KOMODO_API_KEY:-}" || -z "${KOMODO_API_SECRET:-}" ]]; then
             echo "::error::KOMODO_API_KEY and KOMODO_API_SECRET are required to trigger deployment."
+            {
+              echo "## 🦎 Komodo GitOps Deployment Summary"
+              echo ""
+              echo "❌ \`KOMODO_API_KEY\` / \`KOMODO_API_SECRET\` are not configured, so \`${STACK_NAME}\` was never told to redeploy — but the GitOps commit has already been pushed, so the compose file now names an image the running stack is not using."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
@@ -291,6 +324,16 @@ jobs:
 
           if [[ ! "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
             echo "::error::Komodo rejected the redeployment request for stack '${STACK_NAME}' (HTTP ${HTTP_CODE})."
+            {
+              echo "## 🦎 Komodo GitOps Deployment Summary"
+              echo ""
+              echo "❌ Komodo refused to redeploy \`${STACK_NAME}\` with HTTP ${HTTP_CODE}. The GitOps commit is already pushed, so the compose file names an image the running stack is not using. Komodo replied:"
+              echo ""
+              echo '```'
+              head -c 2000 "${BODY_FILE}" 2>/dev/null || echo "(empty response body)"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
@@ -341,6 +384,16 @@ jobs:
               FAILED|failed|Error|error)
                 echo "::error::Komodo deployment failed. Response: ${STATUS_RESP}"
                 echo "status=FAILED" >> "${GITHUB_OUTPUT}"
+                {
+                  echo "## 🦎 Komodo GitOps Deployment Summary"
+                  echo ""
+                  echo "❌ Komodo execution \`${EXEC_ID}\` for \`${STACK_NAME}\` reported \`${STATUS}\`. Komodo replied:"
+                  echo ""
+                  echo '```json'
+                  head -c 2000 <<< "${STATUS_RESP}"
+                  echo '```'
+                  echo ""
+                } >> "${GITHUB_STEP_SUMMARY}"
                 exit 1
                 ;;
               *)
@@ -367,6 +420,7 @@ jobs:
             echo "| :--- | :--- |"
             echo "| **Environment** | \`${{ inputs.environment }}\` |"
             echo "| **Stack Name** | \`${{ inputs.komodo-stack-name }}\` |"
+            echo "| **Previous Image** | \`${{ steps.gitops_commit.outputs.previous_image || 'none recorded' }}\` |"
             echo "| **Deployed Image** | \`${{ env.NEW_IMAGE_REF || inputs.image-tag }}\` |"
             echo "| **GitOps Repository** | \`${{ inputs.gitops-repo }}\` |"
             echo "| **GitOps Commit** | \`${{ steps.gitops_commit.outputs.commit_sha || 'N/A' }}\` |"

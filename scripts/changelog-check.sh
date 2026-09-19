@@ -20,8 +20,16 @@ set -euo pipefail
 
 echo "Checking if ${RELEASE_VERSION} version exist in ${CHANGELOG_FILE_NAME}..."
 
+summarise() {
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    printf '%s\n\n' "${1}" >> "${GITHUB_STEP_SUMMARY}"
+  fi
+}
+
 if [[ ! -f ${CHANGELOG_FILE_NAME} ]]; then
   echo "::error title=Changelog::${CHANGELOG_FILE_NAME} changelog is missing in the repo"
+  summarise "### 📋 Changelog
+❌ \`${CHANGELOG_FILE_NAME}\` does not exist. Add it, following the keepachangelog.com format, with a section for \`${RELEASE_VERSION}\`."
   exit 1
 fi
 
@@ -33,6 +41,20 @@ if [[ ! -s ${RELEASE_CHANGELOG_FILE_NAME} ]]; then
   cp "${CHANGELOG_FILE_NAME}" "${RELEASE_CHANGELOG_FILE_NAME}"
   if ! grep -q "${RELEASE_VERSION//./\\.}" "${RELEASE_CHANGELOG_FILE_NAME}"; then
     echo "::error title=Changelog::Changelog is either empty or doesnt have release version ${RELEASE_VERSION} specified in the ${CHANGELOG_FILE_NAME} file"
+    summarise "### 📋 Changelog
+❌ \`${CHANGELOG_FILE_NAME}\` has no entry for \`${RELEASE_VERSION}\`.
+
+Add:
+\`\`\`markdown
+## [${RELEASE_VERSION}] - $(date +%Y-%m-%d)
+### Added
+- ...
+\`\`\`
+
+The headings this file already carries:
+\`\`\`
+$(grep -E '^#+ \[' "${CHANGELOG_FILE_NAME}" | head -n 10)
+\`\`\`"
     exit 1
   fi
 fi
@@ -71,7 +93,21 @@ jq -Rs '
     )
 ' "${RELEASE_CHANGELOG_FILE_NAME}" > "${RELEASE_CHANGELOG_CARD_FILE_NAME}"
 
-jq -e 'length > 0' "${RELEASE_CHANGELOG_CARD_FILE_NAME}" > /dev/null
+# `jq -e` on its own exits 1 with nothing on stdout or stderr, so a card that
+# rendered to an empty array used to fail the job with no sentence at all.
+if ! jq -e 'length > 0' "${RELEASE_CHANGELOG_CARD_FILE_NAME}" > /dev/null; then
+  echo "::error title=Changelog::The ${RELEASE_VERSION} section rendered to an empty Teams card."
+  summarise "### 📋 Changelog
+❌ The \`${RELEASE_VERSION}\` section produced no renderable content, so the release notification card would be empty.
+
+What was extracted from \`${CHANGELOG_FILE_NAME}\`:
+\`\`\`
+$(head -n 50 "${RELEASE_CHANGELOG_FILE_NAME}")
+\`\`\`
+
+Give the section headings (\`### Added\`) and bullet lines (\`- …\`)."
+  exit 1
+fi
 
 cat "${RELEASE_CHANGELOG_FILE_NAME}"
 

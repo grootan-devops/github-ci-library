@@ -23,6 +23,10 @@ run_linted() {
       echo ""
       if [[ "${RESULT}" -eq 0 ]]; then
         echo "✅ No findings."
+      elif [[ -z "${OUTPUT}" ]]; then
+        # An empty fenced block is a dead end. A linter that fails silently is
+        # usually a missing binary or an unreadable config, so say which it was.
+        echo "❌ Failed (exit ${RESULT}) without printing anything. Check that \`${1}\` is installed in the job image and that its configuration is readable."
       else
         echo "❌ Failed (exit ${RESULT}). The linter reported:"
         echo ""

@@ -43,7 +43,7 @@ env:
 
 jobs:
   dependency:
-    name: "Java: Dependency Download"
+    name: Dependency Download
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
     permissions:
@@ -75,7 +75,14 @@ jobs:
           restore-keys: m2-
 
       - name: Resolve Dependencies
-        run: mvn -B dependency:go-offline -q
+        id: resolve
+        run: |
+          set -uo pipefail
+          # Capture as well as stream: Maven names the artifact coordinate and
+          # the repository that refused it, and that sentence is the whole
+          # answer. An exit code on its own is not.
+          mvn -B dependency:go-offline -q 2>&1 | tee "${RUNNER_TEMP}/mvn-resolve.log"
+          exit "${PIPESTATUS[0]}"
 
       # GitLab inherits `when: always` here, which is safe there because a cache
       # key is rewritable — a partial tree from a failed resolve is overwritten
@@ -89,19 +96,37 @@ jobs:
           path: .m2
           key: ${{ steps.key.outputs.key }}
 
+      # Cache hit or miss is worth stating on a green run: it is what explains
+      # the job's duration, and a key that never hits points at a pom.xml that
+      # keeps changing. On a failure Maven's own words go here too, since no
+      # other job in the graph will report them.
       - name: Publish Dependency Summary
         if: always()
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.key.outputs.key }}
+          RESOLVE_OUTCOME: ${{ steps.resolve.outcome }}
         run: |
           set -euo pipefail
+          CACHE_STATE="rebuilt — no entry matched"
+          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
             echo "### ☕ Java dependencies"
             echo ""
-            echo "Cache key \`${{ steps.key.outputs.key }}\` (${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss — populated' }})."
+            if [[ "${RESOLVE_OUTCOME}" == "success" ]]; then
+              echo "✅ Repository resolved offline. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}."
+            else
+              echo "❌ \`mvn dependency:go-offline\` failed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}. Maven reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/mvn-resolve.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   build:
-    name: "Java: Build"
+    name: Build
     needs: dependency
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 40
@@ -137,7 +162,13 @@ jobs:
           restore-keys: m2-
 
       - name: Build
-        run: ${{ inputs.build-command }}
+        id: compile
+        run: |
+          set -uo pipefail
+          # Braces, not a bare pipe: a build command may end in its own
+          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Upload Artifacts
         if: ${{ !cancelled() }}
@@ -152,12 +183,23 @@ jobs:
 
       - name: Publish Build Summary
         if: always()
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
           {
             echo "### 📦 Java build"
             echo ""
-            if compgen -G "target/*.jar" > /dev/null || compgen -G "target/*.war" > /dev/null; then
+            if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
+              # "No artifacts were produced" is a symptom. javac already named
+              # the file and the line, so that is what goes here.
+              echo "❌ \`${BUILD_COMMAND}\` failed. Maven reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            elif compgen -G "target/*.jar" > /dev/null || compgen -G "target/*.war" > /dev/null; then
               echo "| Artifact | Size |"
               echo "|---|---|"
               for F in target/*.jar target/*.war; do
@@ -165,13 +207,13 @@ jobs:
                 echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
               done
             else
-              echo "No JAR or WAR artifacts were produced."
+              echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote no JAR or WAR to \`target/\`, so the \`java-artifacts\` artifact will be empty."
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   test:
-    name: "Java: Unit Test"
+    name: Unit Test
     if: ${{ inputs.run-tests }}
     needs: dependency
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -217,7 +259,35 @@ jobs:
           restore-keys: m2-
 
       - name: Run Unit Tests
-        run: ${{ inputs.test-command }}
+        id: unit
+        run: |
+          set -uo pipefail
+          # Braces, not a bare pipe: a test command may end in its own
+          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
+          exit "${PIPESTATUS[0]}"
+
+      # junit-report.sh reports the cases Surefire records. A run that never got
+      # that far — a compile error in the test sources, a missing plugin —
+      # leaves it nothing to report, so Maven's own output explains the job.
+      - name: Explain Test Runner Failure
+        if: ${{ failure() && steps.unit.outcome == 'failure' }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🧪 Java test command"
+            echo ""
+            echo "❌ \`${TEST_COMMAND}\` exited non-zero. Maven reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${RUNNER_TEMP}/test.log" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
+            echo ""
+            echo "Per-case results, where Surefire got far enough to write any, are in the table below and in the \`java-test-reports\` artifact."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload Test Reports
         if: ${{ !cancelled() }}

@@ -32,20 +32,25 @@ jobs:
     uses: ./.github/workflows/self-lint.yml
     secrets: inherit
 
+  # Calls secret-scanning.yml directly rather than through self-secret-scan.yml,
+  # for the same reason `guards` calls check.yml directly: self-secret-scan.yml
+  # only forwards one input, and the extra hop made this read
+  # "Security / Secret Scan / Secret Scan". It still exists for a standalone
+  # dispatch with full-history on.
   secret-scan:
     name: Security
-    uses: ./.github/workflows/self-secret-scan.yml
+    uses: ./.github/workflows/secret-scanning.yml
+    secrets: inherit
+
+  version:
+    name: Version
+    uses: ./.github/workflows/self-version.yml
     secrets: inherit
 
   # Calls check.yml directly rather than through self-check.yml. Each reusable
   # hop prefixes the job name, and "Check / Release Guards / Check: Migration
   # Guide" said one thing three times. self-check.yml still exists for a
   # standalone dispatch.
-  version:
-    name: Version
-    uses: ./.github/workflows/self-version.yml
-    secrets: inherit
-
   guards:
     name: Guards
     needs: version

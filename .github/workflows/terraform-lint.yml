@@ -93,7 +93,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   init:
-    name: "Terraform: Init"
+    name: Init
     needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
@@ -131,27 +131,39 @@ jobs:
           restore-keys: tf-
 
       - name: Terraform Init
+        id: tfinit
         env:
           TF_STATE_NAME: ${{ inputs.state-name }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           SLUG="${GITHUB_REPOSITORY//\//_}"
+          # Capture as well as stream: `terraform init` says whether it was the
+          # backend, a provider constraint or a credential that stopped it, and
+          # "check the backend configuration" is a guess by comparison.
           terraform init -input=false -no-color -reconfigure \
-            -backend-config="workspace_key_prefix=${SLUG}/${TF_STATE_NAME}"
+            -backend-config="workspace_key_prefix=${SLUG}/${TF_STATE_NAME}" 2>&1 | tee "${RUNNER_TEMP}/tf-init.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Publish Init Summary
         if: always()
         env:
-          OUTCOME: ${{ job.status }}
+          OUTCOME: ${{ steps.tfinit.outcome }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
+          CACHE_STATE="rebuilt — no entry matched"
+          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
             echo "### 🌍 Terraform init"
             echo ""
             if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ Backend initialised; providers cached for the checks."
+              echo "✅ Backend initialised; providers cached for the checks (provider cache ${CACHE_STATE})."
             else
-              echo "❌ \`terraform init\` failed — check the backend configuration and credentials."
+              echo "❌ \`terraform init\` failed, so neither \`validate\` nor \`tflint\` ran. Terraform reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/tf-init.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -166,7 +178,7 @@ jobs:
           key: ${{ steps.key.outputs.key }}
 
   check:
-    name: "Terraform: ${{ matrix.name }}"
+    name: ${{ matrix.name }}
     needs: [discover, init]
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
@@ -195,35 +207,48 @@ jobs:
           restore-keys: tf-
 
       - name: Run ${{ matrix.name }}
+        id: check
         env:
           CHECK: ${{ matrix.check }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          # Capture as well as stream: both tools name the file, the line and
+          # the rule. `terraform fmt -check` says nothing at all beyond the
+          # file list, so the diff it would have applied goes in too.
+          LOG="${RUNNER_TEMP}/tf-check.log"
           case "${CHECK}" in
             validate)
-              terraform validate
-              terraform fmt -recursive -check .
+              {
+                terraform validate -no-color &&
+                terraform fmt -recursive -check -diff -no-color .
+              } 2>&1 | tee "${LOG}"
               ;;
             tflint)
-              tflint --chdir . --recursive --filter=tests/** --call-module-type=all
+              tflint --chdir . --recursive --filter=tests/** --call-module-type=all 2>&1 | tee "${LOG}"
               ;;
           esac
+          exit "${PIPESTATUS[0]}"
 
       - name: Publish Check Summary
         if: always()
         env:
           NAME: ${{ matrix.name }}
-          OUTCOME: ${{ job.status }}
+          OUTCOME: ${{ steps.check.outcome }}
         run: |
           set -euo pipefail
+          LOG="${RUNNER_TEMP}/tf-check.log"
           {
             echo "### 🌍 Terraform: ${NAME}"
             echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ Passed." ;;
-              failure) echo "❌ Failed. See the job log." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ Passed."
+            else
+              echo "❌ Failed. \`${NAME}\` reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${LOG}" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -231,7 +256,7 @@ jobs:
   # a backend or credential failure in `terraform init` must not hide stale
   # generated documentation. The script writes its own step summary.
   docs:
-    name: "Terraform: Documentation"
+    name: Documentation
     needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20

@@ -41,7 +41,7 @@ env:
 
 jobs:
   dependency:
-    name: "Go: Dependency Download"
+    name: Dependency Download
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
@@ -73,7 +73,14 @@ jobs:
           restore-keys: go-
 
       - name: Download Modules
-        run: go mod download
+        id: download
+        run: |
+          set -uo pipefail
+          # Capture as well as stream: `go mod download` names the module and
+          # the checksum or proxy error that stopped it, and that sentence is
+          # the whole answer. An exit code on its own is not.
+          go mod download 2>&1 | tee "${RUNNER_TEMP}/go-mod-download.log"
+          exit "${PIPESTATUS[0]}"
 
       # GitLab inherits `when: always` here, which is safe there because a cache
       # key is rewritable — a partial tree from a failed resolve is overwritten
@@ -87,19 +94,37 @@ jobs:
           path: .go-cache
           key: ${{ steps.key.outputs.key }}
 
+      # Cache hit or miss is worth stating on a green run: it is what explains
+      # the job's duration, and a key that never hits points at a go.sum that
+      # keeps changing. On a failure the resolution error goes here too, since
+      # no other job in the graph will report it.
       - name: Publish Dependency Summary
         if: always()
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.key.outputs.key }}
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
         run: |
           set -euo pipefail
+          CACHE_STATE="rebuilt — no entry matched"
+          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
           {
             echo "### 🐹 Go modules"
             echo ""
-            echo "Cache key \`${{ steps.key.outputs.key }}\` (${{ steps.cache.outputs.cache-hit == 'true' && 'hit' || 'miss — populated' }})."
+            if [[ "${DOWNLOAD_OUTCOME}" == "success" ]]; then
+              echo "✅ Modules resolved. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}."
+            else
+              echo "❌ \`go mod download\` failed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}. Go reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/go-mod-download.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   build:
-    name: "Go: Build"
+    name: Build
     needs: dependency
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
@@ -135,7 +160,13 @@ jobs:
           restore-keys: go-
 
       - name: Build
-        run: ${{ inputs.build-command }}
+        id: compile
+        run: |
+          set -uo pipefail
+          # Braces, not a bare pipe: a build command may end in its own
+          # redirect, and `cmd > file | tee` would hand tee an empty stream.
+          { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Upload Binaries
         if: ${{ !cancelled() }}
@@ -149,12 +180,23 @@ jobs:
 
       - name: Publish Build Summary
         if: always()
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
         run: |
           set -euo pipefail
           {
             echo "### 📦 Go build"
             echo ""
-            if [[ -d bin ]]; then
+            if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
+              # "No binaries were produced" is a symptom. The compiler already
+              # named the file and the line, so that is what goes here.
+              echo "❌ \`${BUILD_COMMAND}\` failed. The compiler reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            elif [[ -d bin ]]; then
               echo "| Binary | Size |"
               echo "|---|---|"
               for F in bin/*; do
@@ -162,13 +204,13 @@ jobs:
                 echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
               done
             else
-              echo "No binaries were produced."
+              echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote nothing to \`bin/\`, so the \`go-binaries\` artifact will be empty."
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   test:
-    name: "Go: Unit Test"
+    name: Unit Test
     if: ${{ inputs.run-tests }}
     needs: dependency
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -214,10 +256,37 @@ jobs:
           restore-keys: go-
 
       - name: Run Unit Tests
+        id: unit
+        run: |
+          set -uo pipefail
+          mkdir -p "${TEST_REPORT_DIR}"
+          # Braces, not a bare pipe: the default test command ends in its own
+          # redirect into the JUnit file, and `cmd > file | tee` would hand tee
+          # an empty stream.
+          { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
+          exit "${PIPESTATUS[0]}"
+
+      # junit-report.sh reports the cases a JUnit file records. A test command
+      # that never wrote one — a compile error, a missing runner — leaves it
+      # nothing to report, so its own output has to be what explains the job.
+      - name: Explain Test Runner Failure
+        if: ${{ failure() && steps.unit.outcome == 'failure' }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
         run: |
           set -euo pipefail
-          mkdir -p "${TEST_REPORT_DIR}"
-          ${{ inputs.test-command }}
+          {
+            echo "### 🧪 Go test command"
+            echo ""
+            echo "❌ \`${TEST_COMMAND}\` exited non-zero. It reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${RUNNER_TEMP}/test.log" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
+            echo ""
+            echo "Per-case results, where the run got far enough to produce any, are in the table below and in the \`go-test-reports\` artifact."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload Test Reports
         if: ${{ !cancelled() }}

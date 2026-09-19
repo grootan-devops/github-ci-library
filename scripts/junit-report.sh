@@ -18,6 +18,7 @@
 #   FAIL_ON_FAILURE   true  exits non-zero when a test failed (default false)
 #   ANNOTATION_LEVEL  failure | warning | notice (default failure)
 #   MAX_ANNOTATIONS   cap on annotations sent (default 50, GitHub's per-request limit)
+#   MAX_LISTED_FAILURES  cap on failures listed in the job summary (default 20)
 set -euo pipefail
 
 : "${REPORT_GLOB:?REPORT_GLOB is required}"
@@ -26,6 +27,7 @@ JOB_SUMMARY="${JOB_SUMMARY:-true}"
 FAIL_ON_FAILURE="${FAIL_ON_FAILURE:-false}"
 ANNOTATION_LEVEL="${ANNOTATION_LEVEL:-failure}"
 MAX_ANNOTATIONS="${MAX_ANNOTATIONS:-50}"
+MAX_LISTED_FAILURES="${MAX_LISTED_FAILURES:-20}"
 
 shopt -s nullglob globstar
 # shellcheck disable=SC2206 # deliberate globbing: REPORT_GLOB is a glob pattern
@@ -35,7 +37,12 @@ shopt -u nullglob globstar
 if [[ ${#REPORTS[@]} -eq 0 ]]; then
   echo "No JUnit report matched '${REPORT_GLOB}'; nothing to publish."
   if [[ "${JOB_SUMMARY}" == "true" ]]; then
-    { echo "### ${CHECK_NAME}"; echo; echo "No test report was produced."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+    {
+      echo "### ${CHECK_NAME}"
+      echo ""
+      echo "No test report matched \`${REPORT_GLOB}\`. Either the test command did not run, or it failed before writing JUnit XML — the test step's own output says which."
+      echo ""
+    } >> "${GITHUB_STEP_SUMMARY}"
   fi
   exit 0
 fi
@@ -82,10 +89,17 @@ if [[ "${JOB_SUMMARY}" == "true" ]]; then
     echo "| ${TOTAL} | ${PASSED} | ${FAILED} | ${SKIPPED} |"
     echo ""
     if [[ "${FAILED}" -gt 0 ]]; then
-      echo "<details><summary>Failures</summary>"
+      # A broken suite can fail in the hundreds. The counts above are the
+      # answer; this is a bounded sample to recognise the shape of it by, and
+      # the uploaded JUnit XML carries every case.
+      echo "<details><summary>Failures (showing up to ${MAX_LISTED_FAILURES} of ${FAILED})</summary>"
       echo ""
-      jq -r '.[] | select(.failure != null)
+      jq -r --argjson max "${MAX_LISTED_FAILURES}" '[.[] | select(.failure != null)] | .[0:$max] | .[]
         | "- **\(.classname // "")\(if (.classname // "") != "" then " · " else "" end)\(.name)** — \((.failure["+@message"] // .failure | tostring) | gsub("\n"; " ") | .[0:300])"' <<< "${CASES}"
+      if [[ "${FAILED}" -gt "${MAX_LISTED_FAILURES}" ]]; then
+        echo ""
+        echo "_…and $(( FAILED - MAX_LISTED_FAILURES )) more. Every case is in the uploaded test report._"
+      fi
       echo ""
       echo "</details>"
       echo ""

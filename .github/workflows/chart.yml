@@ -79,7 +79,7 @@ env:
 
 jobs:
   docs:
-    name: "Chart: Documentation"
+    name: Documentation
     if: ${{ inputs.check-docs }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
@@ -106,7 +106,7 @@ jobs:
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart-docs-check.sh"
 
   lint:
-    name: "Chart: Lint"
+    name: Lint
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
@@ -128,39 +128,63 @@ jobs:
           set -euo pipefail
           if [[ -z "${REGISTRY_USERNAME}" || -z "${REGISTRY_PASSWORD}" ]]; then
             echo "::error title=Registry::IMAGE_REGISTRY_USERNAME / IMAGE_REGISTRY_PASSWORD are required to resolve chart dependencies. Pass 'secrets: inherit'."
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            printf '### ⎈ Chart lint\n\n❌ No registry credentials, so the chart dependencies cannot be resolved and the chart was never linted. Pass `secrets: inherit` from the calling workflow.\n\n' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
           printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
 
       - name: Update Chart Dependencies
-        run: helm dependency update "${CHART_DIR}/"
+        id: deps
+        run: |
+          set -uo pipefail
+          helm dependency update "${CHART_DIR}/" 2>&1 | tee "${RUNNER_TEMP}/helm-dep.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Lint Chart
+        id: helmlint
         env:
           HELM_TEST_VALUES: ${{ inputs.helm-values }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          # Capture as well as stream: `helm lint --strict` names the template
+          # and the field it rejected, and that is the whole answer.
           if [[ -z "${HELM_TEST_VALUES}" ]]; then
-            helm lint --strict -f "${CHART_DIR}/values.yaml" "${CHART_DIR}/"
+            helm lint --strict -f "${CHART_DIR}/values.yaml" "${CHART_DIR}/" 2>&1 | tee "${RUNNER_TEMP}/helm-lint.log"
           else
             printf '%s' "${HELM_TEST_VALUES}" > "${CHART_DIR}/override.yaml"
-            helm lint --strict -f "${CHART_DIR}/values.yaml" -f "${CHART_DIR}/override.yaml" "${CHART_DIR}/"
+            helm lint --strict -f "${CHART_DIR}/values.yaml" -f "${CHART_DIR}/override.yaml" "${CHART_DIR}/" 2>&1 | tee "${RUNNER_TEMP}/helm-lint.log"
           fi
+          exit "${PIPESTATUS[0]}"
 
       - name: Publish Lint Summary
         if: always()
         env:
-          OUTCOME: ${{ job.status }}
+          DEPS_OUTCOME: ${{ steps.deps.outcome }}
+          LINT_OUTCOME: ${{ steps.helmlint.outcome }}
         run: |
           set -euo pipefail
+          # helm lint ends with its own tally ("1 chart(s) linted, 0 chart(s)
+          # failed") — already computed, so the count costs nothing to carry.
+          TALLY="$(grep -E 'chart\(s\) linted' "${RUNNER_TEMP}/helm-lint.log" 2>/dev/null | tail -n 1 || true)"
           {
             echo "### ⎈ Chart lint"
             echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ \`helm lint --strict\` passed." ;;
-              failure) echo "❌ \`helm lint --strict\` failed. See the job log." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
+            if [[ "${DEPS_OUTCOME}" != "success" ]]; then
+              echo "❌ \`helm dependency update\` failed, so the chart was never linted. Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 30 "${RUNNER_TEMP}/helm-dep.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            elif [[ "${LINT_OUTCOME}" == "success" ]]; then
+              echo "✅ \`helm lint --strict\` passed.${TALLY:+ ${TALLY}}"
+            else
+              echo "❌ \`helm lint --strict\` failed.${TALLY:+ ${TALLY}} Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/helm-lint.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -169,7 +193,7 @@ jobs:
   # An application chart has nothing to assert that lint does not already cover.
   # Requires the `unittest` Helm plugin in the job image.
   unittest:
-    name: "Chart: Unit Test"
+    name: Unit Test
     if: ${{ inputs.run-unittest }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
@@ -188,25 +212,50 @@ jobs:
         run: helm dependency update "${CHART_DIR}/${{ inputs.mock-chart }}"
 
       - name: Run helm-unittest
+        id: unittest
         run: |
+          set -uo pipefail
           helm unittest --strict \
             --output-type JUnit \
             --output-file unittest-report.xml \
-            "${CHART_DIR}/${{ inputs.mock-chart }}"
+            "${CHART_DIR}/${{ inputs.mock-chart }}" 2>&1 | tee "${RUNNER_TEMP}/helm-unittest.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Publish Unit Test Summary
         if: always()
         env:
-          OUTCOME: ${{ job.status }}
+          MOCK_CHART: ${{ inputs.mock-chart }}
+          OUTCOME: ${{ steps.unittest.outcome }}
         run: |
           set -euo pipefail
+          # helm-unittest prints its own Charts/Test Suites/Tests tallies at the
+          # end of the run. Reuse them rather than re-parsing the JUnit file.
+          TALLY="$(grep -E '^(Charts|Test Suites|Tests|Snapshot):' "${RUNNER_TEMP}/helm-unittest.log" 2>/dev/null || true)"
           {
             echo "### 📘 Chart unit tests"
             echo ""
             if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ \`helm unittest --strict\` passed against \`${CHART_DIR}/${{ inputs.mock-chart }}\`."
+              echo "✅ \`helm unittest --strict\` passed against \`${CHART_DIR}/${MOCK_CHART}\`."
             else
-              echo "❌ \`helm unittest --strict\` failed. See the job log and the JUnit report."
+              echo "❌ \`helm unittest --strict\` failed against \`${CHART_DIR}/${MOCK_CHART}\`."
+            fi
+            if [[ -n "${TALLY}" ]]; then
+              echo ""
+              echo '```'
+              echo "${TALLY}"
+              echo '```'
+            fi
+            if [[ "${OUTCOME}" != "success" ]]; then
+              echo ""
+              echo "<details><summary>helm-unittest output</summary>"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/helm-unittest.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+              echo ""
+              echo "</details>"
+              echo ""
+              echo "Every assertion is in the \`chart-unittest-report\` artifact."
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -221,7 +270,7 @@ jobs:
           retention-days: 7
 
   build:
-    name: "Chart: Package"
+    name: Package
     if: ${{ !inputs.is-release }}
     needs: lint
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -244,29 +293,40 @@ jobs:
         run: printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
 
       - name: Package Chart
+        id: package
         env:
           CHART_VERSION: ${{ inputs.chart-version }}
           CHART_APP_VERSION: ${{ inputs.chart-app-version }}
         run: |
-          set -euo pipefail
-          helm dependency update "${CHART_DIR}/"
-          helm package "${CHART_DIR}/" --version "${CHART_VERSION}" --app-version "${CHART_APP_VERSION}"
+          set -uo pipefail
+          # Capture as well as stream: Helm names the dependency it could not
+          # pull or the version string it rejected, and that is the answer.
+          {
+            helm dependency update "${CHART_DIR}/" &&
+            helm package "${CHART_DIR}/" --version "${CHART_VERSION}" --app-version "${CHART_APP_VERSION}"
+          } 2>&1 | tee "${RUNNER_TEMP}/helm-package.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Publish Package Summary
         if: always()
         env:
           CHART_NAME: ${{ inputs.chart-name }}
           CHART_VERSION: ${{ inputs.chart-version }}
-          OUTCOME: ${{ job.status }}
+          CHART_APP_VERSION: ${{ inputs.chart-app-version }}
+          OUTCOME: ${{ steps.package.outcome }}
         run: |
           set -euo pipefail
           {
             echo "### ⎈ Chart package"
             echo ""
             if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ Packaged \`${CHART_NAME}-${CHART_VERSION}.tgz\`."
+              echo "✅ Packaged \`${CHART_NAME}-${CHART_VERSION}.tgz\` (appVersion \`${CHART_APP_VERSION}\`)."
             else
-              echo "❌ \`helm package\` failed. See the job log."
+              echo "❌ \`helm package\` did not produce \`${CHART_NAME}-${CHART_VERSION}.tgz\`. Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/helm-package.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
@@ -281,7 +341,7 @@ jobs:
           retention-days: 7
 
   push:
-    name: "Chart: Push"
+    name: Push
     needs: build
     if: ${{ !cancelled() && !inputs.is-release && needs.build.result == 'success' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -318,12 +378,39 @@ jobs:
           PACKAGE="${CHART_NAME}-${CHART_VERSION}.tgz"
           if [[ ! -f "${PACKAGE}" ]]; then
             echo "::error title=Chart push::Package '${PACKAGE}' not found."
+            {
+              echo "### ⎈ Helm Chart Package Info"
+              echo ""
+              echo "❌ \`${PACKAGE}\` is not in the downloaded \`chart-package\` artifact, so there is nothing to push. The package job names its output from \`chart-name\` and \`chart-version\`; these are what arrived:"
+              echo ""
+              echo '```'
+              ls -1
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
           TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}"
           echo "Pushing ${PACKAGE} to ${TARGET}..."
-          helm push "${PACKAGE}" "${TARGET}"
+          # Capture as well as stream: a registry that refuses the push says
+          # whether it was the credential, the quota or an immutable tag.
+          if ! PUSH_OUTPUT="$(helm push "${PACKAGE}" "${TARGET}" 2>&1)"; then
+            echo "${PUSH_OUTPUT}" >&2
+            echo "::error title=Chart push::${TARGET} refused ${PACKAGE}."
+            {
+              echo "### ⎈ Helm Chart Package Info"
+              echo ""
+              echo "❌ \`${TARGET}\` refused \`${PACKAGE}\`. Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 30 <<< "${PUSH_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "${PUSH_OUTPUT}"
 
           # GitLab's Chart:Push mirrors a *stable* push into the dev channel so a
           # chart that was promoted still resolves for consumers pinned to the
@@ -332,13 +419,19 @@ jobs:
           # the dev repository is mirrored. The mirror is a convenience -- the
           # bytes it duplicates are published above -- so a failure is a notice,
           # not an error.
+          MIRROR_STATE="not applicable"
           if [[ -n "${CHART_DEV_REPOSITORY}" && "${CHART_REPOSITORY}" != "${CHART_DEV_REPOSITORY}" ]]; then
             DEV_TARGET="oci://${REGISTRY_HOST}/${CHART_DEV_REPOSITORY}"
             echo "Mirroring ${PACKAGE} to the dev channel at ${DEV_TARGET}..."
             if helm push "${PACKAGE}" "${DEV_TARGET}"; then
               echo "✅ Mirrored ${PACKAGE} to ${DEV_TARGET}."
+              MIRROR_STATE="\`${DEV_TARGET}\`"
             else
               echo "::warning title=Chart push::Optional dev mirror push failed for '${PACKAGE}'. The chart is published at ${TARGET}."
+              # A consumer pinned to the candidate repository will not resolve
+              # this version, so the reader has to be told even though the job
+              # goes green.
+              MIRROR_STATE="⚠️ failed — consumers pinned to \`${CHART_DEV_REPOSITORY}\` will not resolve \`${CHART_VERSION}\`"
             fi
           fi
 
@@ -347,6 +440,7 @@ jobs:
             echo "- **📦 Name:** \`${CHART_NAME}\`"
             echo "- **🏷️ Version:** \`${CHART_VERSION}\`"
             echo "- **🌐 Registry:** \`${TARGET}\`"
+            echo "- **🔁 Dev mirror:** ${MIRROR_STATE}"
           } > "${CHART_INFO_FILE_NAME}"
           cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
 
@@ -360,7 +454,7 @@ jobs:
           retention-days: 7
 
   promote:
-    name: "Chart: Promote"
+    name: Promote
     if: ${{ inputs.is-release }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
@@ -418,17 +512,45 @@ jobs:
             helm package "${CHART_DIR}" --version "${TAG}" --app-version "${TAG}"
           else
             echo "::error title=Chart promote::No candidate and no local chart to publish."
+            {
+              echo "### ⎈ Helm Chart Package Info"
+              echo ""
+              echo "❌ \`${TAG}\` was not promoted: nothing in \`${DEV_REF}\` matched \`${CANDIDATE_VERSION:-^${TAG}-0}\`, and there is no \`${CHART_DIR}/Chart.yaml\` to fall back to. The production repository is unchanged."
+              echo ""
+              echo "Candidate versions currently published:"
+              echo ""
+              echo '```'
+              helm show chart "${DEV_REF}" --version "^${TAG}-0" 2>&1 | head -n 20 || echo "(the dev repository could not be listed either)"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
-          helm push "${CHART_NAME}-${TAG}.tgz" "oci://${REGISTRY_HOST}/${PROD_REPOSITORY}"
+          PROMOTED_FROM="${CANDIDATE_VERSION:-${LATEST:-working tree}}"
+          if ! PUSH_OUTPUT="$(helm push "${CHART_NAME}-${TAG}.tgz" "oci://${REGISTRY_HOST}/${PROD_REPOSITORY}" 2>&1)"; then
+            echo "${PUSH_OUTPUT}" >&2
+            echo "::error title=Chart promote::The production repository refused ${CHART_NAME}-${TAG}.tgz."
+            {
+              echo "### ⎈ Helm Chart Package Info"
+              echo ""
+              echo "❌ \`oci://${REGISTRY_HOST}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged in the dev repository. Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 30 <<< "${PUSH_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "${PUSH_OUTPUT}"
 
           {
             echo "### ⎈ Helm Chart Package Info"
             echo "- **📦 Name:** \`${CHART_NAME}\`"
             echo "- **🏷️ Version:** \`${TAG}\`"
             echo "- **🌐 Registry:** \`oci://${REGISTRY_HOST}/${PROD_REPOSITORY}\`"
-            echo "- **🔗 Promoted from:** \`${CANDIDATE_VERSION:-newest candidate}\`"
+            echo "- **🔗 Promoted from:** \`${PROMOTED_FROM}\`"
           } > "${CHART_INFO_FILE_NAME}"
           cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
 

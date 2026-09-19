@@ -29,7 +29,7 @@ on:
 
 jobs:
   sonarqube:
-    name: "Quality: SonarQube"
+    name: SonarQube
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 45
     permissions:
@@ -78,6 +78,15 @@ jobs:
           [[ -n "${SONARQUBE_TOKEN}" ]] || MISSING+=("secrets.SONARQUBE_TOKEN")
           if [[ ${#MISSING[@]} -gt 0 ]]; then
             echo "::error title=SonarQube::Missing configuration: ${MISSING[*]}"
+            {
+              echo "### 🔍 SonarQube"
+              echo ""
+              echo "❌ No analysis was run. These are not set on this repository or organisation:"
+              echo ""
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf -- '- `%s`\n' "${MISSING[@]}"
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
@@ -111,8 +120,18 @@ jobs:
           [[ -n "${PROJECT_VERSION}" ]] && SCANNER_ARGS+=("-Dsonar.projectVersion=${PROJECT_VERSION}")
           [[ -f sonar.properties ]] && SCANNER_ARGS+=("-Dproject.settings=sonar.properties")
 
-          sonar-scanner "${SCANNER_ARGS[@]}"
+          # The key has to reach the summary whether or not the scanner
+          # succeeds — it is what the dashboard link is built from.
           echo "SONAR_PROJECT_KEY=${PROJECT_KEY}" >> "${GITHUB_ENV}"
+
+          # Capture as well as stream: a failed quality gate is reported by the
+          # scanner as the conditions that were not met, and an unreachable
+          # server as an HTTP error. Both belong in the summary verbatim.
+          set +e
+          sonar-scanner "${SCANNER_ARGS[@]}" 2>&1 | tee "${RUNNER_TEMP}/sonar-scanner.log"
+          SCANNER_RESULT="${PIPESTATUS[0]}"
+          set -e
+          exit "${SCANNER_RESULT}"
 
       # GitLab keeps this cache on a stable key with `policy: pull-push`, so
       # every pipeline writes the newest analysis data back. GitHub caches are
@@ -172,6 +191,11 @@ jobs:
           DASHBOARD: ${{ vars.SONAR_EXTERNAL_URL || vars.SONAR_URL }}
         run: |
           set -euo pipefail
+          LOG="${RUNNER_TEMP}/sonar-scanner.log"
+          # The scanner prints the gate verdict itself ("QUALITY GATE STATUS:
+          # FAILED") followed by the conditions that were not met. Reuse those
+          # lines rather than querying the API a second time for the same fact.
+          GATE="$(grep -aE 'QUALITY GATE STATUS|^\s*-\s' "${LOG}" 2>/dev/null | tail -n 12 || true)"
           {
             echo "### 🔍 SonarQube"
             echo ""
@@ -180,9 +204,25 @@ jobs:
               failure) echo "❌ Analysis failed or the quality gate was not met." ;;
               *)       echo "Status: ${OUTCOME}" ;;
             esac
+            echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| **Project key** | \`${SONAR_PROJECT_KEY:-unresolved}\` |"
             if [[ -n "${DASHBOARD}" && -n "${SONAR_PROJECT_KEY:-}" ]]; then
+              echo "| **Dashboard** | [${SONAR_PROJECT_KEY}](${DASHBOARD}/dashboard?id=${SONAR_PROJECT_KEY}) |"
+            fi
+            if [[ -n "${GATE}" ]]; then
               echo ""
-              echo "[Open the dashboard](${DASHBOARD}/dashboard?id=${SONAR_PROJECT_KEY})"
+              echo '```'
+              echo "${GATE}"
+              echo '```'
+            elif [[ "${OUTCOME}" != "success" && -s "${LOG}" ]]; then
+              # No gate verdict means the scanner never reached one — the
+              # analysis itself broke, so its last words are the explanation.
+              echo ""
+              echo '```'
+              tail -n 30 "${LOG}"
+              echo '```'
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

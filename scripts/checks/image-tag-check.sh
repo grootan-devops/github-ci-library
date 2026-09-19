@@ -12,7 +12,25 @@ if [[ ! "${IMAGE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 if [[ -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
-  crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
+  # A login that fails aborts the guard, and "exit code 1" would leave the
+  # reader unable to tell a bad credential from an unreachable registry.
+  if ! LOGIN_OUTPUT="$(crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}" 2>&1)"; then
+    echo "::error title=Image::Could not authenticate to ${REGISTRY_HOST}."
+    echo "${LOGIN_OUTPUT}" >&2
+    {
+      echo "### 🐳 Image tag"
+      echo ""
+      echo "❌ Could not log in to \`${REGISTRY_HOST}\` as \`${REGISTRY_USERNAME}\`, so \`${IMAGE_TAG}\` cannot be confirmed available. crane reported:"
+      echo ""
+      echo '```'
+      tail -n 20 <<< "${LOGIN_OUTPUT}"
+      echo '```'
+      echo ""
+      echo "Check \`secrets.IMAGE_REGISTRY_USERNAME\` / \`secrets.IMAGE_REGISTRY_PASSWORD\` and that the caller passes \`secrets: inherit\`."
+      echo ""
+    } >> "${GITHUB_STEP_SUMMARY}"
+    exit 1
+  fi
 fi
 
 TARGET="${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"

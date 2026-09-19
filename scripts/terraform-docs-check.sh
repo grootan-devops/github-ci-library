@@ -10,6 +10,7 @@ set -euo pipefail
 
 : "${TF_README_FILE_NAME:=README.md}"
 STALE=()
+UNREADABLE=()
 
 check_dir() {
   local DIR="${1}"
@@ -21,9 +22,16 @@ check_dir() {
     return
   fi
 
-  local BEFORE AFTER
+  local BEFORE AFTER OUTPUT
   BEFORE=$(md5sum "${README_FILE}")
-  terraform-docs markdown table "${DIR}" --output-file "${TF_README_FILE_NAME}" --required
+  # terraform-docs aborts on a module it cannot parse. Its own words say which
+  # file and which line; "the docs check failed" says neither.
+  if ! OUTPUT="$(terraform-docs markdown table "${DIR}" --output-file "${TF_README_FILE_NAME}" --required 2>&1)"; then
+    echo "${OUTPUT}" >&2
+    echo "::error title=Terraform docs::terraform-docs could not read ${DIR}."
+    UNREADABLE+=("${README_FILE}:::$(tail -n 5 <<< "${OUTPUT}")")
+    return
+  fi
   AFTER=$(md5sum "${README_FILE}")
 
   if [[ "${BEFORE}" != "${AFTER}" ]]; then
@@ -42,19 +50,32 @@ if [[ -d modules ]]; then
 fi
 check_dir "."
 
-if [[ ${#STALE[@]} -gt 0 ]]; then
+if [[ ${#STALE[@]} -gt 0 || ${#UNREADABLE[@]} -gt 0 ]]; then
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {
       echo "### 🌍 Terraform documentation"
       echo ""
-      echo "❌ Stale or missing generated docs:"
-      # shellcheck disable=SC2016 # backticks are markdown, not command substitution
-      printf -- '- `%s`\n' "${STALE[@]}"
-      echo ""
-      echo '```bash'
-      echo "terraform-docs markdown table . --output-file ${TF_README_FILE_NAME} --recursive --required"
-      echo '```'
-      echo ""
+      if [[ ${#UNREADABLE[@]} -gt 0 ]]; then
+        echo "❌ terraform-docs could not read these modules, so their documentation was never compared:"
+        echo ""
+        echo '```'
+        for ENTRY in "${UNREADABLE[@]}"; do
+          echo "${ENTRY%%:::*}"
+          echo "${ENTRY#*:::}"
+        done
+        echo '```'
+        echo ""
+      fi
+      if [[ ${#STALE[@]} -gt 0 ]]; then
+        echo "❌ Stale or missing generated docs:"
+        # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+        printf -- '- `%s`\n' "${STALE[@]}"
+        echo ""
+        echo '```bash'
+        echo "terraform-docs markdown table . --output-file ${TF_README_FILE_NAME} --recursive --required"
+        echo '```'
+        echo ""
+      fi
     } >> "${GITHUB_STEP_SUMMARY}"
   fi
   exit 1

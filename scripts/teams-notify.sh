@@ -26,6 +26,26 @@ set -euo pipefail
 
 REPO_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}"
 
+summarise_failure() {
+  if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    return
+  fi
+  {
+    echo "### 📣 Teams notification"
+    echo ""
+    echo "❌ ${1}"
+    if [[ -n "${2}" ]]; then
+      echo ""
+      echo '```'
+      echo "${2}"
+      echo '```'
+    fi
+    echo ""
+    echo "The release itself is unaffected — only the announcement did not go out. Check \`secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL\`."
+    echo ""
+  } >> "${GITHUB_STEP_SUMMARY}"
+}
+
 ACTIONS='[
   {"type":"Action.OpenUrl","title":"🚀 Release Page","url":"'"${REPO_URL}/releases/tag/${TAG}"'","style":"positive"},
   {"type":"Action.OpenUrl","title":"📂 Source Code","url":"'"${REPO_URL}/tree/${TAG}"'"},
@@ -137,11 +157,15 @@ for URL in "${WEBHOOKS[@]}"; do
   fi
 
   echo "Sending notification to Teams Workflow..."
-  if ! HTTP_CODE="$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
+  # Keep the response body: Teams answers a rejected card with a reason, and the
+  # notify job is allow-failure, so the summary is the only place it will show.
+  RESPONSE_FILE="$(mktemp)"
+  if ! HTTP_CODE="$(curl -sS -o "${RESPONSE_FILE}" -w "%{http_code}" -X POST \
       -H "Content-Type: application/json" \
       --data-binary @message.json \
-      "${CLEAN_URL}")"; then
+      "${CLEAN_URL}" 2>"${RESPONSE_FILE}.err")"; then
     echo "::error title=Teams notification::Could not reach Teams Workflow endpoint."
+    summarise_failure "Could not reach the Teams Workflow endpoint." "$(cat "${RESPONSE_FILE}.err" 2>/dev/null)"
     exit 1
   fi
 
@@ -152,6 +176,7 @@ for URL in "${WEBHOOKS[@]}"; do
       ;;
     *)
       echo "::error title=Teams notification::Teams Workflow rejected the payload: HTTP ${HTTP_CODE}"
+      summarise_failure "The Teams Workflow rejected the card with HTTP ${HTTP_CODE}." "$(head -c 2000 "${RESPONSE_FILE}" 2>/dev/null)"
       exit 1
       ;;
   esac

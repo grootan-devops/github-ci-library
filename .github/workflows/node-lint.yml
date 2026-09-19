@@ -19,7 +19,7 @@ env:
 
 jobs:
   lint:
-    name: "Node Lint: biome"
+    name: biome
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
@@ -83,13 +83,27 @@ jobs:
           OUTCOME: ${{ steps.biome.outcome }}
         run: |
           set -euo pipefail
+          # Biome ends its report with its own tallies ("Checked N files",
+          # "Found N errors"). Those lines are the count, already computed — no
+          # second pass over the diagnostics to arrive at the same number.
+          TALLY="$(grep -E '^(Checked|Found|Fixed|Skipped) ' "${BIOME_REPORT}" 2>/dev/null | tail -n 5 || true)"
           {
             echo "### 📗 Node lint: biome"
             echo ""
             if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ Passed."
+              echo "✅ No diagnostics."
             elif [[ -s "${BIOME_REPORT}" ]]; then
-              echo "❌ Failed."
+              echo "❌ Biome reported diagnostics."
+            else
+              echo "❌ Biome exited \`${OUTCOME}\` without writing a report — it did not get as far as checking anything."
+            fi
+            if [[ -n "${TALLY}" ]]; then
+              echo ""
+              echo '```'
+              echo "${TALLY}"
+              echo '```'
+            fi
+            if [[ "${OUTCOME}" != "success" && -s "${BIOME_REPORT}" ]]; then
               echo ""
               echo "<details><summary>Biome diagnostics</summary>"
               echo ""
@@ -98,8 +112,8 @@ jobs:
               echo '```'
               echo ""
               echo "</details>"
-            else
-              echo "Status: ${OUTCOME}"
+              echo ""
+              echo "Every diagnostic is in the \`node-biome-report\` artifact."
             fi
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

@@ -139,7 +139,7 @@ env:
 
 jobs:
   build:
-    name: "Image: Buildah Build & Push"
+    name: Build & Push
     if: ${{ !inputs.is-release }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60
@@ -190,6 +190,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Build Image
+        id: build
         env:
           BASE_IMAGE_REPO: ${{ steps.base.outputs.repo }}
           BASE_IMAGE_TAG: ${{ steps.base.outputs.tag }}
@@ -203,7 +204,13 @@ jobs:
           CONTAINER_PATH_ENV: ${{ inputs.container-path-env }}
           CONTAINER_ENTRYPOINT: ${{ inputs.container-entrypoint }}
           CONTAINER_CMD: ${{ inputs.container-cmd }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah-build.sh"
+        run: |
+          set -uo pipefail
+          # Capture as well as stream: the script is a chain of buildah and dnf
+          # calls, and the one that aborted names the package or the mount it
+          # could not resolve. That sentence is the whole answer.
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah-build.sh" 2>&1 | tee "${RUNNER_TEMP}/buildah.log"
+          exit "${PIPESTATUS[0]}"
 
       - name: Push Image
         id: push
@@ -213,12 +220,20 @@ jobs:
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
         run: |
+          set -uo pipefail
+          # Capture as well as stream: podman says whether the registry refused
+          # the credential, the quota or the tag, and the summary needs that
+          # rather than an exit code.
+          {
+            podman login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}" &&
+            podman tag "${IMAGE_NAME}" "${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}" &&
+            podman push "${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
+          } 2>&1 | tee "${RUNNER_TEMP}/podman-push.log"
+          PUSH_RESULT="${PIPESTATUS[0]}"
+          [[ "${PUSH_RESULT}" -eq 0 ]] || exit "${PUSH_RESULT}"
           set -euo pipefail
-          podman login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
 
           TARGET="${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
-          podman tag "${IMAGE_NAME}" "${TARGET}"
-          podman push "${TARGET}"
 
           DIGEST="$(podman image inspect "${TARGET}" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')"
           REF="${REGISTRY_HOST}/${IMAGE_REPOSITORY}@${DIGEST}"
@@ -258,7 +273,8 @@ jobs:
 
       # buildah-build.sh writes the package table, and the push step writes the
       # digest table — both only on success. A failed build would otherwise
-      # report nothing about which base image it was assembling from.
+      # report nothing about which base image it was assembling from, so the
+      # aborted step's own output goes here alongside the target it was for.
       - name: Publish Build Failure Summary
         if: failure()
         env:
@@ -266,17 +282,29 @@ jobs:
           BASE_TAG: ${{ steps.base.outputs.tag }}
           REPO: ${{ inputs.image-repository }}
           TAG: ${{ inputs.image-tag }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
         run: |
           set -euo pipefail
+          if [[ "${BUILD_OUTCOME}" == "failure" ]]; then
+            STAGE="the buildah assembly"
+            LOG="${RUNNER_TEMP}/buildah.log"
+          else
+            STAGE="the push to the registry"
+            LOG="${RUNNER_TEMP}/podman-push.log"
+          fi
           {
             echo "### 🐳 Container Image"
             echo ""
-            echo "❌ \`${REGISTRY_HOST}/${REPO}:${TAG}\` was not built from \`${BASE_REPO:-unresolved}:${BASE_TAG:-unresolved}\`. No candidate exists for the scan or the promotion to consume."
+            echo "❌ \`${REGISTRY_HOST}/${REPO}:${TAG}\` was not published: ${STAGE} failed. It was being assembled from \`${BASE_REPO:-unresolved}:${BASE_TAG:-unresolved}\`. No candidate exists for the scan or the promotion to consume."
+            echo ""
+            echo '```'
+            tail -n 50 "${LOG}" 2>/dev/null || echo "(the failing step ran before any output was captured)"
+            echo '```'
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
   promote:
-    name: "Image: Promote"
+    name: Promote
     if: ${{ inputs.is-release }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
@@ -311,13 +339,15 @@ jobs:
 
           if [[ -z "${SCAN_RESULT}" ]]; then
             echo "::error title=Promotion refused::No scan result was passed. The scan runs in your workflow, so this one cannot depend on it directly — pass the scan job's result through the 'scan-result' input, or set 'require-scan: false' if this artifact has no scan."
+            REASON="no \`scan-result\` was passed. The scan runs in your workflow, so this one cannot depend on it directly — pass the scan job's \`result\` through the \`scan-result\` input, or set \`require-scan: false\` if this artifact has no scan."
           else
             echo "::error title=Promotion refused::The scan did not succeed (result: ${SCAN_RESULT}). Refusing to promote an image that failed or skipped its scan."
+            REASON="the scan job reported \`${SCAN_RESULT}\`, not \`success\`. Fix the scan, or justify its findings in \`ignored-cves.yml\`, before promoting."
           fi
           {
             echo "### 🚫 Promotion refused"
             echo ""
-            echo "The candidate image was not confirmed scanned, so it has not been promoted."
+            echo "The candidate image has not been promoted: ${REASON}"
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
           exit 1
@@ -351,11 +381,42 @@ jobs:
 
           if [[ -z "${SOURCE}" ]]; then
             echo "::error title=Image promote::No candidate image found in ${DEV_IMAGE} for ${TAG}."
+            {
+              echo "### 🐳 Container Image"
+              echo ""
+              echo "❌ \`${TAG}\` was not promoted: no candidate in \`${DEV_IMAGE}\` matched \`${CANDIDATE_TAG:-${TAG}-*}\`. The production tag is unchanged."
+              echo ""
+              echo "Tags that do exist in the candidate repository:"
+              echo ""
+              echo '```'
+              crane ls "${DEV_IMAGE}" 2>&1 | tail -n 20 || echo "(the candidate repository could not be listed either)"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
 
-          echo "📦 Promoting ${SOURCE} to ${PROD_IMAGE}:${TAG}"
-          crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}"
+          SOURCE_DIGEST="$(crane digest "${SOURCE}")"
+          echo "📦 Promoting ${SOURCE} (${SOURCE_DIGEST}) to ${PROD_IMAGE}:${TAG}"
+          # Capture as well as stream: a registry that refuses the retag says
+          # whether it was the credential, an immutable tag or a quota, and
+          # that sentence is what decides who has to fix it.
+          if ! MUTATE_OUTPUT="$(crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}" 2>&1)"; then
+            echo "${MUTATE_OUTPUT}" >&2
+            echo "::error title=Image promote::${PROD_IMAGE}:${TAG} was refused by the registry."
+            {
+              echo "### 🐳 Container Image"
+              echo ""
+              echo "❌ \`${PROD_IMAGE}:${TAG}\` was refused. The scanned candidate \`${SOURCE}\` (\`${SOURCE_DIGEST}\`) is unchanged in the dev repository, so a re-run can promote it once this is fixed. crane reported:"
+              echo ""
+              echo '```'
+              tail -n 30 <<< "${MUTATE_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "${MUTATE_OUTPUT}"
           crane tag "${PROD_IMAGE}:${TAG}" latest
           MAJOR="$(grep -Eo '^[0-9]+' <<<"${TAG}" || true)"
           MINOR="$(grep -Eo '^[0-9]+\.[0-9]+' <<<"${TAG}" || true)"
@@ -370,6 +431,10 @@ jobs:
             echo "| **Promoted from** | \`${SOURCE}\` |"
             echo "| **Released as** | \`${PROD_IMAGE}:${TAG}\` |"
             echo "| **Digest** | \`$(crane digest "${PROD_IMAGE}:${TAG}")\` |"
+            # The digest the scan cleared. `crane mutate` rewrites the version
+            # label, so this is expected to differ from the released digest —
+            # it is here as the provenance link back to the scan.
+            echo "| **Scanned candidate digest** | \`${SOURCE_DIGEST}\` |"
             echo ""
           } > "${IMAGE_INFO_FILE_NAME}"
           cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"

@@ -10,6 +10,18 @@ if ! REMOTE_TAGS="$(git -c http.extraheader="AUTHORIZATION: basic ${AUTH_HEADER}
   ls-remote --tags --refs "https://github.com/${GITHUB_REPOSITORY}.git" 2>&1)"; then
   echo "::error title=Git tag::Could not list remote tags. Refusing to report a tag as available without checking."
   echo "${REMOTE_TAGS}" >&2
+  {
+    echo "### 🏷️ Git tag"
+    echo ""
+    echo "❌ Could not list the remote tags of \`${GITHUB_REPOSITORY}\`, so \`${TAG}\` cannot be confirmed available. git reported:"
+    echo ""
+    echo '```'
+    tail -n 20 <<< "${REMOTE_TAGS}"
+    echo '```'
+    echo ""
+    echo "Check that the token passed as \`GH_TOKEN\` still has \`contents: read\` on this repository."
+    echo ""
+  } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
 

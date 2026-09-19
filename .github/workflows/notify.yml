@@ -18,7 +18,7 @@ on:
 
 jobs:
   notify:
-    name: "Notify: Teams"
+    name: Teams
     # GitLab applies `allow_failure: true` to Release:Notification:Teams through
     # .teams-adaptivecard-notification-vars. A Teams outage must not turn the
     # caller's run red -- the card is an announcement, not a release gate.

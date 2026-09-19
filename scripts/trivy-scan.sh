@@ -91,6 +91,20 @@ log_error() {
 print_separator() {
   echo "========================================"
 }
+
+# The scan's own summary is written at the very end, so a run that never gets
+# that far — a bad SCAN_TYPE, a Trivy that produced no report — would leave the
+# job summary blank. These failures get a section of their own instead.
+summarise_abort() {
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    {
+      echo "### 🛡️ Trivy ${SCAN_TYPE:-security} scan"
+      echo ""
+      echo "❌ ${1}"
+      echo ""
+    } >> "${GITHUB_STEP_SUMMARY}"
+  fi
+}
 get_ignore_config_path() {
   case "${SCAN_TYPE}" in
     image) echo "image" ;;
@@ -143,10 +157,12 @@ validate_scan_type() {
   if [[ -z "${SCAN_TYPE}" ]]; then
     log_error "SCAN_TYPE is not set. Valid values: ${VALID_TYPES[*]}"
     log_error "Example: export SCAN_TYPE=image"
+    summarise_abort "\`SCAN_TYPE\` is not set. Pass \`scan-type\` as one of: ${VALID_TYPES[*]}."
     exit 1
   fi
   if [[ ! " ${VALID_TYPES[*]} " == *" ${SCAN_TYPE} "* ]]; then
     log_error "Invalid SCAN_TYPE '${SCAN_TYPE}'. Valid values: ${VALID_TYPES[*]}"
+    summarise_abort "\`${SCAN_TYPE}\` is not a scan type. Pass \`scan-type\` as one of: ${VALID_TYPES[*]}."
     exit 1
   fi
   log_info "Scan type: ${SCAN_TYPE}"
@@ -159,10 +175,12 @@ validate_config_type() {
   local VALID_CONFIG_TYPES=("chart" "terraform")
   if [[ -z "${CONFIG_TYPE}" ]]; then
     log_error "CONFIG_TYPE is not set for config scan. Valid values: ${VALID_CONFIG_TYPES[*]}"
+    summarise_abort "\`config-type\` is required when \`scan-type\` is \`config\`. Pass one of: ${VALID_CONFIG_TYPES[*]}."
     exit 1
   fi
   if [[ ! " ${VALID_CONFIG_TYPES[*]} " == *" ${CONFIG_TYPE} "* ]]; then
     log_error "Invalid CONFIG_TYPE '${CONFIG_TYPE}'. Valid values: ${VALID_CONFIG_TYPES[*]}"
+    summarise_abort "\`${CONFIG_TYPE}\` is not a config type. Pass \`config-type\` as one of: ${VALID_CONFIG_TYPES[*]}."
     exit 1
   fi
   log_info "Config type: ${CONFIG_TYPE}"
@@ -264,6 +282,7 @@ execute_trivy_scan() {
 
   if [[ ! -f "${TRIVY_SCAN_REPORT_NAME}.json" ]]; then
     log_error "Trivy did not generate output file"
+    summarise_abort "Trivy exited cleanly but wrote no \`${TRIVY_SCAN_REPORT_NAME}.json\`, so there is nothing to evaluate. The scan cannot be treated as passing. Re-run, and if it persists check the Trivy server at \`${TRIVY_HOST:-<unset>}\`."
     exit 1
   fi
   log_info "Trivy scan completed successfully"
@@ -1018,6 +1037,32 @@ setup_temp_files() {
   trap cleanup EXIT
 }
 
+# The report tables count what Trivy found. This one counts what is left to act
+# on once the ignore file has been applied, which is what decided the verdict —
+# and it stays one table however many findings there are, where a truncated list
+# would hide the only number that matters. "No longer present" is the stale
+# suppression case: ignored-cves.yml has rotted and is now failing the scan.
+generate_action_table() {
+  case "${SCAN_TYPE}" in
+    license)
+      generate_table "License category" "Needs review" "Ignored"
+      echo "| Restricted | ${#FINAL_RESTRICTED[@]} | ${#FINAL_RESTRICTED_IGNORED[@]} |"
+      echo "| Reciprocal | ${#FINAL_RECIPROCAL[@]} | ${#FINAL_RECIPROCAL_IGNORED[@]} |"
+      echo "| Unrecognized | ${#FINAL_UNRECOGNIZED[@]} | ${#FINAL_UNRECOGNIZED_IGNORED[@]} |"
+      echo "| Notice | ${#FINAL_NOTICE[@]} | ${#FINAL_NOTICE_IGNORED[@]} |"
+      echo "| Permissive | ${#FINAL_PERMISSIVE[@]} | ${#FINAL_PERMISSIVE_IGNORED[@]} |"
+      echo "| **Ignored but no longer present** | ${#FINAL_FIXED_IGNORED[@]} | — |"
+      ;;
+    *)
+      generate_table "Category" "Count"
+      echo "| Active, fixable | ${#FINAL_FIXABLE[@]} |"
+      echo "| Ignored (justified) | ${#FINAL_FIXABLE_IGNORED[@]} |"
+      echo "| Unfixable | ${#FINAL_UNFIXABLE[@]} |"
+      echo "| **Ignored but no longer present** | ${#FINAL_FIXED_IGNORED[@]} |"
+      ;;
+  esac
+}
+
 # The scan already writes a markdown summary file (the same one that is attached
 # to the release); the job summary reuses it verbatim so the run page and the
 # release notes never disagree.
@@ -1041,14 +1086,28 @@ publish_step_summary() {
     fi
     echo ""
     echo "**Verdict:** ${VERDICT}"
+    echo ""
+    echo "#### What is left to act on"
+    echo ""
+    generate_action_table
     if [[ ${#REASONS[@]} -gt 0 ]]; then
       echo ""
-      echo "<details><summary>Details (${#REASONS[@]})</summary>"
-      echo ""
-      printf -- '- %s\n' "${REASONS[@]}"
-      echo ""
-      echo "</details>"
+      # Reasons say what to do about each bucket, so on a failure they are the
+      # remedy and belong open, not folded away behind a disclosure triangle.
+      if [[ ${EXIT_CODE} -eq 1 ]]; then
+        printf -- '- %s\n' "${REASONS[@]}"
+      else
+        echo "<details><summary>Details (${#REASONS[@]})</summary>"
+        echo ""
+        printf -- '- %s\n' "${REASONS[@]}"
+        echo ""
+        echo "</details>"
+      fi
     fi
+    echo ""
+    # Every individual finding is in the report the run uploads; the summary
+    # points at it rather than reprinting a list nobody reads in a table.
+    echo "Full findings: \`${TRIVY_SCAN_REPORT_NAME}.md\` in this run's artifacts."
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"
 
