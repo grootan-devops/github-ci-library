@@ -34,7 +34,6 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   linter pragmas with their reason, and the platform behaviours that would
   otherwise be re-broken.
 
-
 - `check.yml` discovers the guards that apply to the repository and runs them as
   a matrix, so a repository with no chart or no Dockerfile no longer gets
   permanently skipped chart and image jobs in its run graph.
