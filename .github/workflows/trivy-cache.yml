@@ -29,6 +29,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+      actions: write
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:
@@ -39,24 +40,13 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      - name: Resolve Cache Key
-        id: cache-key
-        run: |
-          set -euo pipefail
-          # GitLab keys this cache "trivy-db" and pulls it on every pipeline.
-          # A per-run key can never be reused, so the databases were downloaded
-          # again on every run. Key by day instead: one entry serves every run
-          # that day, and the prefix restore-key falls back to yesterday's while
-          # today's is still being warmed.
-          echo "value=trivy-db-$(date -u +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
-
       - name: Restore Trivy Database Cache
         id: cache
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: ${{ steps.cache-key.outputs.value }}
-          restore-keys: trivy-db-
+          key: trivy-db
+          restore-keys: trivy-db
 
       - name: Warm Policy & Java Databases
         env:
@@ -80,14 +70,43 @@ jobs:
             echo "No pom.xml and enable-java-db is not true — skipping trivy-java-db."
           fi
 
-      # An exact hit means today's databases are already cached; saving again
-      # would only fail on a duplicate key.
+      # GitLab keys this cache "trivy-db" and pushes over it every pipeline.
+      # GitHub caches are immutable, so the entry has to be deleted before the
+      # same key can be written again — otherwise "trivy-db" would be frozen at
+      # whatever the first run stored and the databases would go stale forever.
+      # Refresh at most once a day; every other run just restores.
+      - name: Refresh Cache Entry
+        id: refresh
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          STAMP=".trivycache/.warmed-on"
+          TODAY="$(date -u +%Y-%m-%d)"
+          if [[ -f "${STAMP}" ]] && [[ "$(cat "${STAMP}")" == "${TODAY}" ]]; then
+            echo "Databases were already warmed today; keeping the cached entry."
+            echo "save=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          mkdir -p .trivycache
+          echo "${TODAY}" > "${STAMP}"
+
+          if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" >/dev/null 2>&1; then
+            echo "Deleted the previous trivy-db entry so this run can write it."
+          else
+            echo "No previous trivy-db entry to delete."
+          fi
+          echo "save=true" >> "${GITHUB_OUTPUT}"
+
       - name: Save Trivy Database Cache
-        if: ${{ !cancelled() && steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ !cancelled() && steps.refresh.outputs.save == 'true' }}
         uses: actions/cache/save@v6
         with:
           path: .trivycache
-          key: ${{ steps.cache-key.outputs.value }}
+          key: trivy-db
 
       - name: Publish Cache Summary
         if: always()
@@ -96,6 +115,6 @@ jobs:
           {
             echo "### 🗄️ Trivy database cache"
             echo ""
-            echo "Warmed into \`${{ steps.cache-key.outputs.value }}\` — $(du -sh .trivycache 2>/dev/null | cut -f1 || echo 'empty')."
+            echo "Warmed into \`trivy-db\` — $(du -sh .trivycache 2>/dev/null | cut -f1 || echo 'empty')."
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

@@ -57,9 +57,9 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - The Trivy database cache was keyed by run id, so it could never be reused and
   every run downloaded the ~1.2GB vulnerability database and, for an image with
-  Java in it, a further ~900MB Java database. It is now keyed by day, matching
-  GitLab's single `trivy-db` key: the first run of the day warms it and every
-  run after that restores it.
+  Java in it, a further ~900MB Java database. The key is now `trivy-db`, as on
+  GitLab. GitHub caches are immutable, so the warm job deletes the entry before
+  rewriting it, and does that at most once a day — every other run restores.
 
 - `trivy-scan.sh` passed `--skip-java-db-update` unconditionally. Trivy treats
   that as fatal on a cold cache rather than as a cue to fetch the database, so
