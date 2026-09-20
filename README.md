@@ -45,16 +45,15 @@ Reusable GitHub Actions workflows (`workflow_call`)
 - [Scan Exit Codes](#scan-exit-codes)
 - [DevOps Reference & Platform Defaults](#devops-reference--platform-defaults)
 - [Project-Level Integration Examples (All Permutations)](#project-level-integration-examples-all-permutations)
-  - [1. Node.js Full Stack](#1-nodejs-full-stack-app--docker--helm--multi-env-gitops-deploy)
-  - [2. Python FastAPI / Service](#2-python-fastapi--service-app--docker--helm)
-  - [3. Golang Service / Binary Distribution](#3-golang-service--binary-distribution)
-  - [4. Java / Spring Boot Microservice](#4-java--spring-boot-microservice)
-  - [5. Pure Helm Chart Repository](#5-pure-helm-chart-repository)
-  - [6. Terraform Infrastructure / Module Registry](#6-terraform-infrastructure--module-registry)
+  - [1. Language + Docker Image + Helm Chart](#1-language--docker-image--helm-chart)
+  - [2. Terraform Infrastructure / Module Registry](#2-terraform-infrastructure--module-registry)
+  - [3. Helm Chart Only](#3-helm-chart-only)
+  - [4. Image Only, Built With Docker](#4-image-only-built-with-docker)
+  - [5. Image Only, Built with Buildah](#5-image-only-built-with-buildah)
+  - [6. Language Library (No Image, No Chart)](#6-language-library-no-image-no-chart)
   - [7. Monorepo with Matrix Fan-Out](#7-monorepo-with-matrix-fan-out)
-  - [8. Security & Code Quality Audit Only Pipeline](#8-security--code-quality-audit-only-pipeline)
-  - [9. Standalone Build & Unit Test Verification](#9-standalone-build--unit-test-verification)
-  - [10. Standalone Release Prerequisites & Conflict Check](#10-standalone-release-prerequisites--conflict-check)
+  - [8. Security & Code Quality Audit Only](#8-security--code-quality-audit-only)
+  - [9. GitOps Deploy Entry Point](#9-gitops-deploy-entry-point)
 - [Migration Guide & Standard](#migration-guide--standard)
 
 ---
@@ -78,6 +77,7 @@ permissions:
   packages: write
   actions: write
   checks: write
+  pull-requests: read
 
 jobs:
   init:
@@ -140,6 +140,8 @@ permissions:
   contents: write
   packages: write
   actions: write
+  checks: write
+  pull-requests: read
 
 jobs:
   init:
@@ -159,11 +161,13 @@ jobs:
     secrets: inherit
     with:
       scan-type: image
-      image-repository: ${{ needs.init.outputs.image-dev-repository }}
+      # Production repository, not the dev one: for a candidate tag
+      # trivy-scan.sh appends the dev suffix itself.
+      image-repository: ${{ needs.init.outputs.image-repository }}
       target-version: ${{ needs.init.outputs.candidate-image-tag }}
 
   image:
-    needs: [init, scan]
+    needs: [init, check, scan]
     uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
     secrets: inherit
     with:
@@ -1301,7 +1305,16 @@ Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
 Every example assumes the organisation variables and secrets above are set, and pins the
 library with `@1.0.0`.
 
-### 1. Node.js Full Stack (App + Docker + Helm + Multi-Env GitOps Deploy)
+### 1. Language + Docker Image + Helm Chart
+
+The complete single-service shape: an application build, an image and a chart that
+versions with it. `init.yml` resolves every version once, the `<language>-*` pair builds
+and tests, `docker.yml` and `chart.yml` publish, `scan.yml` covers both artifacts,
+`check.yml` gates the release and `release.yml` promotes it. `buildah.yml` does not apply
+because the image is built from a Dockerfile; `terraform-*` and `mono.yml` belong to other
+repository shapes; `deploy-*-gitops.yml` is a separate deploy workflow, not part of
+verification. Add `sbom.yml` and a `scan-type: license` job beside the scans if the project
+must ship an attestation.
 
 ```yaml
 # .github/workflows/pr.yml
@@ -1312,17 +1325,20 @@ on:
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
   cancel-in-progress: true
-permissions: { contents: read, packages: write, actions: read, checks: write }
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
 
 jobs:
   init:
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
-  trivy-cache:
-    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
-    secrets: inherit
-
+  # The guards ask whether the tag, changelog section, chart version and image tag
+  # are still free. No build can change that answer, so they depend on init alone.
   check:
     needs: init
     uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
@@ -1335,6 +1351,8 @@ jobs:
       image-tag: ${{ needs.init.outputs.image-tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
 
+  # Dockerfile, YAML, Markdown, changelog and migration guide. The Dockerfile lint
+  # lives here, not in docker.yml.
   lint:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
@@ -1350,6 +1368,13 @@ jobs:
       build-command: npm run build
       test-command: npm run test:ci
 
+  # Pulls the Trivy databases once so every scan restores them instead of
+  # re-downloading roughly 1GB each.
+  trivy-cache:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
   image:
     needs: [init, build]
     uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
@@ -1358,8 +1383,9 @@ jobs:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
       image-repository: ${{ needs.init.outputs.image-push-repository }}
 
+  # The chart's appVersion is the image tag, so it must not publish ahead of the image.
   chart:
-    needs: init
+    needs: [init, image]
     uses: grootan-devops/github-ci-library/.github/workflows/chart.yml@1.0.0
     secrets: inherit
     with:
@@ -1384,169 +1410,260 @@ jobs:
       scan-type: config
       config-type: chart
 
-  license-scan:
-    needs: trivy-cache
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: license
-
-  sbom:
-    needs: trivy-cache
-    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
-    secrets: inherit
-
   secret-scan:
     uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
     secrets: inherit
 
   sonarqube:
-    needs: build
+    needs: [init, build]
     uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
     secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
 ```
 
+Swap the `node-lint.yml` / `node-build.yml` pair for the `python-`, `golang-` or `java-`
+equivalent; nothing else in the shape changes. For Java, also set
+`enable-java-db: "true"` on `trivy-cache.yml`.
+
+> [!IMPORTANT]
+> `pull-requests: read` is not optional. `init.yml` requests it, and a caller that omits it
+> fails at **startup** — before any job begins, with no log to read.
+
 ```yaml
-# .github/workflows/deploy.yml
-name: CD · GitOps Deploy
+# .github/workflows/release.yml
+name: CD · Production Release
 on:
+  push:
+    branches: [master]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Target environment
-        required: true
-        type: choice
-        options: [dev, staging, production]
-      target-version:
-        description: Version to deploy (defaults to the current chart version)
-        required: false
-        type: string
 concurrency:
-  group: "deploy-${{ inputs.environment }}"
+  group: "release-${{ github.ref }}"
   cancel-in-progress: false
-permissions: { contents: read, actions: read }
+permissions:
+  contents: write
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
 
 jobs:
+  # workflow_dispatch can target any ref, so without this a release could be cut
+  # from a feature branch and publish work that never passed a pull request.
+  guard-ref:
+    name: Verify Ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+
   init:
+    needs: guard-ref
+    # guard-ref is skipped on a push, which would skip this job too: accept
+    # skipped, refuse failure.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
-  deploy:
+  # Re-run on master: the guards gate the release and extract its notes.
+  check:
     needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/deploy-argocd-gitops.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
     secrets: inherit
     with:
-      environment: ${{ inputs.environment }}
-      gitops-repo: contoso/app-gitops
-      app-path: apps/${{ inputs.environment }}/order-backend
+      tag: ${{ needs.init.outputs.tag }}
       chart-name: ${{ needs.init.outputs.chart-name }}
-      chart-version: ${{ inputs.target-version || needs.init.outputs.chart-version }}
+      chart-version: ${{ needs.init.outputs.chart-version }}
       chart-repository: ${{ needs.init.outputs.chart-repository }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
-      github-environment-name: ${{ inputs.environment }}
-```
 
----
-
-### 2. Python FastAPI / Service (App + Docker + Helm)
-
-```yaml
-# .github/workflows/pr.yml
-name: CI · PR Verification
-on: { pull_request: { branches: [master] } }
-permissions: { contents: read, packages: write, actions: read, checks: write }
-
-jobs:
-  init:
-    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+  trivy-cache:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
+  # The candidate is re-scanned here rather than trusted from the pull request
+  # run: it may have sat in the dev repository for days. `image-repository` is the
+  # PRODUCTION one: scan.yml appends the dev suffix itself for any target that is
+  # not a bare x.y.z, so passing image-dev-repository would resolve to
+  # `<repo>-dev-dev:<tag>`, which does not exist.
+  image-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      target-version: ${{ needs.init.outputs.candidate-image-tag }}
+
+  chart-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: config
+      config-type: chart
+
+  # `check` is in `needs` so a failed tag / changelog / migration / collision guard
+  # stops the promotion. Without it the production image is published anyway and
+  # only the git tag is blocked.
+  image:
+    needs: [init, check, image-scan]
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
+    secrets: inherit
+    with:
+      is-release: true
+      image-tag: ${{ needs.init.outputs.tag }}
+      release-tag: ${{ needs.init.outputs.tag }}
+      candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
+      # Required. docker.yml cannot depend on a scan that lives here, so it
+      # refuses to promote unless the verdict is handed to it.
+      scan-result: ${{ needs.image-scan.result }}
+
+  # Promotion pulls the exact candidate named by `candidate-version` and
+  # re-packages it at the release tag — the released chart carries the content the
+  # pull request scanned, re-stamped, not a fresh build from the working tree.
+  chart:
+    needs: [init, check, image, chart-scan]
+    uses: grootan-devops/github-ci-library/.github/workflows/chart.yml@1.0.0
+    secrets: inherit
+    with:
+      is-release: true
+      chart-name: ${{ needs.init.outputs.chart-name }}
+      chart-version: ${{ needs.init.outputs.chart-version }}
+      chart-app-version: ${{ needs.init.outputs.chart-app-version }}
+      chart-repository: ${{ needs.init.outputs.chart-repository }}
+      chart-dev-repository: ${{ needs.init.outputs.chart-dev-repository }}
+      release-tag: ${{ needs.init.outputs.tag }}
+      candidate-version: ${{ needs.init.outputs.candidate-chart-version }}
+
+  release:
+    needs: [init, check, image, chart]
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      upstream-run-id: ${{ needs.init.outputs.upstream-run-id }}
+```
+
+The remaining files are on-demand entry points into the same modules. None of them
+publishes anything.
+
+```yaml
+# .github/workflows/lint.yml
+name: Lint · Dockerfile, YAML & Markdown
+on:
+  workflow_dispatch:
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  actions: read
+  checks: write
+
+jobs:
   lint:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
-  python-lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/python-lint.yml@1.0.0
+  node-lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/node-lint.yml@1.0.0
     secrets: inherit
-    with:
-      linters: '["ruff","mypy"]'
-
-  build:
-    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
-    secrets: inherit
-
-  image:
-    needs: [init, build]
-    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
-    secrets: inherit
-    with:
-      image-tag: ${{ needs.init.outputs.image-push-tag }}
-      image-repository: ${{ needs.init.outputs.image-push-repository }}
-      test: true
-
-  scan:
-    needs: [init, image]
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: image
-      image-ref: ${{ needs.image.outputs.image-ref-digest }}
 ```
 
-The Dockerfile and `.dockerignore` for this stack are in
-[Dockerfile Standards](#3-python-uv--src-layout).
+```yaml
+# .github/workflows/secret-scan.yml
+name: Audit · Secret Scanning
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  actions: read
+  checks: write
 
----
-
-### 3. Golang Service / Binary Distribution
+jobs:
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+    with:
+      # The pull request run scans the diff; the sweep walks every commit ever pushed.
+      full-history: true
+```
 
 ```yaml
-# .github/workflows/pr.yml
-name: CI · PR Verification
-on: { pull_request: { branches: [master] } }
-permissions: { contents: read, packages: write, actions: read, checks: write }
+# .github/workflows/sonarqube.yml
+name: Audit · SonarQube
+on:
+  workflow_dispatch:
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: read
 
 jobs:
   init:
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
-  golang-lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/golang-lint.yml@1.0.0
-    secrets: inherit
-
+  # Coverage comes from the build's test report, so the analysis has to follow it.
   build:
-    uses: grootan-devops/github-ci-library/.github/workflows/golang-build.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/node-build.yml@1.0.0
     secrets: inherit
     with:
-      build-command: go build -trimpath -ldflags="-s -w" -o bin/ ./cmd/...
+      test-command: npm run test:ci
 
-  image:
+  sonarqube:
     needs: [init, build]
-    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
     secrets: inherit
     with:
-      image-tag: ${{ needs.init.outputs.image-push-tag }}
-      image-repository: ${{ needs.init.outputs.image-push-repository }}
-
-  scan:
-    needs: [init, image]
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: image
-      image-ref: ${{ needs.image.outputs.image-ref-digest }}
+      project-version: ${{ needs.init.outputs.tag }}
 ```
 
----
-
-### 4. Java / Spring Boot Microservice
-
 ```yaml
-# .github/workflows/pr.yml
-name: CI · PR Verification
-on: { pull_request: { branches: [master] } }
-permissions: { contents: read, packages: write, actions: read, checks: write }
+# .github/workflows/image-scan.yml
+name: Audit · Published Image Vulnerabilities
+on:
+  workflow_dispatch:
+    inputs:
+      target-version:
+        description: Image tag to scan. Defaults to the current version.
+        required: false
+        type: string
+  schedule:
+    - cron: "0 3 * * 1"
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  actions: write
+  checks: write
+  pull-requests: read
 
 jobs:
   init:
@@ -1554,49 +1671,508 @@ jobs:
     secrets: inherit
 
   trivy-cache:
+    needs: init
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
+
+  # Re-scans a tag that is already in production: new CVEs land against images
+  # that have not been rebuilt.
+  image-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
     with:
-      enable-java-db: "true"
+      scan-type: image
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      target-version: ${{ inputs.target-version || needs.init.outputs.image-tag }}
+
+  chart-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: config
+      config-type: chart
+```
+
+```yaml
+# .github/workflows/check.yml
+name: Check · Release Prerequisites
+on:
+  workflow_dispatch:
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      chart-name: ${{ needs.init.outputs.chart-name }}
+      chart-version: ${{ needs.init.outputs.chart-version }}
+      chart-repository: ${{ needs.init.outputs.chart-repository }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+```
+
+Answers "can this version be released?" without building anything — git tag availability,
+changelog section, migration section, chart version collision and image tag collision, in
+one verdict.
+
+---
+
+### 2. Terraform Infrastructure / Module Registry
+
+Terraform repositories build nothing and push nothing: no image, no chart, no language
+artifact. That leaves `init.yml`, `terraform-lint.yml`, `terraform-test.yml`, the
+`config`/`terraform` mode of `scan.yml`, `check.yml`, `release.yml`, `secret-scanning.yml`,
+`sonarqube.yml` and `trivy-cache.yml`. `docker.yml`, `buildah.yml`, `chart.yml` and the
+`<language>-build.yml` workflows do not apply, and neither does `sbom.yml` — there is no
+built artifact to describe. The release publishes only a git tag; consumers pin it.
+
+`init.yml` discovers the version from `package.json`, `pyproject.toml`, `pom.xml` or
+`Chart.yaml`, none of which a Terraform repository has, so the version lives in a `VERSION`
+file read by one local workflow and passed to `init.yml` as `tag`.
+
+```yaml
+# .github/workflows/version.yml
+name: Version
+
+# A Terraform repository has no package.json, pyproject.toml or pom.xml for init.yml to
+# read, so the release version lives in VERSION and is validated in exactly one place.
+
+on:
+  workflow_call:
+    outputs:
+      tag:
+        description: "Semantic version read from VERSION"
+        value: ${{ jobs.version.outputs.tag }}
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Resolve
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.read.outputs.TAG }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Read VERSION
+        id: read
+        run: |
+          set -euo pipefail
+          TAG="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "${TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=Version::VERSION holds '${TAG}', which is not MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+          echo "TAG=${TAG}" >> "${GITHUB_OUTPUT}"
+```
+
+```yaml
+# .github/workflows/pr.yml
+name: CI · PR Verification
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "**.tf"
+      - "**.tfvars"
+      - "**.tftpl"
+      - "tests/**"
+      - "VERSION"
+      - ".github/**"
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+# No `packages: write`: this shape publishes no image and no chart.
+permissions:
+  contents: read
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  version:
+    uses: ./.github/workflows/version.yml
+    secrets: inherit
+
+  init:
+    needs: version
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ignore-chart: "true"
+      ignore-docker: "true"
+
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # The guards ask whether the tag and changelog section are free; no lint, scan or test
+  # can change that answer, so they hang off init alone and report even when the rest fails.
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
 
   lint:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
-  build:
-    uses: grootan-devops/github-ci-library/.github/workflows/java-build.yml@1.0.0
-    secrets: inherit
-
-  image:
-    needs: [init, build]
-    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
+  terraform-lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform-lint.yml@1.0.0
     secrets: inherit
     with:
-      image-tag: ${{ needs.init.outputs.image-push-tag }}
-      image-repository: ${{ needs.init.outputs.image-push-repository }}
+      state-name: network
 
-  sbom:
-    needs: [build, trivy-cache]
-    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
+  terraform-scan:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
+    with:
+      scan-type: config
+      config-type: terraform
+      scan-path: "."
+
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+
+  sonarqube:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
 ```
 
-> [!TIP]
-> Set `enable-java-db: "true"` on `trivy-cache.yml` so the Java vulnerability database is
-> downloaded once for the whole run rather than by each scan.
+The module test is a **separate workflow**, not a job in `pr.yml`. It provisions real
+infrastructure and destroys it in a post-failure job, so it must run with
+`cancel-in-progress: false` — a PR workflow cancels superseded runs, which would kill
+teardown and leave the fixtures standing.
+
+```yaml
+# .github/workflows/terraform-test.yml
+name: CI · Terraform Module Test
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "**.tf"
+      - "**.tfvars"
+      - "tests/**"
+      - ".github/**"
+  workflow_dispatch:
+
+# Deliberately NOT cancel-in-progress. The test provisions real infrastructure and tears it
+# down in a post-failure job; cancelling a superseded run kills teardown and strands it.
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  terraform-test:
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform-test.yml@1.0.0
+    secrets: inherit
+    with:
+      test-timeout: 45m
+```
+
+```yaml
+# .github/workflows/release.yml
+name: CD · Tag & Release
+
+on:
+  push:
+    branches: [master]
+    # A pipeline-only change is verified by its own PR; it must never cut a release.
+    paths-ignore:
+      - ".github/**"
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  # workflow_dispatch can target ANY ref, so a release cut from a feature branch would tag
+  # work that never passed a pull request. Refuse any non-default ref.
+  guard-ref:
+    name: Verify Ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+
+  version:
+    needs: guard-ref
+    # guard-ref is skipped on a push, which would skip this job too: accept skipped, refuse failure.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    uses: ./.github/workflows/version.yml
+    secrets: inherit
+
+  init:
+    needs: version
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ignore-chart: "true"
+      ignore-docker: "true"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+
+  # Nothing is promoted: consumers pin the git tag, so there is no image or chart to copy
+  # from a candidate repository and no scan-result gate to pass.
+  release:
+    needs: [init, check]
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      notify: true
+```
+
+```yaml
+# .github/workflows/check.yml
+name: Check · Release Prerequisites
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+jobs:
+  version:
+    uses: ./.github/workflows/version.yml
+    secrets: inherit
+
+  init:
+    needs: version
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ignore-chart: "true"
+      ignore-docker: "true"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+```
+
+With no `chart-name` and no `image-tag`, `check.yml` runs the git tag, changelog and
+migration guards only — the chart and image guards switch themselves off.
+
+```yaml
+# .github/workflows/lint.yml
+name: Lint · YAML, Markdown & Terraform
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+
+  terraform-lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform-lint.yml@1.0.0
+    secrets: inherit
+    with:
+      state-name: network
+      check-docs: true
+```
+
+```yaml
+# .github/workflows/config-scan.yml
+name: Scan · Terraform Configuration
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+
+permissions:
+  contents: read
+  actions: write
+  checks: write
+
+jobs:
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # Every scan job needs trivy-cache, or each one re-downloads the ~1GB vulnerability DB.
+  terraform-scan:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: config
+      config-type: terraform
+      scan-path: "."
+      fail-on-warnings: true
+```
+
+```yaml
+# .github/workflows/secret-scan.yml
+name: Scan · Secrets
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+    with:
+      full-history: true
+```
+
+```yaml
+# .github/workflows/sonarqube.yml
+name: Quality · SonarQube
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+jobs:
+  version:
+    uses: ./.github/workflows/version.yml
+    secrets: inherit
+
+  init:
+    needs: version
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ignore-chart: "true"
+      ignore-docker: "true"
+
+  sonarqube:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
+```
+
+There is no publish step. The release tags the repository and consumers pin that tag:
+
+```hcl
+module "network" {
+  source = "git::git@github.com:grootan-devops/terraform-modules.git//modules/network?ref=1.0.0"
+}
+```
 
 ---
 
-### 5. Pure Helm Chart Repository
+### 3. Helm Chart Only
 
-A chart-only repository has no image and no application build. `init.yml` detects the
-absence of a Dockerfile and reads the version from `Chart.yaml`.
+A chart-only repository publishes one OCI artifact and nothing else. `init.yml` reads the
+version from `Chart.yaml` and `ignore-docker: "true"` stops it looking for a Dockerfile, so
+`chart.yml` is the whole build. `docker.yml` / `buildah.yml` have no subject here, and
+neither does `sbom.yml` or `scan-type: license` — both describe an application's dependency
+tree, and a chart ships none. What remains is the chart's own pipeline: `lint.yml`,
+`chart.yml`, a `config` / `chart` scan, the `check.yml` guards, `secret-scanning.yml`,
+`sonarqube.yml` and `release.yml`.
 
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-on: { pull_request: { branches: [master] } }
-permissions: { contents: read, packages: write, actions: read }
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "chart/**"
+      - "CHANGELOG.md"
+      - "MIGRATION.md"
+      # Without this a change to the pipeline itself merges unverified.
+      - ".github/**"
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  checks: write
+  # init.yml requests it; omit it and the run fails at startup.
+  pull-requests: read
 
 jobs:
   init:
@@ -1605,6 +2181,12 @@ jobs:
     with:
       ignore-docker: "true"
 
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # Guards depend on init alone: they ask whether the tag, changelog entry and
+  # chart version are still free, which packaging cannot change.
   check:
     needs: init
     uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
@@ -1630,7 +2212,188 @@ jobs:
       chart-repository: ${{ needs.init.outputs.chart-push-repository }}
 
   chart-scan:
-    needs: chart
+    needs: [chart, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: config
+      config-type: chart
+
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+
+  sonarqube:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
+```
+
+```yaml
+# .github/workflows/release.yml
+name: CD · Production Release
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+concurrency:
+  group: "release-${{ github.ref }}"
+  cancel-in-progress: false
+permissions:
+  contents: write
+  packages: write
+  actions: write
+  # scan.yml's job declares `checks: write`. A called workflow cannot request a
+  # permission the caller withheld, so omitting it fails the run at startup.
+  checks: write
+  pull-requests: read
+
+jobs:
+  # workflow_dispatch can target any ref, so a release cut from a feature branch
+  # would publish a chart that never passed a pull request. Refuse it.
+  guard-ref:
+    name: Verify Ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+
+  init:
+    needs: guard-ref
+    # guard-ref is skipped on a push, which would skip this job too: accept skipped, refuse failure.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+
+  trivy-cache:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      chart-name: ${{ needs.init.outputs.chart-name }}
+      chart-version: ${{ needs.init.outputs.chart-version }}
+      chart-repository: ${{ needs.init.outputs.chart-repository }}
+
+  # Re-scanned here, not trusted from the pull request run: the candidate may
+  # have sat in the dev repository for days.
+  chart-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: config
+      config-type: chart
+
+  chart:
+    needs: [init, check, chart-scan]
+    uses: grootan-devops/github-ci-library/.github/workflows/chart.yml@1.0.0
+    secrets: inherit
+    with:
+      is-release: true
+      chart-name: ${{ needs.init.outputs.chart-name }}
+      chart-version: ${{ needs.init.outputs.tag }}
+      chart-app-version: ${{ needs.init.outputs.tag }}
+      chart-repository: ${{ needs.init.outputs.chart-repository }}
+      chart-dev-repository: ${{ needs.init.outputs.chart-dev-repository }}
+      release-tag: ${{ needs.init.outputs.tag }}
+      candidate-version: ${{ needs.init.outputs.candidate-chart-version }}
+
+  release:
+    needs: [init, chart]
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      upstream-run-id: ${{ needs.init.outputs.upstream-run-id }}
+```
+
+`chart.yml` · `promote` pulls the exact candidate named by `candidate-version`, repackages
+it at the release tag and pushes it to production — the released bytes are the scanned
+bytes. It has no `scan-result` input: unlike `docker.yml` / `buildah.yml`, it is gated by
+the caller's `needs:` alone, which is why `chart` needs `chart-scan` above.
+
+```yaml
+# .github/workflows/check.yml
+name: Check · Release Prerequisites
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      chart-name: ${{ needs.init.outputs.chart-name }}
+      chart-version: ${{ needs.init.outputs.chart-version }}
+      chart-repository: ${{ needs.init.outputs.chart-repository }}
+```
+
+```yaml
+# .github/workflows/lint.yml
+name: Lint · Config & Documentation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+  checks: write
+
+jobs:
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+```
+
+```yaml
+# .github/workflows/chart-scan.yml
+name: Scan · Helm Chart
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+  checks: write
+
+jobs:
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  chart-scan:
+    needs: trivy-cache
     uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
@@ -1638,19 +2401,860 @@ jobs:
       config-type: chart
 ```
 
+```yaml
+# .github/workflows/secret-scan.yml
+name: Security · Secret Scan
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+permissions:
+  contents: read
+  actions: write
+  checks: write
+
+jobs:
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+    with:
+      full-history: true
+```
+
+```yaml
+# .github/workflows/sonarqube.yml
+name: Quality · SonarQube
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+
+  sonarqube:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
+```
+
 > A `type: library` chart (such as `tpllib`) is exempt from the application-chart standard:
 > no `values.schema.json`, no `manifest.yaml`, and `check-docs: false` if it ships no
-> `README.gotmpl`.
+> `README.gotmpl`. A repository whose chart *is* consumed by others should also set
+> `run-unittest: true` on `chart.yml` to render the mock consumer chart under
+> `chart/test` with `helm unittest --strict`.
 
 ---
 
-### 6. Terraform Infrastructure / Module Registry
+### 4. Image Only, Built With Docker
+
+A repository that ships a container image and nothing else: a `Dockerfile`, the files it copies
+in, and the release paperwork. `init.yml` resolves the tags and repositories, `docker.yml` builds
+the candidate and later promotes it, `scan.yml` scans the image, and `check.yml`, `release.yml`,
+`secret-scanning.yml`, `sonarqube.yml`, `lint.yml` and `trivy-cache.yml` behave as they do
+everywhere else. There is no language build or lint workflow and no `chart.yml`. `sbom.yml` and
+the license scan are left out too: both read a dependency manifest this repository does not have,
+and what is actually inside the image is already covered by the image scan. That same missing
+manifest means `init.yml` has no version to discover, so the caller hands it one from `VERSION`.
 
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-on: { pull_request: { branches: [master] } }
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "rootfs/**"
+      - "VERSION"
+      - "CHANGELOG.md"
+      - "MIGRATION.md"
+      # Without this a change to the pipeline itself is never verified.
+      - ".github/**"
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  # No package.json, pom.xml or Chart.yaml to read from, so init.yml has no
+  # version to discover: it is handed one from VERSION.
+  version:
+    name: Resolve Version
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.read.outputs.tag }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Read VERSION
+        id: read
+        run: |
+          set -euo pipefail
+          TAG="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "${TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=Version::VERSION holds '${TAG}', not MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+
+  init:
+    needs: version
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ignore-chart: "true"
+
+  # Hadolint lives here. docker.yml builds; it does not lint.
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+
+  # Pulls the Trivy databases once so every scan restores them.
+  trivy-cache:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  image:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
+    secrets: inherit
+    with:
+      image-tag: ${{ needs.init.outputs.image-push-tag }}
+      image-repository: ${{ needs.init.outputs.image-push-repository }}
+      # Runs ci_image_test.sh inside the candidate before anything scans it.
+      test: true
+
+  image-scan:
+    needs: [image, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-ref: ${{ needs.image.outputs.image-ref-digest }}
+
+  # Guards depend on init alone: they ask whether the tag, changelog entry and
+  # image version are still free, which no build can change.
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+
+  sonarqube:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
+```
+
+```yaml
+# .github/workflows/release.yml
+name: CD · Production Release
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+concurrency:
+  group: "release-${{ github.ref }}"
+  cancel-in-progress: false
+permissions:
+  contents: write
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  # workflow_dispatch can target any ref, so a release cut from a feature
+  # branch would publish an image that never passed a pull request.
+  guard-ref:
+    name: Verify Ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+
+  version:
+    name: Resolve Version
+    needs: guard-ref
+    # guard-ref is skipped on a push, which would skip this job too: accept
+    # skipped, refuse failure.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.read.outputs.tag }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Read VERSION
+        id: read
+        run: |
+          set -euo pipefail
+          TAG="$(tr -d '[:space:]' < VERSION)"
+          if [[ ! "${TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error title=Version::VERSION holds '${TAG}', not MAJOR.MINOR.PATCH."
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "${GITHUB_OUTPUT}"
+
+  init:
+    needs: version
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      ignore-chart: "true"
+
+  trivy-cache:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # The candidate is re-scanned here, not trusted from the pull request run: it
+  # may have sat in the dev repository for days. `image-repository` is the
+  # PRODUCTION one — scan.yml appends the dev suffix itself for a target that is
+  # not a bare x.y.z, so `image-dev-repository` would double it.
+  scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      target-version: ${{ needs.init.outputs.candidate-image-tag }}
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+
+  image:
+    needs: [init, scan, check]
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
+    secrets: inherit
+    with:
+      is-release: true
+      image-tag: ${{ needs.init.outputs.tag }}
+      release-tag: ${{ needs.init.outputs.tag }}
+      candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
+      # Required. docker.yml cannot depend on a scan that lives here, so it
+      # refuses to promote unless the verdict is handed to it.
+      scan-result: ${{ needs.scan.result }}
+
+  release:
+    needs: [init, image]
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      upstream-run-id: ${{ needs.init.outputs.upstream-run-id }}
+```
+
+The rest are dispatchable on their own, for when one dimension has to be re-run without a build.
+
+```yaml
+# .github/workflows/lint.yml
+name: Lint · Dockerfile, YAML & Docs
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+```
+
+```yaml
+# .github/workflows/secret-scan.yml
+name: Security · Secret Scan
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+    with:
+      full-history: true
+```
+
+```yaml
+# .github/workflows/sonarqube.yml
+name: Quality · SonarQube
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  # Lets the scanner cache entry be replaced instead of going stale.
+  actions: write
+
+jobs:
+  sonarqube:
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+```
+
+```yaml
+# .github/workflows/image-scan.yml
+name: Scan · Released Image
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Released version to re-scan
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ inputs.tag }}
+      ignore-chart: "true"
+
+  trivy-cache:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  image-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      target-version: ${{ needs.init.outputs.image-tag }}
+```
+
+```yaml
+# .github/workflows/check.yml
+name: Check · Release Prerequisites
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Version to test for release readiness
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ inputs.tag }}
+      ignore-chart: "true"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+```
+
+Re-scanning a released image needs no build: `scan.yml` resolves it from `image-repository` and
+`target-version`. A finding on a tag that is already out is a re-release, not a re-promotion —
+the old digest stays where it is until a new version goes through the pipeline.
+
+---
+
+### 5. Image Only, Built with Buildah
+
+A Dockerfile-free image repository: a hardened base or runtime image assembled by
+`buildah.yml` from `vars.MICRO_ROOT_BASE_IMAGE`. It uses `init`, `lint`, `buildah`,
+`scan` (`image` and `license`), `sbom`, `check`, `release`, `secret-scanning`,
+`sonarqube` and `trivy-cache`. `docker.yml` does not apply — there is no Dockerfile —
+and neither do `chart.yml` or the `config` scans, because nothing here is packaged or
+templated. There is no application source, so no `<language>-build.yml` or
+`<language>-lint.yml` either.
+
+Two things follow from having no Dockerfile and no manifest: `init.yml`'s `auto`
+detection would switch the image side *off*, so `ignore-docker: "false"` is declared
+explicitly, and there is no `package.json`/`Chart.yaml` to read a version from, so `tag`
+is the one hand-stamped value in the repository.
+
+```yaml
+# .github/workflows/pr.yml
+name: CI · PR Verification
+on:
+  pull_request:
+    branches: [master]
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions: { contents: read, packages: write, actions: write, checks: write, pull-requests: read }
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      # There is no Dockerfile for `auto` to find, so the image side has to be
+      # turned on explicitly, and no manifest carries the version — `tag` is the
+      # one hand-stamped value in the repository. Bump it in the PR that ships
+      # the change; release.yml repeats it.
+      ignore-docker: "false"
+      ignore-chart: "true"
+      tag: "1.4.0"
+
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+
+  sonarqube:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
+
+  image:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/buildah.yml@1.0.0
+    secrets: inherit
+    with:
+      image-tag: ${{ needs.init.outputs.image-push-tag }}
+      image-repository: ${{ needs.init.outputs.image-push-repository }}
+      # base-image-repo is omitted: vars.MICRO_ROOT_BASE_IMAGE supplies it.
+      install-packages: "tzdata ca-certificates"
+      # Kept when the package manager is purged out of the finished image.
+      required-packages: "tzdata ca-certificates glibc-minimal-langpack"
+      container-path-env: "/opt/app/bin"
+      container-entrypoint: "/opt/app/bin/entrypoint"
+
+  image-scan:
+    needs: [image, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-ref: ${{ needs.image.outputs.image-ref-digest }}
+
+  license-scan:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: license
+
+  sbom:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
+    secrets: inherit
+```
+
+> The Dockerfile lint lives in `lint.yml`, not in the image workflow — and with no
+> Dockerfile present it is a no-op here, leaving YAML, markdown, `CHANGELOG.md` and
+> `MIGRATION.md`. For anything `install-packages` cannot express, drop a `buildah.sh`
+> in the project root: `buildah.yml` sources it mid-build with `BASE_CONTAINER` and
+> `CONTAINER_MOUNT` in scope.
+
+```yaml
+# .github/workflows/release.yml
+name: CD · Promote, Tag & Release
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+permissions: { contents: write, packages: write, actions: write, checks: write, pull-requests: read }
+
+jobs:
+  # workflow_dispatch accepts any ref, so a release could otherwise be cut from a
+  # branch that never passed a pull request.
+  guard-ref:
+    name: Verify Ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+
+  init:
+    needs: guard-ref
+    # guard-ref is skipped on a push, which would skip this job too.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "false"
+      ignore-chart: "true"
+      tag: "1.4.0" # same hand-stamped version as pr.yml
+
+  # Guards only ever depend on init: they ask whether the tag, changelog and
+  # image version are free, which no build can change.
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # Re-scans the candidate sitting in the dev repository. Nothing is rebuilt, so
+  # the digest promoted below is the digest scanned here.
+  image-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      target-version: ${{ needs.init.outputs.candidate-image-tag }}
+
+  image:
+    needs: [init, check, image-scan]
+    uses: grootan-devops/github-ci-library/.github/workflows/buildah.yml@1.0.0
+    secrets: inherit
+    with:
+      is-release: true
+      # `tag` / `image-repository`, never the `*-push-*` pair: a workflow_dispatch
+      # release is a manual run on the release branch, and init.yml forces the dev
+      # repositories and a candidate suffix for those. Promoting with the push
+      # outputs would copy dev to dev and leave production untouched.
+      image-tag: ${{ needs.init.outputs.tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
+      release-tag: ${{ needs.init.outputs.tag }}
+      candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
+      # Without this the promotion refuses: the scan lives here, not in the library.
+      scan-result: ${{ needs.image-scan.result }}
+
+  release:
+    needs: [init, check, image]
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      # Pulls the candidate run's SBOM, licence and scan reports in as release assets.
+      upstream-run-id: ${{ needs.init.outputs.upstream-run-id }}
+      additional-artifacts: "installed_pkgs.txt"
+```
+
+> [!IMPORTANT]
+> `scan-result` is not optional. `buildah.yml` · `promote` fails closed: omit it and the
+> release errors rather than silently promoting an unscanned image. The SBOM and licence
+> reports are not re-run on the release — `upstream-run-id` restores them from the
+> candidate run that produced the image being promoted.
+
+The remaining workflows are the same modules on `workflow_dispatch`, for running one
+concern on its own.
+
+```yaml
+# .github/workflows/build.yml
+name: Build · Rebuild Candidate Image
+on:
+  workflow_dispatch:
+permissions: { contents: read, packages: write, actions: write, checks: write, pull-requests: read }
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "false"
+      ignore-chart: "true"
+      tag: "1.4.0"
+
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  image:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/buildah.yml@1.0.0
+    secrets: inherit
+    with:
+      image-tag: ${{ needs.init.outputs.image-push-tag }}
+      image-repository: ${{ needs.init.outputs.image-push-repository }}
+      install-packages: "tzdata ca-certificates"
+      required-packages: "tzdata ca-certificates glibc-minimal-langpack"
+      container-path-env: "/opt/app/bin"
+      container-entrypoint: "/opt/app/bin/entrypoint"
+
+  image-scan:
+    needs: [image, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-ref: ${{ needs.image.outputs.image-ref-digest }}
+```
+
+```yaml
+# .github/workflows/check.yml
+name: Check · Release Prerequisites
+on:
+  workflow_dispatch:
+permissions: { contents: read, actions: read, pull-requests: read }
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "false"
+      ignore-chart: "true"
+      tag: "1.4.0"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+```
+
+```yaml
+# .github/workflows/image-scan.yml
+name: Scan · Published Image
+on:
+  workflow_dispatch:
+    inputs:
+      target-version:
+        description: Image tag to scan (defaults to the current version)
+        required: false
+        type: string
+  schedule:
+    - cron: "0 3 * * *"
+permissions: { contents: read, actions: write, checks: write, pull-requests: read }
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "false"
+      ignore-chart: "true"
+      tag: "1.4.0"
+
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # A published base image accumulates CVEs without any commit, so this runs on a
+  # schedule too. An `x.y.z` target resolves to the production repository; anything
+  # with a candidate suffix resolves to the dev one.
+  image-scan:
+    needs: [init, trivy-cache]
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: image
+      image-repository: ${{ needs.init.outputs.image-repository }}
+      target-version: ${{ inputs.target-version || needs.init.outputs.tag }}
+```
+
+```yaml
+# .github/workflows/sbom.yml
+name: SBOM · Generate & Licence Audit
+on:
+  workflow_dispatch:
+permissions: { contents: read, actions: write, checks: write }
+
+jobs:
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  sbom:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
+    secrets: inherit
+
+  license-scan:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: license
+```
+
+```yaml
+# .github/workflows/lint.yml
+name: Lint · YAML, Changelog & Migration
+on:
+  workflow_dispatch:
 permissions: { contents: read, actions: read }
+
+jobs:
+  # There is no Dockerfile here, so hadolint has nothing to lint and the job
+  # covers YAML, markdown, CHANGELOG.md and MIGRATION.md only.
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+```
+
+```yaml
+# .github/workflows/secret-scan.yml
+name: Secret Scan · Full History
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+permissions: { contents: read, actions: read }
+
+jobs:
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+    with:
+      full-history: true
+```
+
+```yaml
+# .github/workflows/sonarqube.yml
+name: SonarQube · Quality Gate
+on:
+  workflow_dispatch:
+permissions: { contents: read, actions: read }
+
+jobs:
+  sonarqube:
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+```
+
+> [!TIP]
+> Every job that scans `needs` the `trivy-cache` job. Without that edge each scan
+> re-downloads roughly 1GB of vulnerability database, and `actions: write` on the caller
+> is what lets the warm job save the cache entry back.
+
+---
+
+### 6. Language Library (No Image, No Chart)
+
+A library ships a distributable, not a container: `init.yml` runs with `ignore-docker` and
+`ignore-chart` set to `"true"`, and the whole image and chart half of the library — `docker.yml`,
+`buildah.yml`, `chart.yml`, image and config scans, promotion — has no subject. What remains is the
+language pair (`python-lint.yml` / `python-build.yml`), supply-chain evidence (`sbom.yml` and a
+`license` scan behind `trivy-cache.yml`), `secret-scanning.yml`, `sonarqube.yml`, the `check.yml`
+guards and `release.yml`. Swap the two `python-*` calls for the `golang-*`, `node-*` or `java-build.yml`
+equivalents; the rest of the shape is unchanged.
+
+```yaml
+# .github/workflows/pr.yml
+name: CI · PR Verification
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      # A change to the pipeline must re-verify the pipeline.
+      - ".github/**"
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
 
 jobs:
   init:
@@ -1659,45 +3263,299 @@ jobs:
     with:
       ignore-docker: "true"
       ignore-chart: "true"
-      tag: "1.2.0"
 
-  terraform-lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/terraform-lint.yml@1.0.0
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # Guards depend on `init` alone. They ask whether the tag, changelog and
+  # migration section are free — no build can change that answer.
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
     secrets: inherit
     with:
-      state-name: network
+      tag: ${{ needs.init.outputs.tag }}
 
-  terraform-scan:
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+
+  python-lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/python-lint.yml@1.0.0
+    secrets: inherit
+
+  build:
+    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
+    secrets: inherit
+
+  sbom:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
+    secrets: inherit
+
+  license-scan:
+    needs: trivy-cache
     uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
     secrets: inherit
     with:
-      scan-type: config
-      config-type: terraform
-      scan-path: "."
+      scan-type: license
 
-  terraform-test:
-    needs: terraform-lint
-    uses: grootan-devops/github-ci-library/.github/workflows/terraform-test.yml@1.0.0
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+
+  sonarqube:
+    needs: [init, build]
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
     secrets: inherit
     with:
-      test-timeout: 45m
-
+      project-version: ${{ needs.init.outputs.tag }}
 ```
 
-`terraform-test.yml` tears down on failure automatically, so a crashed test never strands
-real infrastructure.
+```yaml
+# .github/workflows/release.yml
+name: CD · Tag, Release & Notify
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - ".github/**"
+  workflow_dispatch:
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+permissions:
+  contents: write
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
 
-There is no publish step: the release tags the repository, and consumers pin that tag.
+jobs:
+  # workflow_dispatch accepts any ref, so a release cut from a feature branch
+  # would tag and publish work that never passed a pull request.
+  guard-ref:
+    name: Verify Ref
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse A Release From A Non-Default Ref
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
+            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
+            exit 1
+          fi
+          echo "Releasing from the default branch '${DEFAULT_BRANCH}'."
 
-```hcl
-module "network" {
-  source = "git::git@github.com:grootan-devops/terraform-modules.git//modules/network?ref=1.0.0"
-}
+  init:
+    needs: guard-ref
+    # guard-ref is skipped on a push, which would skip this job too: accept skipped, refuse failure.
+    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+
+  # The distributable is the release. Rebuilding it into this run puts the sdist
+  # and wheel among the assets even when the candidate run's artifacts expired.
+  build:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
+    secrets: inherit
+
+  release:
+    needs: [init, check, build]
+    uses: grootan-devops/github-ci-library/.github/workflows/release.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      upstream-run-id: ${{ needs.init.outputs.upstream-run-id }}
+      notify: true
 ```
+
+```yaml
+# .github/workflows/build.yml
+name: Build · Verify
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  build:
+    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
+    secrets: inherit
+```
+
+```yaml
+# .github/workflows/check.yml
+name: Check · Release Prerequisites
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+```
+
+```yaml
+# .github/workflows/lint.yml
+name: Lint · Config, Docs & Source
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
+    secrets: inherit
+
+  python-lint:
+    uses: grootan-devops/github-ci-library/.github/workflows/python-lint.yml@1.0.0
+    secrets: inherit
+```
+
+```yaml
+# .github/workflows/secret-scan.yml
+name: Security · Secret Scan
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * 1"
+permissions:
+  contents: read
+
+jobs:
+  secret-scan:
+    uses: grootan-devops/github-ci-library/.github/workflows/secret-scanning.yml@1.0.0
+    secrets: inherit
+    with:
+      full-history: true
+```
+
+```yaml
+# .github/workflows/sbom.yml
+name: Supply Chain · SBOM & Licenses
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+permissions:
+  contents: read
+  # trivy-cache.yml replaces the immutable `trivy-db` entry; without this the
+  # cache never refreshes and every run re-downloads roughly 1GB.
+  actions: write
+  checks: write
+
+jobs:
+  trivy-cache:
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+
+  # Both jobs restore the warmed database. Without the `needs`, each pulls ~1GB of its own.
+  sbom:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/sbom.yml@1.0.0
+    secrets: inherit
+
+  license-scan:
+    needs: trivy-cache
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
+    secrets: inherit
+    with:
+      scan-type: license
+```
+
+```yaml
+# .github/workflows/sonarqube.yml
+name: Quality · SonarQube
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+  actions: write
+  checks: write
+  pull-requests: read
+
+jobs:
+  init:
+    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
+    secrets: inherit
+    with:
+      ignore-docker: "true"
+      ignore-chart: "true"
+
+  # Coverage reaches Sonar as the build's test-report artifact; without this
+  # job the analysis still runs, but reports zero coverage.
+  build:
+    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
+    secrets: inherit
+
+  sonarqube:
+    needs: [init, build]
+    uses: grootan-devops/github-ci-library/.github/workflows/sonarqube.yml@1.0.0
+    secrets: inherit
+    with:
+      project-version: ${{ needs.init.outputs.tag }}
+```
+
+> [!NOTE]
+> There is no `scan-result` wiring anywhere in this shape. The fail-closed promotion gate belongs
+> to `docker.yml` and `buildah.yml`; with no image to promote, the release is the git tag plus the
+> assets `release.yml` collects.
 
 ---
 
 ### 7. Monorepo with Matrix Fan-Out
+
+Orthogonal to the six shapes above: `mono.yml` decides *which* projects a change touched,
+and each one then runs whichever of those shapes it is. Nothing else in the library fans
+out on its own.
 
 ```yaml
 # .github/workflows/pr.yml
@@ -1744,9 +3602,11 @@ workflow, pass `always-run-all: true` so a release never skips a project.
 
 ---
 
-### 8. Security & Code Quality Audit Only Pipeline
+### 8. Security & Code Quality Audit Only
 
-For a repository that ships no artifact but must still be audited — or as a nightly sweep.
+The one shape with no release at all: a repository that ships no artifact but must still be
+audited, or a nightly sweep bolted onto a repository that already has one of the six
+pipelines above.
 
 ```yaml
 # .github/workflows/audit.yml
@@ -1755,7 +3615,12 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 2 * * 1"
-permissions: { contents: read, actions: read, checks: write }
+permissions:
+  contents: read
+  # trivy-cache.yml replaces the immutable `trivy-db` entry; with only `actions: read`
+  # the cache never refreshes and each scan re-downloads roughly 1GB.
+  actions: write
+  checks: write
 
 jobs:
   trivy-cache:
@@ -1785,62 +3650,73 @@ jobs:
     secrets: inherit
 ```
 
+No `init.yml`, so no `pull-requests: read` and no version resolution — nothing here is
+versioned. `sonarqube.yml` runs without `project-version`, which analyses the branch
+without stamping a release version on the Sonar project.
+
 ---
 
-### 9. Standalone Build & Unit Test Verification
+### 9. GitOps Deploy Entry Point
+
+Deployment is deliberately outside every shape above: `pr.yml` and `release.yml` verify and
+publish, and a *separate* dispatchable workflow moves a published version into an
+environment. Add this alongside Section 1, 3, 4 or 5 when the repository deploys through
+GitOps.
 
 ```yaml
-# .github/workflows/build.yml
-name: Build · Verify
+# .github/workflows/deploy.yml
+name: CD · GitOps Deploy
 on:
   workflow_dispatch:
-permissions: { contents: read, actions: read, checks: write }
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: choice
+        options: [dev, staging, production]
+      target-version:
+        description: Version to deploy (defaults to the current chart version)
+        required: false
+        type: string
+# One deploy per environment at a time, and never cancel one in flight: it commits to the
+# GitOps repository and then waits for ArgoCD to report Healthy.
+concurrency:
+  group: "deploy-${{ inputs.environment }}"
+  cancel-in-progress: false
+permissions: { contents: read, actions: read, pull-requests: read }
 
 jobs:
   init:
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
-  build:
-    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
-    secrets: inherit
-```
-
-Resolves the version, warms the dependency cache, builds and unit-tests — no image, chart
-or scan. The fastest signal that a change compiles and passes tests.
-
----
-
-### 10. Standalone Release Prerequisites & Conflict Check
-
-```yaml
-# .github/workflows/check.yml
-name: Check · Release Prerequisites
-on:
-  workflow_dispatch:
-permissions: { contents: read, actions: read }
-
-jobs:
-  init:
-    uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
-    secrets: inherit
-
-  check:
+  deploy:
     needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/deploy-argocd-gitops.yml@1.0.0
     secrets: inherit
     with:
-      tag: ${{ needs.init.outputs.tag }}
+      environment: ${{ inputs.environment }}
+      gitops-repo: contoso/app-gitops
+      gitops-branch: main
+      # Helm mode: the values file to patch, and the yq path inside it. Setting
+      # `manifest-file` instead selects manifest mode; setting both is refused.
+      chart-values-file: apps/${{ inputs.environment }}/values.yaml
+      chart-app-yq-path: .apps.order-backend
       chart-name: ${{ needs.init.outputs.chart-name }}
-      chart-version: ${{ needs.init.outputs.chart-version }}
+      chart-version: ${{ inputs.target-version || needs.init.outputs.chart-version }}
       chart-repository: ${{ needs.init.outputs.chart-repository }}
-      image-tag: ${{ needs.init.outputs.image-tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
+      argocd-app-name: order-backend-${{ inputs.environment }}
+      # Routes the GitOps commit through a GitHub Environment, so a protected
+      # environment's reviewers approve before anything is written.
+      github-environment-name: ${{ inputs.environment }}
 ```
 
-Answers "can this version be released?" without building anything: git tag availability,
-changelog section, migration section, chart version collision, chart dependency hygiene and
-image tag collision, consolidated into one verdict.
+`gitops-branch` and `argocd-app-name` are required inputs; the deploy refuses at
+`validate` without them, and equally without either `chart-values-file` (Helm mode) or
+`manifest-file` plus `new-image` (manifest mode). Swap
+`deploy-argocd-gitops.yml` for `deploy-komodo-gitops.yml` to patch a Docker Compose stack
+instead; its inputs are in the [deploy/gitops](#deploygitops) module catalog.
 
 ---
 
