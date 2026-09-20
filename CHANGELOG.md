@@ -9,6 +9,12 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `docker.yml` failed every pull-request build with
+  `failed to configure registry cache exporter: invalid reference format`. The buildx cache
+  tag interpolated `github.ref_name`, which on a pull request is `<n>/merge`; a Docker tag
+  admits only `[A-Za-z0-9_.-]`, so the `/` made the whole reference invalid and the build
+  never started. The ref is sanitised into a tag before use.
+
 - `init.yml` discovers the application version from a `VERSION` file. A repository with no
   language manifest -- a skills or documentation repository -- had no way to state its
   version, so version discovery failed and nothing downstream could run. Checked before the

@@ -203,6 +203,23 @@ jobs:
             echo "BUILD_ARGS_EOF"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Resolve Cache Tag
+        id: cache-tag
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          # `github.ref_name` is `<n>/merge` on a pull request, and a Docker tag admits
+          # only [A-Za-z0-9_.-]. Interpolated raw, the registry cache exporter rejects the
+          # whole reference with "invalid reference format" and the build fails -- on every
+          # pull request, which is where the cache matters most.
+          sanitise() { printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-100; }
+          {
+            echo "ref=$(sanitise "${REF_NAME}")"
+            echo "default=$(sanitise "${DEFAULT_BRANCH}")"
+          } >> "${GITHUB_OUTPUT}"
+
       - name: Build & Push Image
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6
@@ -221,9 +238,9 @@ jobs:
             org.opencontainers.image.ref.name=${{ github.ref_name }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: |
-            type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ github.ref_name }}
-            type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ github.event.repository.default_branch }}
-          cache-to: type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ github.ref_name }},mode=max
+            type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ steps.cache-tag.outputs.ref }}
+            type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ steps.cache-tag.outputs.default }}
+          cache-to: type=registry,ref=${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:buildcache-${{ steps.cache-tag.outputs.ref }},mode=max
 
       - name: Publish Digest-Pinned Reference
         id: ref
