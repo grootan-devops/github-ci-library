@@ -39,7 +39,6 @@ Reusable GitHub Actions workflows (`workflow_call`)
   - [sbom](#sbom)
   - [deploy/gitops](#deploygitops)
   - [release & notify](#release--notify)
-  - [mono](#mono)
 - [Key Variables & Configuration](#key-variables--configuration)
 - [Ignored CVEs & Licenses (`ignored-cves.yml`)](#ignored-cves--licenses-ignored-cvesyml)
 - [Scan Exit Codes](#scan-exit-codes)
@@ -51,9 +50,8 @@ Reusable GitHub Actions workflows (`workflow_call`)
   - [4. Image Only, Built With Docker](#4-image-only-built-with-docker)
   - [5. Image Only, Built with Buildah](#5-image-only-built-with-buildah)
   - [6. Language Library (No Image, No Chart)](#6-language-library-no-image-no-chart)
-  - [7. Monorepo with Matrix Fan-Out](#7-monorepo-with-matrix-fan-out)
-  - [8. Security & Code Quality Audit Only](#8-security--code-quality-audit-only)
-  - [9. GitOps Deploy Entry Point](#9-gitops-deploy-entry-point)
+  - [7. Security & Code Quality Audit Only](#7-security--code-quality-audit-only)
+  - [8. GitOps Deploy Entry Point](#8-gitops-deploy-entry-point)
 - [Migration Guide & Standard](#migration-guide--standard)
 
 ---
@@ -261,7 +259,7 @@ Each workflow needs exactly this, and nothing else:
 | `scan` | `contents: read`, `checks: write` |
 | `<lang>-build` | `contents: read`, `checks: write` |
 | `trivy-cache` | `contents: read`, `actions: write` |
-| `lint`, `<lang>-lint`, `check`, `sbom`, `sonarqube`, `secret-scanning`, `mono`, `notify`, `terraform-*`, `deploy-*` | `contents: read` |
+| `lint`, `<lang>-lint`, `check`, `sbom`, `sonarqube`, `secret-scanning`, `notify`, `terraform-*`, `deploy-*` | `contents: read` |
 
 `contents: write` creates the git tag and GitHub Release. `packages: write` covers image and
 chart pushes. `actions: read` lets `init` and `release` reach the upstream candidate run;
@@ -404,8 +402,8 @@ flowchart LR
 
 > [!NOTE]
 > There is no `trigger` phase. GitHub cannot call a reusable workflow from a matrix, so the
-> monorepo child-pipeline pattern is replaced by `mono.yml`, which returns a matrix the
-> caller fans out over. See [mono](#mono).
+> GitLab monorepo child-pipeline pattern has no counterpart here. A repository that needs
+> per-project pipelines gets one workflow file per project.
 
 ---
 
@@ -444,7 +442,6 @@ repeat them.
 | `deploy-argocd-gitops.yml` · `validate` → `gitops-commit` → `sync` | `Deploy:ArgoCD:Validate:Chart/Image:<env>`, `Deploy:ArgoCD:<env>` | `needs: init`; add `image` / `chart` when the same run published them | `Common:Init`, `Image:Push`, `Chart:Push`; the `Validate:*` edges are *internal* |
 | `release.yml` · `collect` → `publish` → `notify` | `Release:Upload`, `Release`, `Release:Notification:Teams` | `needs: [init, image, chart]` — whichever of `image` / `chart` this run promotes | `Release:Upload` → `Common:Init`, `Image:Promote`, `Chart:Promote`; `Release` → `Release:Upload` **(required)** is *internal* |
 | `notify.yml` | `Release:Notification:Teams` | `needs: init` **(required, not optional)**; add `check` for the changelog artifact | `Common:Init` — the library's only `optional: false` edge |
-| `mono.yml` · `discover` | `Trigger:*` child pipelines | *(nothing — it is a root)* | — |
 
 > [!WARNING]
 > **`check.yml` depends on `init` alone. Never write `needs: [init, build]` or
@@ -1276,35 +1273,6 @@ anything named in `additional-artifacts`.
 
 ---
 
-### mono
-
-GitHub cannot call a reusable workflow from a matrix, so there is no child-pipeline
-equivalent. `mono.yml` answers the question the parent pipeline existed to answer — which
-projects changed — and returns a matrix the caller fans out over.
-
-```mermaid
-flowchart LR
-    D["mono.yml · discover<br/>git diff vs merge base<br/>→ matrix"] --> B["build (matrix)"]
-    D --> L["lint (matrix)"]
-    D --> I["image (matrix)"]
-```
-
-| Output | Description |
-|---|---|
-| `matrix` | `strategy.matrix` object covering only the changed projects |
-| `any-changed` | `true` when at least one project changed |
-| `changed-count` | Number of projects selected |
-
-Declare projects once in `vars.MONO_PROJECTS`:
-
-```json
-[{"name":"api","path":"services/api"},{"name":"web","path":"services/web"}]
-```
-
-Pass `always-run-all: true` on release runs so a release never skips a project.
-
----
-
 ## Key Variables & Configuration
 
 The GitLab library sets everything once in a group-level `variables:` block and each project
@@ -1358,7 +1326,6 @@ wherever possible.
 | `CHANGELOG_FILE_NAME` | `./CHANGELOG.md` | Changelog path. |
 | `MIGRATION_FILE_NAME` | `./MIGRATION.md` | Migration guide path. |
 | `UPSTREAM_WORKFLOW` | `pr.yml` | Workflow file whose successful run produced the candidate artifacts. |
-| `MONO_PROJECTS` | — | JSON array of `{name, path}` for monorepos. |
 | `HADOLINT_IGNORE` | — | Comma-separated extra hadolint rules to ignore. |
 | `MD_LINT_IGNORE_RULE` | — | Space-separated extra markdownlint rules to exclude. |
 
@@ -1529,8 +1496,8 @@ The complete single-service shape: an application build, an image and a chart th
 versions with it. `init.yml` resolves every version once, the `<language>-*` pair builds
 and tests, `docker.yml` and `chart.yml` publish, `scan.yml` covers both artifacts,
 `check.yml` gates the release and `release.yml` promotes it. `buildah.yml` does not apply
-because the image is built from a Dockerfile; `terraform-*` and `mono.yml` belong to other
-repository shapes; `deploy-*-gitops.yml` is a separate deploy workflow, not part of
+because the image is built from a Dockerfile; `terraform-*` belongs to another
+repository shape; `deploy-*-gitops.yml` is a separate deploy workflow, not part of
 verification. Add `sbom.yml` and a `scan-type: license` job beside the scans if the project
 must ship an attestation.
 
@@ -4006,68 +3973,7 @@ jobs:
 
 ---
 
-### 7. Monorepo with Matrix Fan-Out
-
-Orthogonal to the six shapes above: `mono.yml` decides *which* projects a change touched,
-and each one then runs whichever of those shapes it is. Nothing else in the library fans
-out on its own.
-
-```yaml
-# .github/workflows/pr.yml
-name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
-
-on: { pull_request: { branches: [main] } }
-
-concurrency:
-  group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
-
-permissions: { contents: read }
-
-jobs:
-  discover:
-    uses: grootan-devops/github-ci-library/.github/workflows/mono.yml@1.0.0
-    secrets: inherit
-
-  build:
-    needs: discover
-    if: ${{ needs.discover.outputs.any-changed == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/node-build.yml@1.0.0
-    secrets: inherit
-    with:
-      project-path: ${{ matrix.path }}
-
-  lint:
-    needs: discover
-    if: ${{ needs.discover.outputs.any-changed == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.discover.outputs.matrix) }}
-    uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
-    secrets: inherit
-    with:
-      project-path: ${{ matrix.path }}
-```
-
-With `vars.MONO_PROJECTS` set to:
-
-```json
-[{"name":"api","path":"services/api"},{"name":"web","path":"services/web"}]
-```
-
-A pull request touching only `services/api/**` builds and lints `api` alone. On the release
-workflow, pass `always-run-all: true` so a release never skips a project.
-
----
-
-### 8. Security & Code Quality Audit Only
+### 7. Security & Code Quality Audit Only
 
 The one shape with no release at all: a repository that ships no artifact but must still be
 audited, or a nightly sweep bolted onto a repository that already has one of the six
@@ -4130,7 +4036,7 @@ without stamping a release version on the Sonar project.
 
 ---
 
-### 9. GitOps Deploy Entry Point
+### 8. GitOps Deploy Entry Point
 
 Deployment is deliberately outside every shape above: `pr.yml` and `release.yml` verify and
 publish, and a *separate* dispatchable workflow moves a published version into an
