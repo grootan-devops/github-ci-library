@@ -470,8 +470,11 @@ jobs:
           # The checkout is owned by a different uid than the container runs as, so git
           # refuses it with "detected dubious ownership" and every git-based fallback
           # below silently returns empty -- their stderr is discarded.
-          git config --global --add safe.directory "${GITHUB_WORKSPACE}" 2>/dev/null || true
-          git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+          # The checkout is owned by a different uid than this container runs as, so git
+          # refuses it with "detected dubious ownership". actions/checkout writes its own
+          # safe.directory under a temporary HOME that this step does not inherit, and the
+          # mismatch is structural rather than path-specific, so accept any path.
+          git config --global --add safe.directory '*' 2>/dev/null || true
 
           # A release fires seconds after the merge, and the commit->PR association is
           # not indexed instantly: a run created 2s after a merge sees nothing. Retry
@@ -489,9 +492,19 @@ jobs:
             [[ -n "${MERGED_PR_NUMBER}" ]] && echo "Resolved PR #${MERGED_PR_NUMBER} via commit/pulls association."
           fi
 
+          # Without --verify --quiet, `git rev-parse HEAD^2` PRINTS "HEAD^2" on stdout when
+          # it cannot resolve it (a squash merge or a direct push has one parent). That
+          # literal then flowed into every lookup below, producing
+          # "No successful 'pr.yml' run found for HEAD^2".
           if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
-            UPSTREAM_HEAD_SHA="$(git rev-parse HEAD^2 2>/dev/null || true)"
+            UPSTREAM_HEAD_SHA="$(git rev-parse --verify --quiet 'HEAD^2^{commit}' 2>/dev/null || true)"
             [[ -n "${UPSTREAM_HEAD_SHA}" ]] && echo "Resolved head commit ${UPSTREAM_HEAD_SHA} via HEAD^2."
+          fi
+
+          # Belt and braces: anything that is not a full object id is not a commit.
+          if [[ -n "${UPSTREAM_HEAD_SHA}" && ! "${UPSTREAM_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Discarding unusable upstream commit '${UPSTREAM_HEAD_SHA}'."
+            UPSTREAM_HEAD_SHA=""
           fi
 
           if [[ -z "${MERGED_PR_NUMBER}" && -n "${UPSTREAM_HEAD_SHA}" ]]; then
@@ -536,7 +549,15 @@ jobs:
           fi
 
           if [[ -z "${MERGED_PR_NUMBER}" ]]; then
-            echo "::warning title=Provenance::Could not resolve the merged pull request for ${GITHUB_SHA}. Promotion falls back to the newest matching tag."
+            # No pull request is the normal, correct state for a commit pushed straight to
+            # the branch: there is no candidate run to inherit artifacts from. Only a
+            # commit that LOOKS like a merge and still did not resolve is a problem.
+            SUBJECT="$(git log -1 --pretty=%s 2>/dev/null || true)"
+            if [[ -n "${UPSTREAM_HEAD_SHA}" || "${SUBJECT}" =~ \(#[0-9]+\)|^Merge\  ]]; then
+              echo "::warning title=Provenance::Could not resolve the merged pull request for ${GITHUB_SHA}, though the commit looks like a merge. Promotion falls back to the newest matching tag."
+            else
+              echo "::notice title=Provenance::${GITHUB_SHA} was pushed directly, not merged from a pull request, so there is no candidate run. Promotion resolves the image by tag and the release carries notes only."
+            fi
           fi
 
           CANDIDATE_SUFFIX=""
