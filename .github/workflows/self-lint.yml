@@ -1,7 +1,5 @@
 name: Lint · Library
-run-name: "Lint · ${{ github.ref_name }} · #${{ github.run_number }}"
-
-# Lint dimension of the library's own pipeline, callable on its own.
+run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
@@ -15,7 +13,6 @@ permissions:
   contents: read
 
 jobs:
-  # actionlint, shellcheck and hadolint ship in the organisation build container.
   self-lint:
     name: ${{ matrix.tool }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -32,7 +29,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # run_linted reports findings in the step summary rather than as an exit code.
       - name: Run ${{ matrix.tool }}
         env:
           TOOL: ${{ matrix.tool }}

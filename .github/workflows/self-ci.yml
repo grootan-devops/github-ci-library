@@ -1,8 +1,5 @@
 name: CI · PR Verification
-run-name: "CI · ${{ github.event.pull_request.number && format('PR #{0} · {1}', github.event.pull_request.number, github.head_ref) || format('{0} · #{1}', github.ref_name, github.run_number) }}"
-
-# The library's own pipeline, counterpart of ci-templates/.gitlab-ci.yml.
-# An aggregator only: each dimension lives in its own `self-*.yml`, dispatchable alone.
+run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   pull_request:
