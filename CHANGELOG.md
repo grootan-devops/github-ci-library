@@ -7,6 +7,15 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `init.yml` required `vars.IMAGE_REGISTRY` and `vars.IMAGE_REPOSITORY` even when the
+  caller set `ignore-docker: "true"` and `ignore-chart: "true"`. A repository that
+  publishes neither an image nor a chart has no registry to name, so the shape the README
+  documents as "Language Library (No Image, No Chart)" could not start. Both inputs set
+  explicitly now skip the requirement; `auto` still requires them, because the check runs
+  before the checkout and cannot see whether a Dockerfile exists.
+
 ### Added
 
 - `docker.yml` and `buildah.yml` take `require-scan` (default true) and

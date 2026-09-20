@@ -184,6 +184,19 @@ jobs:
       - name: Validate Organisation Configuration
         run: |
           set -euo pipefail
+
+          # A repository that publishes neither an image nor a chart has no registry to
+          # name, so requiring one turns a documented shape -- see "Language Library
+          # (No Image, No Chart)" in the README -- into a startup failure.
+          #
+          # Only an EXPLICIT "true" on both inputs relaxes this. `auto` is resolved from
+          # the working tree, and this step runs before the checkout, so `auto` still
+          # requires the variables rather than guessing there is nothing to publish.
+          if [[ "${IGNORE_DOCKER_INPUT,,}" == "true" && "${IGNORE_CHART_INPUT,,}" == "true" ]]; then
+            echo "ignore-docker and ignore-chart are both set: no registry target to resolve."
+            exit 0
+          fi
+
           MISSING=()
           [[ -n "${REGISTRY_HOST}" ]] || MISSING+=("vars.IMAGE_REGISTRY")
           [[ -n "${IMAGE_REPOSITORY_INPUT}" ]] || MISSING+=("vars.IMAGE_REPOSITORY")
@@ -198,6 +211,8 @@ jobs:
               printf -- '- `%s`\n' "${MISSING[@]}"
               echo ""
               echo "Nothing downstream can resolve a registry target without them, so no other job ran."
+              echo ""
+              echo "If this repository publishes neither an image nor a chart, call \`init.yml\` with \`ignore-docker: \"true\"\` and \`ignore-chart: \"true\"\` instead of setting them."
               echo ""
             } >> "${GITHUB_STEP_SUMMARY}"
             exit 1
