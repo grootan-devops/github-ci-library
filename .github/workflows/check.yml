@@ -197,18 +197,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          {
-            echo "## 🚦 Release Prerequisites"
-            echo ""
-            case "${RESULT}" in
-              success)   echo "✅ Every applicable guard passed." ;;
-              failure)   echo "❌ At least one guard failed. Open the failed **Check:** job for the exact remedy." ;;
-              cancelled) echo "🚫 The guards were cancelled." ;;
-              skipped)   echo "⏭️ No guards ran." ;;
-              *)         echo "Status: ${RESULT}" ;;
-            esac
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          if [[ "${RESULT}" != "success" ]]; then
+            {
+              echo "## 🚦 Release Prerequisites"
+              echo ""
+              case "${RESULT}" in
+                failure)   echo "❌ At least one guard failed. Open the failed **Check:** job for the exact remedy." ;;
+                cancelled) echo "🚫 The guards were cancelled." ;;
+                skipped)   echo "⏭️ No guards ran." ;;
+                *)         echo "Status: ${RESULT}" ;;
+              esac
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
           if [[ "${DISCOVER_RESULT}" != "success" ]]; then
             echo "::error title=Release prerequisites::Guard discovery did not succeed (${DISCOVER_RESULT})."

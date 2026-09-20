@@ -74,8 +74,8 @@ jobs:
         id: biome
         run: |
           set -uo pipefail
-          biome check --max-diagnostics=none > "${BIOME_REPORT}" 2>&1
-          BIOME_EXIT=$?
+          BIOME_EXIT=0
+          biome check --max-diagnostics=none > "${BIOME_REPORT}" 2>&1 || BIOME_EXIT=$?
           cat "${BIOME_REPORT}"
           exit ${BIOME_EXIT}
 

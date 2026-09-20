@@ -183,8 +183,8 @@ jobs:
           FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
         run: |
           set -uo pipefail
-          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/trivy-scan.sh"
-          RESULT=$?
+          RESULT=0
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/trivy-scan.sh" || RESULT=$?
           case "${RESULT}" in
             0) echo "Scan clean." ;;
             2)

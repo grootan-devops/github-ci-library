@@ -162,6 +162,9 @@ jobs:
           LINT_OUTCOME: ${{ steps.helmlint.outcome }}
         run: |
           set -euo pipefail
+          if [[ "${DEPS_OUTCOME}" == "success" && "${LINT_OUTCOME}" == "success" ]]; then
+            exit 0
+          fi
           TALLY="$(grep -E 'chart\(s\) linted' "${RUNNER_TEMP}/helm-lint.log" 2>/dev/null | tail -n 1 || true)"
           {
             echo "### ⎈ Chart lint"
@@ -172,8 +175,6 @@ jobs:
               echo '```'
               tail -n 30 "${RUNNER_TEMP}/helm-dep.log" 2>/dev/null || echo "(no output was captured)"
               echo '```'
-            elif [[ "${LINT_OUTCOME}" == "success" ]]; then
-              echo "✅ \`helm lint --strict\` passed.${TALLY:+ ${TALLY}}"
             else
               echo "❌ \`helm lint --strict\` failed.${TALLY:+ ${TALLY}} Helm reported:"
               echo ""

@@ -13,9 +13,8 @@ on:
         default: ""
         description: "Project root. Monorepo children set this."
       state-name:
-        required: false
+        required: true
         type: string
-        default: ""
         description: "Workspace key prefix component for the backend configuration."
       check-docs:
         required: false
@@ -76,16 +75,6 @@ jobs:
             echo "checks=${CHECKS}"
             echo "docs=${DOCS}"
           } >> "${GITHUB_OUTPUT}"
-          if [[ "${ROOT}" != "[]" ]]; then
-            {
-              echo "### 🌍 Applicable Terraform jobs"
-              echo ""
-              echo "- Init"
-              jq -r '.[] | "- \(.name)"' <<< "${CHECKS}"
-              [[ "${DOCS}" == "[]" ]] || echo "- Documentation"
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-          fi
 
   init:
     name: Init
@@ -139,23 +128,19 @@ jobs:
         if: always()
         env:
           OUTCOME: ${{ steps.tfinit.outcome }}
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
-          CACHE_STATE="rebuilt — no entry matched"
-          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
+          if [[ "${OUTCOME}" == "success" ]]; then
+            exit 0
+          fi
           {
             echo "### 🌍 Terraform init"
             echo ""
-            if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ Backend initialised; provider cache ${CACHE_STATE}."
-            else
-              echo "❌ \`terraform init\` failed, so neither \`validate\` nor \`tflint\` ran. Terraform reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/tf-init.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            fi
+            echo "❌ \`terraform init\` failed, so neither \`validate\` nor \`tflint\` ran. Terraform reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${RUNNER_TEMP}/tf-init.log" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
@@ -225,18 +210,17 @@ jobs:
         run: |
           set -euo pipefail
           LOG="${RUNNER_TEMP}/tf-check.log"
+          if [[ "${OUTCOME}" == "success" ]]; then
+            exit 0
+          fi
           {
             echo "### 🌍 Terraform: ${NAME}"
             echo ""
-            if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ Passed."
-            else
-              echo "❌ Failed. \`${NAME}\` reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${LOG}" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            fi
+            echo "❌ Failed. \`${NAME}\` reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${LOG}" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
