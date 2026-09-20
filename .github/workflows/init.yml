@@ -467,8 +467,22 @@ jobs:
           UPSTREAM_RUN_ID=""
           UPSTREAM_RUN_NUMBER=""
 
-          PR_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
-            --jq '[.[] | select(.merged_at != null)] | first // empty' 2>/dev/null || true)"
+          # The checkout is owned by a different uid than the container runs as, so git
+          # refuses it with "detected dubious ownership" and every git-based fallback
+          # below silently returns empty -- their stderr is discarded.
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}" 2>/dev/null || true
+          git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+
+          # A release fires seconds after the merge, and the commit->PR association is
+          # not indexed instantly: a run created 2s after a merge sees nothing. Retry
+          # briefly rather than falling through to "promotion searches by tag".
+          PR_JSON=""
+          for attempt in 1 2 3 4; do
+            PR_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
+              --jq '[.[] | select(.merged_at != null)] | first // empty' 2>/dev/null || true)"
+            [[ -n "${PR_JSON}" ]] && break
+            [[ "${attempt}" -lt 4 ]] && sleep 5
+          done
           if [[ -n "${PR_JSON}" ]]; then
             MERGED_PR_NUMBER="$(jq -r '.number // empty' <<<"${PR_JSON}")"
             UPSTREAM_HEAD_SHA="$(jq -r '.head.sha // empty' <<<"${PR_JSON}")"

@@ -255,7 +255,12 @@ jobs:
             echo "Release ${TAG}" > "${NOTES_FILE}"
           fi
 
-          ARGS=(--title "Release ${TAG}"
+          # This job deliberately does not check the repository out -- it only needs the
+          # payload artifact. Without --repo, gh infers the repository from a git remote
+          # that is not there and dies with "failed to run git: not a git repository",
+          # which surfaced only as "gh refused to publish".
+          ARGS=(--repo "${GITHUB_REPOSITORY}"
+                --title "Release ${TAG}"
                 --notes-file "${NOTES_FILE}"
                 --target "${GITHUB_SHA}")
           if [[ "${DRAFT}" == "true" ]]; then ARGS+=(--draft); fi
@@ -267,10 +272,10 @@ jobs:
 
           # Re-running an existing release updates it rather than failing.
           set +e
-          if gh release view "${TAG}" >/dev/null 2>&1; then
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             echo "::notice title=Release::'${TAG}' already exists. Updating it."
             GH_OUTPUT="$( { gh release edit "${TAG}" "${ARGS[@]}" &&
-              { [[ ${#ASSETS[@]} -eq 0 ]] || gh release upload "${TAG}" "${ASSETS[@]}" --clobber ; } ; } 2>&1 )"
+              { [[ ${#ASSETS[@]} -eq 0 ]] || gh release upload "${TAG}" "${ASSETS[@]}" --repo "${GITHUB_REPOSITORY}" --clobber ; } ; } 2>&1 )"
           else
             GH_OUTPUT="$(gh release create "${TAG}" "${ARGS[@]}" "${ASSETS[@]}" 2>&1)"
           fi
