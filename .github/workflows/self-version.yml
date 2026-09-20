@@ -1,7 +1,5 @@
 name: Version · Library
-run-name: "Version · ${{ github.event_name }} · ${{ github.sha }}"
-
-# Resolves the version the library would release; the one place VERSION is validated.
+run-name: "Version · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:

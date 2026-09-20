@@ -66,7 +66,7 @@ repository path once; every other workflow consumes its outputs.
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -142,7 +142,7 @@ jobs:
 ```yaml
 # .github/workflows/release.yml
 name: CD · Production Release
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
@@ -1537,7 +1537,7 @@ must ship an attestation.
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -1666,7 +1666,7 @@ equivalent; nothing else in the shape changes. For Java, also set
 ```yaml
 # .github/workflows/release.yml
 name: CD · Production Release
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
@@ -1803,7 +1803,7 @@ publishes anything.
 ```yaml
 # .github/workflows/lint.yml
 name: Lint · Dockerfile, YAML & Markdown
-run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Lint · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -1828,7 +1828,7 @@ jobs:
 ```yaml
 # .github/workflows/secret-scan.yml
 name: Audit · Secret Scanning
-run-name: "Audit · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Audit · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -1853,7 +1853,7 @@ jobs:
 ```yaml
 # .github/workflows/sonarqube.yml
 name: Audit · SonarQube
-run-name: "Audit · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Audit · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -1894,7 +1894,7 @@ jobs:
 ```yaml
 # .github/workflows/image-scan.yml
 name: Audit · Published Image Vulnerabilities
-run-name: "Audit · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Audit · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -1957,7 +1957,7 @@ jobs:
 ```yaml
 # .github/workflows/check.yml
 name: Check · Release Prerequisites
-run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Check · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2013,7 +2013,7 @@ needed to resolve a version here.
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -2101,7 +2101,7 @@ teardown and leave the fixtures standing.
 ```yaml
 # .github/workflows/terraform-test.yml
 name: CI · Terraform Module Test
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -2131,7 +2131,7 @@ jobs:
 ```yaml
 # .github/workflows/release.yml
 name: CD · Tag & Release
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
@@ -2201,7 +2201,7 @@ jobs:
 ```yaml
 # .github/workflows/check.yml
 name: Check · Release Prerequisites
-run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Check · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2239,7 +2239,7 @@ migration guards only — the chart and image guards switch themselves off.
 ```yaml
 # .github/workflows/lint.yml
 name: Lint · YAML, Markdown & Terraform
-run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Lint · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2267,7 +2267,7 @@ jobs:
 ```yaml
 # .github/workflows/config-scan.yml
 name: Scan · Terraform Configuration
-run-name: "Scan · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Scan · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2306,7 +2306,7 @@ jobs:
 ```yaml
 # .github/workflows/secret-scan.yml
 name: Scan · Secrets
-run-name: "Scan · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Scan · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2331,7 +2331,7 @@ jobs:
 ```yaml
 # .github/workflows/sonarqube.yml
 name: Quality · SonarQube
-run-name: "Quality · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Quality · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2386,7 +2386,7 @@ tree, and a chart ships none. What remains is the chart's own pipeline: `lint.ym
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -2475,7 +2475,7 @@ jobs:
 ```yaml
 # .github/workflows/release.yml
 name: CD · Production Release
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
@@ -2586,7 +2586,7 @@ the caller's `needs:` alone, which is why `chart` needs `chart-scan` above.
 ```yaml
 # .github/workflows/check.yml
 name: Check · Release Prerequisites
-run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Check · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2623,7 +2623,7 @@ jobs:
 ```yaml
 # .github/workflows/lint.yml
 name: Lint · Config & Documentation
-run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Lint · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2644,7 +2644,7 @@ jobs:
 ```yaml
 # .github/workflows/chart-scan.yml
 name: Scan · Helm Chart
-run-name: "Scan · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Scan · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2679,7 +2679,7 @@ jobs:
 ```yaml
 # .github/workflows/secret-scan.yml
 name: Security · Secret Scan
-run-name: "Security · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Security · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2704,7 +2704,7 @@ jobs:
 ```yaml
 # .github/workflows/sonarqube.yml
 name: Quality · SonarQube
-run-name: "Quality · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Quality · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2757,7 +2757,7 @@ manifest means `init.yml` has no version to discover, so the caller hands it one
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -2848,7 +2848,7 @@ jobs:
 ```yaml
 # .github/workflows/release.yml
 name: CD · Production Release
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
@@ -2953,7 +2953,7 @@ The rest are dispatchable on their own, for when one dimension has to be re-run 
 ```yaml
 # .github/workflows/lint.yml
 name: Lint · Dockerfile, YAML & Docs
-run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Lint · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2974,7 +2974,7 @@ jobs:
 ```yaml
 # .github/workflows/secret-scan.yml
 name: Security · Secret Scan
-run-name: "Security · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Security · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -2999,7 +2999,7 @@ jobs:
 ```yaml
 # .github/workflows/sonarqube.yml
 name: Quality · SonarQube
-run-name: "Quality · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Quality · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3020,7 +3020,7 @@ jobs:
 ```yaml
 # .github/workflows/image-scan.yml
 name: Scan · Released Image
-run-name: "Scan · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Scan · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3073,7 +3073,7 @@ jobs:
 ```yaml
 # .github/workflows/check.yml
 name: Check · Release Prerequisites
-run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Check · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3136,7 +3136,7 @@ is the one hand-stamped value in the repository.
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -3243,7 +3243,7 @@ jobs:
 ```yaml
 # .github/workflows/release.yml
 name: CD · Promote, Tag & Release
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
@@ -3358,7 +3358,7 @@ concern on its own.
 ```yaml
 # .github/workflows/build.yml
 name: Build · Rebuild Candidate Image
-run-name: "Build · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Build · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3419,7 +3419,7 @@ jobs:
 ```yaml
 # .github/workflows/check.yml
 name: Check · Release Prerequisites
-run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Check · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3456,7 +3456,7 @@ jobs:
 ```yaml
 # .github/workflows/image-scan.yml
 name: Scan · Published Image
-run-name: "Scan · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Scan · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3510,7 +3510,7 @@ jobs:
 ```yaml
 # .github/workflows/sbom.yml
 name: SBOM · Generate & Licence Audit
-run-name: "SBOM · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "SBOM · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3548,7 +3548,7 @@ jobs:
 ```yaml
 # .github/workflows/lint.yml
 name: Lint · YAML, Changelog & Migration
-run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Lint · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3568,7 +3568,7 @@ jobs:
 ```yaml
 # .github/workflows/secret-scan.yml
 name: Secret Scan · Full History
-run-name: "Secret Scan · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Secret Scan · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3592,7 +3592,7 @@ jobs:
 ```yaml
 # .github/workflows/sonarqube.yml
 name: SonarQube · Quality Gate
-run-name: "SonarQube · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "SonarQube · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3629,7 +3629,7 @@ equivalents; the rest of the shape is unchanged.
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   pull_request:
@@ -3719,7 +3719,7 @@ jobs:
 ```yaml
 # .github/workflows/release.yml
 name: CD · Tag, Release & Notify
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   push:
@@ -3799,7 +3799,7 @@ jobs:
 ```yaml
 # .github/workflows/build.yml
 name: Build · Verify
-run-name: "Build · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Build · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3834,7 +3834,7 @@ jobs:
 ```yaml
 # .github/workflows/check.yml
 name: Check · Release Prerequisites
-run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Check · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3869,7 +3869,7 @@ jobs:
 ```yaml
 # .github/workflows/lint.yml
 name: Lint · Config, Docs & Source
-run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Lint · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3894,7 +3894,7 @@ jobs:
 ```yaml
 # .github/workflows/secret-scan.yml
 name: Security · Secret Scan
-run-name: "Security · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Security · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3919,7 +3919,7 @@ jobs:
 ```yaml
 # .github/workflows/sbom.yml
 name: Supply Chain · SBOM & Licenses
-run-name: "Supply Chain · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Supply Chain · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -3960,7 +3960,7 @@ jobs:
 ```yaml
 # .github/workflows/sonarqube.yml
 name: Quality · SonarQube
-run-name: "Quality · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Quality · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -4015,7 +4015,7 @@ out on its own.
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CI · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on: { pull_request: { branches: [main] } }
 
@@ -4076,7 +4076,7 @@ pipelines above.
 ```yaml
 # .github/workflows/audit.yml
 name: Audit · Security & Quality
-run-name: "Audit · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Audit · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
@@ -4140,7 +4140,7 @@ GitOps.
 ```yaml
 # .github/workflows/deploy.yml
 name: CD · GitOps Deploy
-run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "CD · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:

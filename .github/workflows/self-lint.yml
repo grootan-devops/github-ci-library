@@ -1,5 +1,5 @@
 name: Lint · Library
-run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: "Lint · ${{ github.event_name }} · ${{ github.short_sha }}"
 
 on:
   workflow_dispatch:
