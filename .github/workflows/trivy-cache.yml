@@ -9,9 +9,12 @@ on:
     inputs:
       enable-java-db:
         required: false
-        type: bool
+        type: boolean
         default: true
-        description: "downloads the Java DB only when pom.xml is present."
+        description: >-
+          Download trivy-java-db as well. Required by any later image or SBOM scan of a
+          Java artifact, which passes --skip-java-db-update and fails on a cold cache.
+          It is roughly 900MB, so set false for a repository that ships no JVM artifact.
       project-path:
         required: false
         type: string
@@ -78,7 +81,7 @@ jobs:
           trivy config --skip-version-check .trivy-checks-warm || true
           rmdir .trivy-checks-warm 2>/dev/null || true
 
-          if [[ "${WANT_JAVA}" == "true" ]]; then
+          if [[ "${ENABLE_JAVA_DB}" == "true" ]]; then
             echo "Warming trivy-java-db for downstream image and SBOM scans..."
             # Downstream scans pass --skip-java-db-update, which Trivy treats as
             # fatal on a cold cache, so a failure here fails every later Java scan.
@@ -90,7 +93,7 @@ jobs:
             fi
             echo "java_db=${JAVA_DB}" >> "${GITHUB_OUTPUT}"
           else
-            echo "No pom.xml and enable-java-db is not true — skipping trivy-java-db."
+            echo "enable-java-db is false — skipping trivy-java-db."
           fi
 
       # GitHub caches are immutable, so a stable key must be deleted before it can
