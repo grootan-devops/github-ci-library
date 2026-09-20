@@ -177,6 +177,13 @@ TRIVY_ARGS=""
 if [[ -n "${TRIVY_CACHE_DIR:-}" ]] && compgen -G "${TRIVY_CACHE_DIR}/java-db/*" > /dev/null 2>&1; then
   TRIVY_ARGS="--skip-java-db-update"
 fi
+# Same for the vulnerability DB. The caller's trivy-cache job restores it, but without
+# this flag `trivy image` applies its own freshness rule and re-downloads ~115MB on every
+# run, so the restored cache buys nothing. Guarded like java-db: a cold cache still
+# downloads rather than failing.
+if [[ -n "${TRIVY_CACHE_DIR:-}" ]] && compgen -G "${TRIVY_CACHE_DIR}/db/*" > /dev/null 2>&1; then
+  TRIVY_ARGS="${TRIVY_ARGS:+${TRIVY_ARGS} }--skip-db-update"
+fi
 build_trivy_command() {
   local BASE_CMD=""
   case "${SCAN_TYPE}" in
@@ -203,8 +210,8 @@ build_trivy_command() {
         BASE_CMD+=" --helm-values ${TRIVY_HELM_VALUES_FILE}"
       fi
       ;;
-    license) BASE_CMD="trivy fs --scanners license --license-full --skip-db-update ${TRIVY_ARGS} ." ;;
-    sbom) BASE_CMD="trivy sbom --scanners vuln ${SBOM_FILE}" ;;
+    license) BASE_CMD="trivy fs --scanners license --license-full ${TRIVY_ARGS} ." ;;
+    sbom) BASE_CMD="trivy sbom --scanners vuln ${TRIVY_ARGS} ${SBOM_FILE}" ;;
   esac
   echo "${BASE_CMD}"
 }
@@ -257,7 +264,13 @@ execute_trivy_scan() {
   fi
 
   log_info "Generating JUnit XML test report..."
-  trivy convert --format template --template "@${JUNIT_TPL_FILE}" --output "${TRIVY_SCAN_REPORT_NAME}.junit" "${TRIVY_SCAN_REPORT_NAME}.json" 2>/dev/null || true
+  if ! CONVERT_ERR="$(trivy convert --format template --template "@${JUNIT_TPL_FILE}" \
+      --output "${TRIVY_SCAN_REPORT_NAME}.junit" "${TRIVY_SCAN_REPORT_NAME}.json" 2>&1)"; then
+    # Previously `2>/dev/null || true`, which hid why the report never appeared and left
+    # the publish step reporting "no JUnit report matched" with no cause.
+    log_warn "JUnit conversion failed; no test report will be published. Trivy reported:"
+    printf '%s\n' "${CONVERT_ERR}" >&2
+  fi
 
   if [[ ! -f "${TRIVY_SCAN_REPORT_NAME}.json" ]]; then
     log_error "Trivy did not generate output file"
