@@ -517,8 +517,23 @@ jobs:
             if [[ -n "${CANDIDATE}" ]]; then
               MERGED_PR_NUMBER="${CANDIDATE}"
               echo "Resolved PR #${MERGED_PR_NUMBER} from squash commit subject."
+              # Two independent reads, because this is the hinge of the whole chain: with
+              # no head commit there is no candidate run, so the release silently carries
+              # notes only. Their stderr is kept -- discarding it is what made the
+              # previous failure undiagnosable from the log.
               if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
-                UPSTREAM_HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${CANDIDATE}" --jq '.head.sha // empty' 2>/dev/null || true)"
+                PR_ERR="$(mktemp)"
+                UPSTREAM_HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${CANDIDATE}" \
+                  --jq '.head.sha // empty' 2>"${PR_ERR}" || true)"
+                if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
+                  UPSTREAM_HEAD_SHA="$(gh pr view "${CANDIDATE}" --repo "${GITHUB_REPOSITORY}" \
+                    --json headRefOid --jq '.headRefOid // empty' 2>>"${PR_ERR}" || true)"
+                  [[ -n "${UPSTREAM_HEAD_SHA}" ]] && echo "Resolved head commit ${UPSTREAM_HEAD_SHA} via gh pr view."
+                fi
+                if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
+                  echo "::warning title=Provenance::Could not read PR #${CANDIDATE} to find its head commit, so no candidate run can be located and the release will carry notes only. gh reported: $(tr '\n' ' ' < "${PR_ERR}" | cut -c1-400)"
+                fi
+                rm -f "${PR_ERR}"
               fi
             fi
           fi
@@ -529,9 +544,14 @@ jobs:
           fi
 
           if [[ -n "${UPSTREAM_HEAD_SHA}" ]]; then
+            RUN_ERR="$(mktemp)"
             UPSTREAM_RUN_JSON="$(gh run list --repo "${GITHUB_REPOSITORY}" \
               --workflow "${UPSTREAM_WORKFLOW}" --commit "${UPSTREAM_HEAD_SHA}" \
-              --status success --limit 1 --json databaseId,number 2>/dev/null || echo '[]')"
+              --status success --limit 1 --json databaseId,number 2>"${RUN_ERR}" || echo '[]')"
+            if [[ -s "${RUN_ERR}" ]]; then
+              echo "::notice title=Provenance::gh run list reported: $(tr '\n' ' ' < "${RUN_ERR}" | cut -c1-300)"
+            fi
+            rm -f "${RUN_ERR}"
             UPSTREAM_RUN_ID="$(jq -r '.[0].databaseId // empty' <<<"${UPSTREAM_RUN_JSON:-[]}" 2>/dev/null || true)"
             UPSTREAM_RUN_NUMBER="$(jq -r '.[0].number // empty' <<<"${UPSTREAM_RUN_JSON:-[]}" 2>/dev/null || true)"
             if [[ -n "${UPSTREAM_RUN_ID}" ]]; then
