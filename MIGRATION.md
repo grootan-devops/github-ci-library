@@ -50,8 +50,11 @@ passing `lint:` to `docker.yml` now gets an unknown-input error; call `lint.yml`
 the image build instead. It was removed because a caller depends on the whole workflow, so
 a lint job inside it put the scan and the release guards behind hadolint.
 
-Callers should also grant `actions: write` where a scan runs, so `trivy-cache.yml` can
-refresh the `trivy-db` entry; without it every scan re-downloads the databases.
+### `trivy-cache.yml` requires `actions: write`
+
+The warm job now declares it, rather than inheriting whatever the caller granted. A reusable
+workflow cannot request a permission its caller did not grant, so a caller that stops at
+`actions: read` fails at startup. Grant `actions: write` wherever `trivy-cache.yml` is called.
 
 ## 1.0.0
 

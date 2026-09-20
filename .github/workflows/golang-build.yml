@@ -38,6 +38,9 @@ env:
   GOPATH: ${{ github.workspace }}/.go-cache
   GOFLAGS: -mod=readonly
 
+permissions:
+  contents: read
+
 jobs:
   dependency:
     name: Dependency Download

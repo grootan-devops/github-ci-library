@@ -38,6 +38,9 @@ env:
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
   UV_VENV_RELOCATABLE: "1"
 
+permissions:
+  contents: read
+
 jobs:
   dependency:
     name: Dependency Download
@@ -117,6 +120,9 @@ jobs:
   build:
     name: Build
     needs: dependency
+    # An interpreted service has nothing to compile: dependencies -> test is the
+    # whole shape. Pass an empty build-command and no build job is created.
+    if: ${{ inputs.build-command != '' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
     permissions:

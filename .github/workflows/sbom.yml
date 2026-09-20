@@ -28,6 +28,9 @@ env:
   SBOM_FILE: sbom.cdx.json
   TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
 
+permissions:
+  contents: read
+
 jobs:
   generate:
     name: Generate

@@ -142,6 +142,9 @@ env:
   ARGOCD_APP_NAME: ${{ inputs.argocd-app-name }}
   DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Validate Deployment Prerequisites

@@ -40,6 +40,9 @@ env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
   MAVEN_OPTS: -Djava.awt.headless=true -Dmaven.repo.local=${{ github.workspace }}/.m2/repository
 
+permissions:
+  contents: read
+
 jobs:
   dependency:
     name: Dependency Download

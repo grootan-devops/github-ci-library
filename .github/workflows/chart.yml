@@ -74,6 +74,9 @@ env:
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   CHART_INFO_FILE_NAME: CHART_INFO.md
 
+permissions:
+  contents: read
+
 jobs:
   docs:
     name: Documentation

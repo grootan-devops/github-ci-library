@@ -74,6 +74,9 @@ on:
         required: false
         description: "Token for the GitOps repository. Falls back to GITHUB_TOKEN."
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: Validate Deployment Prerequisites

@@ -88,6 +88,15 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Every workflow declares a `permissions: contents: read` default. Each job
+  already scoped itself, so nothing changes today; the default is what stops the
+  next job added without one inheriting the caller's full grant.
+- `trivy-cache.yml`'s warm job declares `actions: write` instead of inheriting
+  it. It was the one job in the library with no permissions block at all.
+- `python-build.yml` creates no build job when `build-command` is empty: an
+  interpreted service has nothing to compile and goes `dependency` → `test`.
+- `.gitignore` covers `.env`.
+
 - A manual `workflow_dispatch` of `self-cd.yml` could cut a release from any ref,
   including a feature branch. GitLab refuses a manual release outright
   (`.release-rules` sends `web`/`api` pipelines to `when: never`); the dispatch

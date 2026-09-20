@@ -20,6 +20,9 @@ env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: ${{ matrix.linter }}

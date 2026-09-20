@@ -116,6 +116,9 @@ on:
         description: "Exact dev Helm chart version published by the candidate build"
         value: ${{ jobs.initialize.outputs.CANDIDATE_CHART_VERSION }}
 
+permissions:
+  contents: read
+
 jobs:
   initialize:
     name: Environment Context

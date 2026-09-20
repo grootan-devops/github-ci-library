@@ -13,3 +13,6 @@ _scan_tmp/
 # Python test artifacts
 __pycache__/
 *.py[cod]
+
+# Secrets
+.env

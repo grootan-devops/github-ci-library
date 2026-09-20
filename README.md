@@ -224,10 +224,11 @@ covers image and chart pushes. `actions: write` lets the release restore the can
 artifacts *and* lets `trivy-cache.yml` replace the `trivy-db` entry. `checks: write`
 publishes test and scan results as Checks.
 
-`actions: read` is enough to run, but not to refresh the Trivy cache: GitHub cache entries
-are immutable, so the stable `trivy-db` key has to be deleted before it can be rewritten.
-Without `actions: write` the warm job warns and leaves the existing entry in place, and
-every scan re-downloads roughly 1GB of vulnerability database.
+`actions: read` is not enough for any caller of `trivy-cache.yml`. GitHub cache entries are
+immutable, so the stable `trivy-db` key has to be deleted before it can be rewritten, and the
+warm job declares `actions: write` for it. A reusable workflow cannot request a permission its
+caller did not grant, so a caller that stops at `actions: read` fails at startup before any
+job begins.
 
 > [!IMPORTANT]
 > The repository's default token scope caps all of this. If **Settings → Actions → General →
@@ -656,7 +657,7 @@ flowchart LR
 | Workflow · Job | Description |
 |---|---|
 | `python-build.yml` · `dependency` | `uv sync --frozen --no-install-project`. Caches `.uv-cache` keyed by `uv.lock`. Strictly frozen — never mutates the lockfile. |
-| `python-build.yml` · `build` | `uv build --offline`. Uploads `python-dist`. |
+| `python-build.yml` · `build` | `uv build --offline`. Uploads `python-dist`. Not created when `build-command` is empty — an interpreted service goes `dependency` → `test`. |
 | `python-build.yml` · `test` | `pytest --junitxml --cov`, published as a GitHub Check. |
 | `python-lint.yml` · `lint` | Matrix of `ruff`, `mypy`, `isort`, `pycodestyle`, all in parallel. |
 

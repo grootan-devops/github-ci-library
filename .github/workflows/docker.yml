@@ -104,6 +104,9 @@ env:
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build & Push

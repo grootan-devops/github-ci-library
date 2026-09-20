@@ -80,6 +80,9 @@ env:
   TRIVY_HOST: ${{ vars.TRIVY_HOST }}
   SBOM_FILE: sbom.cdx.json
 
+permissions:
+  contents: read
+
 jobs:
   scan:
     name: ${{ inputs.scan-type }}${{ inputs.config-type && format(' ({0})', inputs.config-type) || '' }}

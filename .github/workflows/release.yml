@@ -54,6 +54,9 @@ env:
   TRIVY_SCAN_REPORT_FILE_NAME: trivy_scan_report.tar.gz
   TEST_REPORT_DIR: test-report
 
+permissions:
+  contents: read
+
 jobs:
   collect:
     name: Collect Artifacts

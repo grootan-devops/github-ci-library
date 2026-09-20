@@ -22,11 +22,18 @@ env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
   TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
 
+permissions:
+  contents: read
+
 jobs:
   warm:
     name: Warm Cache
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
+    permissions:
+      contents: read
+      # Replaces the immutable trivy-db entry; a caller must grant it.
+      actions: write
     # No `permissions:` block on purpose: declaring actions: write would force
     # every caller to grant it or fail at startup. Restores work without it.
     container:

@@ -31,6 +31,9 @@ env:
   CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
   MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
 
+permissions:
+  contents: read
+
 jobs:
   discover:
     name: Detect Lint Targets

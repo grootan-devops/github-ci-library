@@ -16,6 +16,9 @@ env:
   npm_config_cache: ${{ github.workspace }}/.npm
   BIOME_REPORT: biome-report.txt
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: biome

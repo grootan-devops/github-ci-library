@@ -27,6 +27,9 @@ on:
         default: true
         description: "Fail the job when the quality gate fails."
 
+permissions:
+  contents: read
+
 jobs:
   sonarqube:
     name: SonarQube

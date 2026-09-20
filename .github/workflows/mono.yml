@@ -32,6 +32,9 @@ on:
         description: "Number of projects selected"
         value: ${{ jobs.discover.outputs.CHANGED_COUNT }}
 
+permissions:
+  contents: read
+
 jobs:
   discover:
     name: Discover Changed Projects

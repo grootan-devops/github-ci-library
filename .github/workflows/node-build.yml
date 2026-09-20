@@ -43,6 +43,9 @@ env:
   TEST_REPORT_DIR: test-report
   npm_config_cache: ${{ github.workspace }}/.npm
 
+permissions:
+  contents: read
+
 jobs:
   dependency:
     name: Dependency Download

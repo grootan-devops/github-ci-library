@@ -116,6 +116,9 @@ env:
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
   INSTALLED_PCKG_FILE_NAME: installed_pkgs.txt
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build & Push

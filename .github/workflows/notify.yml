@@ -16,6 +16,9 @@ on:
         default: ""
         description: "Artifact holding RELEASE_CHANGELOG.md / RELEASE_CHANGELOG_CARD.json."
 
+permissions:
+  contents: read
+
 jobs:
   notify:
     name: Teams

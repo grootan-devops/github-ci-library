@@ -47,6 +47,9 @@ on:
         default: true
         description: "Run the MIGRATION.md release guard. Disable for artifacts with no migration contract."
 
+permissions:
+  contents: read
+
 jobs:
   discover:
     name: Discover

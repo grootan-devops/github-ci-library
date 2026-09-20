@@ -26,6 +26,9 @@ env:
   GOPATH: ${{ github.workspace }}/.go-cache
   GOFLAGS: -mod=readonly
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: ${{ matrix.linter }}

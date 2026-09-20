@@ -30,6 +30,9 @@ env:
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "0"
 
+permissions:
+  contents: read
+
 jobs:
   # An empty matrix runs no job at all: no root module, nothing provisioned.
   discover:
