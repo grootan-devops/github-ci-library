@@ -360,8 +360,7 @@ caller's to reinstate.
 A release caller that carries `workflow_dispatch` should also refuse a ref that is not the
 default branch. GitLab forbids a manual release outright (`.release-rules` sends `web` and
 `api` pipelines to `when: never`); a GitHub dispatch is looser still, because it can target
-any ref, so without that guard a release can be cut from a feature branch. `self-cd.yml`'s
-`guard-ref` job is the reference implementation.
+any ref, so without that guard a release can be cut from a feature branch.
 
 > [!WARNING]
 > Leave a release or deploy caller at `cancel-in-progress: true` and the next push or
@@ -1271,6 +1270,29 @@ Release assets: the Trivy report bundle, `installed_pkgs.txt`, `sbom.cdx.json`, 
 `.tgz`, the test report archive, `RELEASE_CHANGELOG.md`, `RELEASE_MIGRATION.md`, plus
 anything named in `additional-artifacts`.
 
+#### A release promotes; it does not rebuild
+
+`docker.yml` and `buildah.yml` gate `build` and `test` behind `!inputs.is-release`, and
+`promote` behind `inputs.is-release`. A release caller therefore creates no build job at
+all — it retags, by digest, the candidate its pull request already produced. The same holds
+for `chart.yml`.
+
+That leaves a choice about how much of the pull request's verification to repeat on the
+default-branch push:
+
+| Shape | Jobs on a release | Trade-off |
+|---|---|---|
+| **Fail-closed** | `init`, `trivy-cache`, `scan`, `check`, `image`, `release` | `promote` refuses an image this run did not see scanned. Costs a second scan of an artifact that has not changed. |
+| **GitLab parity** | `init`, `image`, `release` | Matches the GitLab library, where `.image-build-workflow-rules`, `.image-scan-workflow-rules` and `.image-check-rules` all end in `when: never` for a default-branch push, and `Image:Promote` declares `needs: [Common:Init]` alone. Requires `require-scan: false`. |
+
+The second shape trusts that the candidate was scanned on its pull request. That holds only
+while nothing reaches the default branch outside a pull request — so it belongs with a
+protected branch, not with one anybody can push to.
+
+Keeping `check` while dropping `scan` is a reasonable middle: it needs only `init`, costs
+one fast job, and still refuses to re-release over a tag or image version that already
+exists.
+
 ---
 
 ## Key Variables & Configuration
@@ -1638,7 +1660,6 @@ run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: "release-${{ github.ref }}"
@@ -1648,27 +1669,8 @@ permissions:
   contents: read
 
 jobs:
-  guard-ref:
-    name: Verify Ref
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Refuse A Release From A Non-Default Ref
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            exit 1
-          fi
-
   init:
-    needs: guard-ref
-    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       actions: read
@@ -2105,7 +2107,6 @@ on:
     branches: [main]
     paths-ignore:
       - ".github/**"
-  workflow_dispatch:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2115,27 +2116,8 @@ permissions:
   contents: read
 
 jobs:
-  guard-ref:
-    name: Verify Ref
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Refuse A Release From A Non-Default Ref
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            exit 1
-          fi
-
   init:
-    needs: guard-ref
-    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       actions: read
@@ -2447,7 +2429,6 @@ run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: "release-${{ github.ref }}"
@@ -2457,27 +2438,8 @@ permissions:
   contents: read
 
 jobs:
-  guard-ref:
-    name: Verify Ref
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Refuse A Release From A Non-Default Ref
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            exit 1
-          fi
-
   init:
-    needs: guard-ref
-    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       actions: read
@@ -2820,7 +2782,6 @@ run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: "release-${{ github.ref }}"
@@ -2830,25 +2791,8 @@ permissions:
   contents: read
 
 jobs:
-  guard-ref:
-    name: Verify Ref
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    steps:
-      - name: Refuse A Release From A Non-Default Ref
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            exit 1
-          fi
-
   init:
-    needs: guard-ref
-    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       actions: read
@@ -3215,7 +3159,6 @@ run-name: "CD · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3224,27 +3167,8 @@ concurrency:
 permissions: { contents: read }
 
 jobs:
-  guard-ref:
-    name: Verify Ref
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Refuse A Release From A Non-Default Ref
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            exit 1
-          fi
-
   init:
-    needs: guard-ref
-    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       actions: read
@@ -3693,7 +3617,6 @@ on:
     branches: [main]
     paths-ignore:
       - ".github/**"
-  workflow_dispatch:
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3703,28 +3626,8 @@ permissions:
   contents: read
 
 jobs:
-  guard-ref:
-    name: Verify Ref
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - name: Refuse A Release From A Non-Default Ref
-        env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -euo pipefail
-          if [[ "${GITHUB_REF_NAME}" != "${DEFAULT_BRANCH}" ]]; then
-            echo "::error title=Release refused::A release may only be cut from '${DEFAULT_BRANCH}', not '${GITHUB_REF_NAME}'."
-            exit 1
-          fi
-          echo "Releasing from the default branch '${DEFAULT_BRANCH}'."
-
   init:
-    needs: guard-ref
-    if: ${{ !cancelled() && needs.guard-ref.result != 'failure' }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
       actions: read
