@@ -5,7 +5,7 @@ Breaking changes must include an entry before release.
 
 ## Unreleased
 
-Six changes require consumer action.
+Seven changes require consumer action.
 
 ### Status check names changed
 
@@ -85,6 +85,27 @@ A repository with several deployables gets one workflow file per deployable inst
 
 `project-path` is unaffected and still resolves a project that does not sit at the
 repository root. The GitLab library keeps its parent/child monorepo pipelines.
+
+### Caches are written only from the default branch
+
+GitHub scopes every cache entry to the ref that wrote it. A run may read its own ref, its
+base branch and the default branch — nothing else. Writing from every ref therefore produced
+one full copy per branch and per pull request that no other ref could use: five 920 MB
+`trivy-db` entries against a 10 GB repository limit, evicting each other.
+
+Every `actions/cache/save` in the library now runs only when
+`github.ref_name == github.event.repository.default_branch`. Restores are unchanged, so a
+branch or PR still reads the default branch's entry. The cache-refresh steps in
+`trivy-cache.yml` and `sonarqube.yml` are gated the same way — they *delete* the shared
+entry before rewriting it, which a pull request must never do.
+
+Consumer action: none required, but the first default-branch run after upgrading is what
+populates the shared entry. Until it happens, branches and PRs run against a cold cache.
+Delete the stale per-ref entries under **Actions → Caches** to reclaim the space.
+
+`trivy-cache.yml` additionally now downloads the **vulnerability** database, not just the
+checks bundle and `trivy-java-db`. It never warmed `db/`, so every image and SBOM scan
+restored the cache and then downloaded the database anyway.
 
 ## 1.0.0
 

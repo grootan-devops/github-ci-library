@@ -54,12 +54,25 @@ jobs:
           key: trivy-db
           restore-keys: trivy-db
 
-      - name: Warm Policy & Java Databases
+      - name: Warm Vulnerability, Policy & Java Databases
         id: warm
         env:
           ENABLE_JAVA_DB: ${{ inputs.enable-java-db }}
         run: |
           set -euo pipefail
+
+          # The vulnerability database is the whole point of this cache: it is what
+          # every image and SBOM scan loads. Warming only the checks and java-db left
+          # `db/` absent, so each scan restored ~920MB and then downloaded the ~115MB
+          # database anyway -- a cache that cost bandwidth and saved none.
+          echo "Warming trivy-db for downstream image and SBOM scans..."
+          if trivy image --download-db-only --skip-version-check 2>&1 | tee "${RUNNER_TEMP}/vuln-db.log"; then
+            VULN_DB="downloaded"
+          else
+            VULN_DB="⚠️ **download failed** — every later scan downloads the database itself"
+            echo "::warning title=Trivy cache::trivy-db did not download; image and SBOM scans will each fetch it."
+          fi
+          echo "vuln_db=${VULN_DB}" >> "${GITHUB_OUTPUT}"
 
           mkdir -p .trivy-checks-warm
           trivy config --skip-version-check .trivy-checks-warm || true
@@ -90,7 +103,8 @@ jobs:
       # Deleting needs actions: write; without it the existing entry just stays.
       - name: Refresh Cache Entry
         id: refresh
-        if: ${{ !cancelled() }}
+        # Deletes the shared entry, so it must run only where that entry lives.
+        if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -110,8 +124,9 @@ jobs:
             exit 0
           fi
 
-          if [[ -f "${STAMP}" ]] && [[ "$(cat "${STAMP}")" == "${TODAY}" ]]; then
-            echo "'trivy-db' was already refreshed today; keeping it."
+          if [[ -f "${STAMP}" ]] && [[ "$(cat "${STAMP}")" == "${TODAY}" ]] \
+             && compgen -G ".trivycache/db/*" > /dev/null 2>&1; then
+            echo "'trivy-db' was already refreshed today and holds the database; keeping it."
             echo "save=false" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
@@ -126,7 +141,11 @@ jobs:
           fi
 
       - name: Save Trivy Database Cache
-        if: ${{ !cancelled() && steps.refresh.outputs.save == 'true' }}
+        # Default branch only. GitHub scopes every cache entry to the ref that wrote
+        # it, and a run can read only its own ref, its base branch and the default
+        # branch -- so a write from anywhere else is a duplicate nobody else can use.
+        if: ${{ !cancelled() && steps.refresh.outputs.save == 'true'
+          && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
         with:
           path: .trivycache

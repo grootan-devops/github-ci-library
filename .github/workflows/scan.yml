@@ -278,7 +278,11 @@ jobs:
 
       # !cancelled(), not success(): the providers are valid even after a failed scan.
       - name: Save Terraform Provider Cache
-        if: ${{ !cancelled() && inputs.scan-type == 'config' && inputs.config-type == 'terraform' }}
+        # Default branch only. GitHub scopes every cache entry to the ref that wrote
+        # it, and a run can read only its own ref, its base branch and the default
+        # branch -- so a write from anywhere else is a duplicate nobody else can use.
+        if: ${{ !cancelled() && inputs.scan-type == 'config' && inputs.config-type == 'terraform'
+          && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
         with:
           path: |

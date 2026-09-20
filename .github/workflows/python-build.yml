@@ -82,7 +82,11 @@ jobs:
       # Cache entries are immutable: saving after a failed resolve would freeze a
       # half-populated tree under a valid key until uv.lock changes.
       - name: Save uv Cache
-        if: ${{ success() && steps.cache.outputs.cache-hit != 'true' }}
+        # Default branch only. GitHub scopes every cache entry to the ref that wrote
+        # it, and a run can read only its own ref, its base branch and the default
+        # branch -- so a write from anywhere else is a duplicate nobody else can use.
+        if: ${{ success() && steps.cache.outputs.cache-hit != 'true'
+          && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
         with:
           path: .uv-cache
