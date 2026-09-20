@@ -9,6 +9,12 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `init.yml` discovers the application version from a `VERSION` file. A repository with no
+  language manifest -- a skills or documentation repository -- had no way to state its
+  version, so version discovery failed and nothing downstream could run. Checked before the
+  language manifests: where a project has both, the `VERSION` file is the deliberate
+  statement.
+
 - `init.yml` required `vars.IMAGE_REGISTRY` and `vars.IMAGE_REPOSITORY` even when the
   caller set `ignore-docker: "true"` and `ignore-chart: "true"`. A repository that
   publishes neither an image nor a chart has no registry to name, so the shape the README

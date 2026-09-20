@@ -594,7 +594,7 @@ flowchart LR
 
 | Workflow · Job | Description |
 |---|---|
-| `init.yml` · `initialize` | Discovers the application version from `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **26 outputs.** |
+| `init.yml` · `initialize` | Discovers the application version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **26 outputs.** |
 | `check.yml` · `tag-existence` | Fails when the git tag already exists on a different commit. A tag already on *this* commit is treated as a re-run, not a collision. |
 | `check.yml` · `changelog-existence` | Extracts the `## [x.y.z]` section from `CHANGELOG.md` and renders it as an Adaptive Card fragment. Uploads `release-changelog`. |
 | `check.yml` · `migration-existence` | Extracts the `previous...current` section from `MIGRATION.md`. Skipped for an initial release, or disabled with `check-migration: false` for artifacts that intentionally have no migration contract. Uploads `release-migration`. |
@@ -752,22 +752,22 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
    Dockerfile pins nothing itself — bumping a base image is a change to one organisation
    variable.
 
-| Tech stack | Injected build arg | Organisation variable | Description |
-|---|---|---|---|
-| **Java** | `JAVA_25_MICRO_BASE_IMAGE` | `vars.JAVA_25_MICRO_BASE_IMAGE` | Minimal hardened Java 25 JRE runtime |
-| **Golang** | `MICRO_ROOT_BASE_IMAGE` | `vars.MICRO_ROOT_BASE_IMAGE` | Distroless minimal root container for static binaries |
-| **Python** | `PYTHON_312_MICRO_BASE_IMAGE` | `vars.PYTHON_312_MICRO_BASE_IMAGE` | Minimal Python 3.12 micro runtime |
-| **Node.js backend** | `NODE_JS_24_MICRO_BASE_IMAGE` | `vars.NODE_JS_24_MICRO_BASE_IMAGE` | Minimal Node.js 24 micro runtime |
-| **Node.js frontend** | `NGINX_MICRO_BASE_IMAGE` | `vars.NGINX_MICRO_BASE_IMAGE` | Non-root Nginx static SPA server |
-| **Multi-stage builder** | `TOOLKIT_BUILD_IMAGE` | `vars.TOOLKIT_BUILD_IMAGE` | The one build container, for a builder stage only. Every toolchain is baked into it. |
-| **All** | `VERSION` | — | `init.yml`'s `image-push-tag` |
+   | Tech stack | Injected build arg | Organisation variable | Description |
+   |---|---|---|---|
+   | **Java** | `JAVA_25_MICRO_BASE_IMAGE` | `vars.JAVA_25_MICRO_BASE_IMAGE` | Minimal hardened Java 25 JRE runtime |
+   | **Golang** | `MICRO_ROOT_BASE_IMAGE` | `vars.MICRO_ROOT_BASE_IMAGE` | Distroless minimal root container for static binaries |
+   | **Python** | `PYTHON_312_MICRO_BASE_IMAGE` | `vars.PYTHON_312_MICRO_BASE_IMAGE` | Minimal Python 3.12 micro runtime |
+   | **Node.js backend** | `NODE_JS_24_MICRO_BASE_IMAGE` | `vars.NODE_JS_24_MICRO_BASE_IMAGE` | Minimal Node.js 24 micro runtime |
+   | **Node.js frontend** | `NGINX_MICRO_BASE_IMAGE` | `vars.NGINX_MICRO_BASE_IMAGE` | Non-root Nginx static SPA server |
+   | **Multi-stage builder** | `TOOLKIT_BUILD_IMAGE` | `vars.TOOLKIT_BUILD_IMAGE` | The one build container, for a builder stage only. Every toolchain is baked into it. |
+   | **All** | `VERSION` | — | `init.yml`'s `image-push-tag` |
 
-Each is passed as `${{ vars.IMAGE_REGISTRY }}/<value>`.
+   Each is passed as `${{ vars.IMAGE_REGISTRY }}/<value>`.
 
-> [!NOTE]
-> GitLab additionally injects `CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX`. GitHub has no
-> Dependency Proxy and injects no equivalent, so a Dockerfile ported from GitLab must give
-> that ARG a default (`ARG CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX=`) or drop it.
+   > [!NOTE]
+   > GitLab additionally injects `CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX`. GitHub has no
+   > Dependency Proxy and injects no equivalent, so a Dockerfile ported from GitLab must give
+   > that ARG a default (`ARG CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX=`) or drop it.
 
 4. **Base image selection.**
    Use the runtime image matching the project language; fall back to `MICRO_ROOT_BASE_IMAGE`
@@ -1874,7 +1874,7 @@ artifact. That leaves `init.yml`, `terraform-lint.yml`, `terraform-test.yml`, th
 `<language>-build.yml` workflows do not apply, and neither does `sbom.yml` — there is no
 built artifact to describe. The release publishes only a git tag; consumers pin it.
 
-`init.yml` discovers the version from `package.json`, `pyproject.toml`, `pom.xml` or
+`init.yml` discovers the version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or
 `Chart.yaml`, none of which a Terraform repository has, so the version lives in a `VERSION`
 file read by one local workflow and passed to `init.yml` as `tag`.
 

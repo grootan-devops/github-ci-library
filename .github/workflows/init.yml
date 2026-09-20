@@ -277,7 +277,15 @@ jobs:
 
           LANG_VERSION=""
           LANG_SOURCE=""
-          if [[ -f "${PROJECT_PATH}/package.json" ]]; then
+          # A VERSION file is the only manifest a non-language project has -- a skills or
+          # docs repository ships no package.json, pyproject.toml or pom.xml, and without
+          # this it cannot resolve a version at all. Checked first: where a project has
+          # both, the VERSION file is the deliberate statement.
+          if [[ -s "${PROJECT_PATH}/VERSION" ]]; then
+            LANG_VERSION="$(tr -d '[:space:]' < "${PROJECT_PATH}/VERSION")"
+            LANG_SOURCE="VERSION"
+          fi
+          if [[ -z "${LANG_VERSION}" && -f "${PROJECT_PATH}/package.json" ]]; then
             LANG_VERSION="$(jq -r '.version // empty' "${PROJECT_PATH}/package.json")"
             LANG_SOURCE="package.json"
           fi
@@ -327,7 +335,7 @@ jobs:
           fi
 
           if [[ -z "${RELEASE_VERSION}" ]]; then
-            echo "::error title=Version discovery::No version found. Provide Chart.yaml, package.json, pyproject.toml, pom.xml, or the 'tag' input."
+            echo "::error title=Version discovery::No version found. Provide VERSION, Chart.yaml, package.json, pyproject.toml, pom.xml, or the 'tag' input."
             {
               echo "## 🚀 CI/CD Version & Target Discovery"
               echo ""
@@ -335,7 +343,7 @@ jobs:
               echo ""
               echo "| Manifest | Looked for | Present |"
               echo "|---|---|---|"
-              for CANDIDATE in package.json pyproject.toml pom.xml; do
+              for CANDIDATE in VERSION package.json pyproject.toml pom.xml; do
                 if [[ -f "${PROJECT_PATH}/${CANDIDATE}" ]]; then FOUND="yes, but it declares no version"; else FOUND="no"; fi
                 echo "| \`${CANDIDATE}\` | \`${PROJECT_PATH}/${CANDIDATE}\` | ${FOUND} |"
               done
