@@ -269,6 +269,29 @@ jobs:
           # payload artifact. Without --repo, gh infers the repository from a git remote
           # that is not there and dies with "failed to run git: not a git repository",
           # which surfaced only as "gh refused to publish".
+          # GitHub rejects a release body over 125000 characters with a 422 that names no
+          # field you control. Consolidated notes exceed it as soon as the candidate run's
+          # scan reports are restored -- which is exactly when the release is most useful,
+          # so truncate the body and leave the full text attached as an asset.
+          NOTES_LIMIT=124000
+          NOTES_CHARS="$(wc -m < "${NOTES_FILE}" | tr -d ' ')"
+          if [[ "${NOTES_CHARS}" -gt "${NOTES_LIMIT}" ]]; then
+            echo "::warning title=Release::Release notes are ${NOTES_CHARS} characters, over GitHub's ${NOTES_LIMIT} limit. The body is truncated; the full notes stay attached as an asset."
+            TRUNCATED="${RUNNER_TEMP}/release-notes-truncated.md"
+            head -c "${NOTES_LIMIT}" "${NOTES_FILE}" | iconv -f utf-8 -t utf-8 -c > "${TRUNCATED}"
+            {
+              echo ""
+              echo "---"
+              echo ""
+              echo "> These notes were truncated at ${NOTES_LIMIT} characters, which is GitHub's"
+              echo "> limit for a release body. The complete text is attached to this release as"
+              echo "> \`$(basename "${NOTES_FILE}")\`."
+            } >> "${TRUNCATED}"
+            mkdir -p payload/_release_assets
+            cp -f "${NOTES_FILE}" "payload/_release_assets/$(basename "${NOTES_FILE}")" 2>/dev/null || true
+            NOTES_FILE="${TRUNCATED}"
+          fi
+
           ARGS=(--repo "${GITHUB_REPOSITORY}"
                 --title "Release ${TAG}"
                 --notes-file "${NOTES_FILE}"
