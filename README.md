@@ -2245,6 +2245,10 @@ name: Check · Release Prerequisites
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -2278,6 +2282,10 @@ name: Lint · YAML, Markdown & Terraform
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -2302,6 +2310,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 2 * * 1"
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -2338,6 +2350,10 @@ on:
   schedule:
     - cron: "0 3 * * 1"
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -2355,6 +2371,10 @@ name: Quality · SonarQube
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -2612,6 +2632,10 @@ name: Check · Release Prerequisites
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -2644,6 +2668,10 @@ name: Lint · Config & Documentation
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -2659,6 +2687,10 @@ name: Scan · Helm Chart
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -2692,6 +2724,10 @@ on:
   schedule:
     - cron: "0 2 * * 1"
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -2709,6 +2745,10 @@ name: Quality · SonarQube
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -2967,6 +3007,10 @@ name: Lint · Dockerfile, YAML & Docs
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -2985,6 +3029,10 @@ on:
   schedule:
     - cron: "0 2 * * 1"
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -3002,6 +3050,10 @@ name: Quality · SonarQube
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -3023,6 +3075,10 @@ on:
         description: Released version to re-scan
         required: true
         type: string
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -3071,6 +3127,10 @@ on:
         description: Version to test for release readiness
         required: true
         type: string
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -3364,6 +3424,10 @@ name: Build · Rebuild Candidate Image
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions: { contents: read }
 
 jobs:
@@ -3420,6 +3484,10 @@ name: Check · Release Prerequisites
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions: { contents: read }
 
 jobs:
@@ -3458,6 +3526,10 @@ on:
         type: string
   schedule:
     - cron: "0 3 * * *"
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions: { contents: read }
 
@@ -3504,6 +3576,10 @@ name: SBOM · Generate & Licence Audit
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions: { contents: read }
 
 jobs:
@@ -3537,6 +3613,10 @@ name: Lint · YAML, Changelog & Migration
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions: { contents: read }
 
 jobs:
@@ -3556,6 +3636,10 @@ on:
   schedule:
     - cron: "0 2 * * 1"
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions: { contents: read }
 
 jobs:
@@ -3572,6 +3656,10 @@ name: SonarQube · Quality Gate
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions: { contents: read }
 
@@ -3781,6 +3869,10 @@ name: Build · Verify
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -3810,6 +3902,10 @@ name: Check · Release Prerequisites
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -3841,6 +3937,10 @@ name: Lint · Config, Docs & Source
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -3863,6 +3963,10 @@ on:
   schedule:
     - cron: "0 2 * * 1"
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -3882,6 +3986,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 3 * * 1"
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -3917,6 +4025,10 @@ name: Quality · SonarQube
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -3968,6 +4080,10 @@ out on its own.
 name: CI · PR Verification
 
 on: { pull_request: { branches: [main] } }
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions: { contents: read }
 
@@ -4027,6 +4143,10 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 2 * * 1"
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
