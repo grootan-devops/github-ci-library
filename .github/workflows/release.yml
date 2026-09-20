@@ -85,21 +85,31 @@ jobs:
           path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_artifacts
           merge-multiple: true
 
+      # `gh` is not installed in the toolkit container, so `gh run download` failed with
+      # "command not found" and -- discarding stderr -- looked exactly like a run with no
+      # artifacts. Every release since has carried notes only. A JS action runs on the
+      # runner's own node even inside a container job, so it needs nothing from the image.
       - name: Download Candidate Run's Artifacts
         if: ${{ inputs.upstream-run-id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ inputs.upstream-run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_artifacts
+          merge-multiple: true
+
+      - name: Report Candidate Artifact Restore
+        if: ${{ inputs.upstream-run-id != '' }}
         env:
-          GH_TOKEN: ${{ github.token }}
           UPSTREAM_RUN_ID: ${{ inputs.upstream-run-id }}
         run: |
           set -euo pipefail
-          echo "📥 Restoring verification artifacts from run ${UPSTREAM_RUN_ID}..."
-          mkdir -p _artifacts
-          if gh run download "${UPSTREAM_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --dir _upstream 2>/dev/null; then
-            find _upstream -mindepth 1 -maxdepth 1 -type d -exec sh -c 'cp -a "$1"/. _artifacts/ 2>/dev/null || true' _ {} \;
-            rm -rf _upstream
-            echo "✅ Restored $(find _artifacts -type f | wc -l | tr -d ' ') files from the candidate run."
+          COUNT="$(find _artifacts -type f 2>/dev/null | wc -l | tr -d ' ')"
+          if [[ "${COUNT}" -gt 0 ]]; then
+            echo "✅ Restored ${COUNT} files from candidate run ${UPSTREAM_RUN_ID}."
           else
-            echo "::warning title=Release::Could not download artifacts from run ${UPSTREAM_RUN_ID}. The release will carry only this run's artifacts."
+            echo "::warning title=Release::Candidate run ${UPSTREAM_RUN_ID} yielded no artifacts, so the release will carry only this run's. Check that the run succeeded and its artifacts have not expired."
           fi
 
       - name: Consolidate Release Notes & Assets

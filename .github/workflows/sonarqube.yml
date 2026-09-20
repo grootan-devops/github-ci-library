@@ -148,7 +148,7 @@ jobs:
           TODAY="$(date -u +%Y-%m-%d)"
 
           # The caches API matches `key` as a PREFIX, so filter for the exact key.
-          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" \
+          EXISTING="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" \
             --jq "[.actions_caches[] | select(.key == \"${CACHE_KEY}\")] | length" 2>/dev/null || echo 0)"
 
           if [[ "${EXISTING}" == "0" ]]; then
@@ -164,7 +164,7 @@ jobs:
           fi
 
           mkdir -p .sonar && echo "${TODAY}" > "${STAMP}"
-          if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" >/dev/null 2>&1; then
+          if curl -sS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -o /dev/null -w "%{http_code}" "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" | grep -qE "^(200|204)$"; then
             echo "save=true" >> "${GITHUB_OUTPUT}"
           else
             echo "::warning title=Sonar cache::Could not replace '${CACHE_KEY}'. Grant 'actions: write' in the calling workflow to let it refresh."

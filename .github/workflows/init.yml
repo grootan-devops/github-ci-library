@@ -476,97 +476,83 @@ jobs:
           # mismatch is structural rather than path-specific, so accept any path.
           git config --global --add safe.directory '*' 2>/dev/null || true
 
-          # A release fires seconds after the merge, and the commit->PR association is
-          # not indexed instantly: a run created 2s after a merge sees nothing. Retry
-          # briefly rather than falling through to "promotion searches by tag".
-          PR_JSON=""
-          for attempt in 1 2 3 4; do
-            PR_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" \
-              --jq '[.[] | select(.merged_at != null)] | first // empty' 2>/dev/null || true)"
-            [[ -n "${PR_JSON}" ]] && break
-            [[ "${attempt}" -lt 4 ]] && sleep 5
-          done
+          # `gh` is NOT installed in the toolkit container -- only on the runner host.
+          # Every lookup here was written `gh ... 2>/dev/null || true`, so "command not
+          # found" was indistinguishable from "no result": provenance silently resolved
+          # nothing on every containerised run. curl and jq are present, so talk to the
+          # REST API directly and keep the errors.
+          api() {
+            local path="$1"; shift
+            curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
+                 -H "Accept: application/vnd.github+json" \
+                 -H "X-GitHub-Api-Version: 2022-11-28" \
+                 "${GITHUB_API_URL}${path}" "$@"
+          }
+
+          API_ERR="$(mktemp)"
+
+          PR_JSON="$(api "/repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/pulls" 2>"${API_ERR}" \
+            | jq -r '[.[]? | select(.merged_at != null)] | first // empty' 2>/dev/null || true)"
           if [[ -n "${PR_JSON}" ]]; then
             MERGED_PR_NUMBER="$(jq -r '.number // empty' <<<"${PR_JSON}")"
             UPSTREAM_HEAD_SHA="$(jq -r '.head.sha // empty' <<<"${PR_JSON}")"
             [[ -n "${MERGED_PR_NUMBER}" ]] && echo "Resolved PR #${MERGED_PR_NUMBER} via commit/pulls association."
+          elif [[ -s "${API_ERR}" ]]; then
+            echo "::notice title=Provenance::commits/pulls lookup: $(tr '\n' ' ' < "${API_ERR}" | cut -c1-200)"
           fi
 
-          # Without --verify --quiet, `git rev-parse HEAD^2` PRINTS "HEAD^2" on stdout when
-          # it cannot resolve it (a squash merge or a direct push has one parent). That
-          # literal then flowed into every lookup below, producing
-          # "No successful 'pr.yml' run found for HEAD^2".
+          # A true merge commit carries the pull request head as its second parent. A squash
+          # merge and a direct push have one parent, and without --verify --quiet rev-parse
+          # PRINTS "HEAD^2" on stdout, which then poisons every lookup below.
           if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
             UPSTREAM_HEAD_SHA="$(git rev-parse --verify --quiet 'HEAD^2^{commit}' 2>/dev/null || true)"
             [[ -n "${UPSTREAM_HEAD_SHA}" ]] && echo "Resolved head commit ${UPSTREAM_HEAD_SHA} via HEAD^2."
           fi
-
-          # Belt and braces: anything that is not a full object id is not a commit.
           if [[ -n "${UPSTREAM_HEAD_SHA}" && ! "${UPSTREAM_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "Discarding unusable upstream commit '${UPSTREAM_HEAD_SHA}'."
             UPSTREAM_HEAD_SHA=""
           fi
 
           if [[ -z "${MERGED_PR_NUMBER}" && -n "${UPSTREAM_HEAD_SHA}" ]]; then
-            MERGED_PR_NUMBER="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${UPSTREAM_HEAD_SHA}/pulls" --jq '.[0].number // empty' 2>/dev/null || true)"
+            MERGED_PR_NUMBER="$(api "/repos/${GITHUB_REPOSITORY}/commits/${UPSTREAM_HEAD_SHA}/pulls" 2>/dev/null \
+              | jq -r '.[0].number // empty' 2>/dev/null || true)"
             [[ -n "${MERGED_PR_NUMBER}" ]] && echo "Resolved PR #${MERGED_PR_NUMBER} via upstream commit."
           fi
 
+          # The squash path: the subject carries "(#N)" and there is no second parent.
           if [[ -z "${MERGED_PR_NUMBER}" ]]; then
-            CANDIDATE="$(git log -1 --pretty=%s | grep -oE '\(#[0-9]+\)' | tail -n1 | tr -dc '0-9' || true)"
+            CANDIDATE="$(git log -1 --pretty=%s 2>/dev/null | grep -oE '\(#[0-9]+\)' | tail -n1 | tr -dc '0-9' || true)"
             if [[ -n "${CANDIDATE}" ]]; then
               MERGED_PR_NUMBER="${CANDIDATE}"
               echo "Resolved PR #${MERGED_PR_NUMBER} from squash commit subject."
-              # Two independent reads, because this is the hinge of the whole chain: with
-              # no head commit there is no candidate run, so the release silently carries
-              # notes only. Their stderr is kept -- discarding it is what made the
-              # previous failure undiagnosable from the log.
-              if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
-                PR_ERR="$(mktemp)"
-                UPSTREAM_HEAD_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${CANDIDATE}" \
-                  --jq '.head.sha // empty' 2>"${PR_ERR}" || true)"
-                if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
-                  UPSTREAM_HEAD_SHA="$(gh pr view "${CANDIDATE}" --repo "${GITHUB_REPOSITORY}" \
-                    --json headRefOid --jq '.headRefOid // empty' 2>>"${PR_ERR}" || true)"
-                  [[ -n "${UPSTREAM_HEAD_SHA}" ]] && echo "Resolved head commit ${UPSTREAM_HEAD_SHA} via gh pr view."
-                fi
-                if [[ -z "${UPSTREAM_HEAD_SHA}" ]]; then
-                  echo "::warning title=Provenance::Could not read PR #${CANDIDATE} to find its head commit, so no candidate run can be located and the release will carry notes only. gh reported: $(tr '\n' ' ' < "${PR_ERR}" | cut -c1-400)"
-                fi
-                rm -f "${PR_ERR}"
-              fi
             fi
           fi
 
-          if [[ -z "${MERGED_PR_NUMBER}" ]]; then
-            MERGED_PR_NUMBER="$(gh pr list --repo "${GITHUB_REPOSITORY}" --state merged --json number,mergeCommit --jq ".[] | select(.mergeCommit.oid == \"${GITHUB_SHA}\") | .number" 2>/dev/null | head -n1 || true)"
-            [[ -n "${MERGED_PR_NUMBER}" ]] && echo "Resolved PR #${MERGED_PR_NUMBER} via merge commit search."
+          # With the pull request known, its head commit is one read away. This is the hinge:
+          # no head commit means no candidate run, which means a notes-only release.
+          if [[ -n "${MERGED_PR_NUMBER}" && -z "${UPSTREAM_HEAD_SHA}" ]]; then
+            : > "${API_ERR}"
+            UPSTREAM_HEAD_SHA="$(api "/repos/${GITHUB_REPOSITORY}/pulls/${MERGED_PR_NUMBER}" 2>"${API_ERR}" \
+              | jq -r '.head.sha // empty' 2>/dev/null || true)"
+            if [[ -n "${UPSTREAM_HEAD_SHA}" ]]; then
+              echo "Resolved head commit ${UPSTREAM_HEAD_SHA} from PR #${MERGED_PR_NUMBER}."
+            else
+              echo "::warning title=Provenance::Could not read PR #${MERGED_PR_NUMBER} to find its head commit, so no candidate run can be located and the release will carry notes only. The API reported: $(tr '\n' ' ' < "${API_ERR}" | cut -c1-300)"
+            fi
           fi
 
           if [[ -n "${UPSTREAM_HEAD_SHA}" ]]; then
-            RUN_ERR="$(mktemp)"
-            UPSTREAM_RUN_JSON="$(gh run list --repo "${GITHUB_REPOSITORY}" \
-              --workflow "${UPSTREAM_WORKFLOW}" --commit "${UPSTREAM_HEAD_SHA}" \
-              --status success --limit 1 --json databaseId,number 2>"${RUN_ERR}" || echo '[]')"
-            if [[ -s "${RUN_ERR}" ]]; then
-              echo "::notice title=Provenance::gh run list reported: $(tr '\n' ' ' < "${RUN_ERR}" | cut -c1-300)"
-            fi
-            rm -f "${RUN_ERR}"
-            UPSTREAM_RUN_ID="$(jq -r '.[0].databaseId // empty' <<<"${UPSTREAM_RUN_JSON:-[]}" 2>/dev/null || true)"
-            UPSTREAM_RUN_NUMBER="$(jq -r '.[0].number // empty' <<<"${UPSTREAM_RUN_JSON:-[]}" 2>/dev/null || true)"
+            RUNS_JSON="$(api "/repos/${GITHUB_REPOSITORY}/actions/workflows/${UPSTREAM_WORKFLOW}/runs?head_sha=${UPSTREAM_HEAD_SHA}&status=success&per_page=1" 2>/dev/null || true)"
+            UPSTREAM_RUN_ID="$(jq -r '.workflow_runs[0].id // empty' <<<"${RUNS_JSON:-{}}" 2>/dev/null || true)"
+            UPSTREAM_RUN_NUMBER="$(jq -r '.workflow_runs[0].run_number // empty' <<<"${RUNS_JSON:-{}}" 2>/dev/null || true)"
             if [[ -n "${UPSTREAM_RUN_ID}" ]]; then
               echo "Upstream run ${UPSTREAM_RUN_ID} (${UPSTREAM_WORKFLOW}) will supply candidate artifacts."
-              if [[ -z "${MERGED_PR_NUMBER}" ]]; then
-                RUN_BRANCH="$(gh run view "${UPSTREAM_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --json headBranch --jq '.headBranch // empty' 2>/dev/null || true)"
-                if [[ -n "${RUN_BRANCH}" ]]; then
-                  MERGED_PR_NUMBER="$(gh pr list --repo "${GITHUB_REPOSITORY}" --state all --head "${RUN_BRANCH}" --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-                  [[ -n "${MERGED_PR_NUMBER}" ]] && echo "Resolved PR #${MERGED_PR_NUMBER} from upstream run branch '${RUN_BRANCH}'."
-                fi
-              fi
             else
               echo "::warning title=Provenance::No successful '${UPSTREAM_WORKFLOW}' run found for ${UPSTREAM_HEAD_SHA}. Pre-release artifacts will not be attached to the release."
             fi
           fi
+
+          rm -f "${API_ERR}"
 
           if [[ -z "${MERGED_PR_NUMBER}" ]]; then
             # No pull request is the normal, correct state for a commit pushed straight to

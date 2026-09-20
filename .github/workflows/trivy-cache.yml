@@ -112,8 +112,8 @@ jobs:
           TODAY="$(date -u +%Y-%m-%d)"
 
           # The caches API matches `key` as a PREFIX, so filter for the exact key.
-          EXISTING="$(gh api "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" \
-            --jq '[.actions_caches[] | select(.key == "trivy-db")] | length' 2>/dev/null || echo 0)"
+          EXISTING="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" \
+            | jq -r '[.actions_caches[] | select(.key == "trivy-db")] | length' 2>/dev/null || echo 0)"
 
           if [[ "${EXISTING}" == "0" ]]; then
             mkdir -p .trivycache && echo "${TODAY}" > "${STAMP}"
@@ -130,7 +130,7 @@ jobs:
           fi
 
           mkdir -p .trivycache && echo "${TODAY}" > "${STAMP}"
-          if gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" >/dev/null 2>&1; then
+          if curl -sS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -o /dev/null -w "%{http_code}" "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=trivy-db" | grep -qE "^(200|204)$"; then
             echo "Replaced the 'trivy-db' entry with today's databases."
             echo "save=true" >> "${GITHUB_OUTPUT}"
           else
