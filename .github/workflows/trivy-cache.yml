@@ -9,9 +9,9 @@ on:
     inputs:
       enable-java-db:
         required: false
-        type: string
-        default: "auto"
-        description: "auto | true | false. auto downloads the Java DB only when pom.xml is present."
+        type: bool
+        default: true
+        description: "downloads the Java DB only when pom.xml is present."
       project-path:
         required: false
         type: string
@@ -77,11 +77,6 @@ jobs:
           mkdir -p .trivy-checks-warm
           trivy config --skip-version-check .trivy-checks-warm || true
           rmdir .trivy-checks-warm 2>/dev/null || true
-
-          WANT_JAVA="${ENABLE_JAVA_DB}"
-          if [[ "${WANT_JAVA}" == "auto" ]]; then
-            if [[ -f pom.xml ]]; then WANT_JAVA=true; else WANT_JAVA=false; fi
-          fi
 
           if [[ "${WANT_JAVA}" == "true" ]]; then
             echo "Warming trivy-java-db for downstream image and SBOM scans..."
