@@ -4,9 +4,13 @@
 # Env: DOCKERFILE (default Dockerfile), HADOLINT_IGNORE (comma-separated extra rules).
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/hadolint-ignores.sh
+source "${SCRIPT_DIR}/hadolint-ignores.sh"
+
 : "${DOCKERFILE:=Dockerfile}"
 : "${HADOLINT_IGNORE:=}"
-DEFAULT_HADOLINT="DL3008,DL3013,DL3016,DL3018,DL3028,DL3033,DL3037,DL3041,DL3062"
+DEFAULT_HADOLINT="${HADOLINT_DEFAULT_IGNORE}"
 
 if [[ ! -f "${DOCKERFILE}" ]]; then
   echo "::error title=Docker lint::${DOCKERFILE} not found."

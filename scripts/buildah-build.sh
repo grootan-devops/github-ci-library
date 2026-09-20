@@ -105,7 +105,7 @@ rm -rf \
   /usr/bin/{dnf,yum,microdnf,rpm}
 "
 
-buildah config --user 10001 "${BASE_CONTAINER}"
+buildah config --user 10001:10001 "${BASE_CONTAINER}"
 buildah umount "${BASE_CONTAINER}"
 buildah commit --squash "${BASE_CONTAINER}" "${IMAGE_NAME}"
 
@@ -116,7 +116,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   {
     echo "### 🧱 Buildah image"
     echo ""
-    echo "Built \`${IMAGE_NAME}\` from \`${BASE_IMAGE_REPO}:${BASE_IMAGE_TAG}\` as UID 10001."
+    echo "Built \`${IMAGE_NAME}\` from \`${BASE_IMAGE_REPO}:${BASE_IMAGE_TAG}\` as 10001:10001."
     echo ""
     echo "<details><summary>Installed packages ($(wc -l < "./${INSTALLED_PCKG_FILE_NAME}" | tr -d ' '))</summary>"
     echo ""

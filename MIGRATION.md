@@ -5,7 +5,7 @@ Breaking changes must include an entry before release.
 
 ## Unreleased
 
-Three changes require consumer action.
+Five changes require consumer action.
 
 ### Status check names changed
 
@@ -55,6 +55,23 @@ a lint job inside it put the scan and the release guards behind hadolint.
 The warm job now declares it, rather than inheriting whatever the caller granted. A reusable
 workflow cannot request a permission its caller did not grant, so a caller that stops at
 `actions: read` fails at startup. Grant `actions: write` wherever `trivy-cache.yml` is called.
+
+### Only `TOOLKIT_BUILD_IMAGE` is injected as a build arg
+
+`docker.yml` previously emitted four build args — `JAVA25_BUILD_IMAGE`, `GO_BUILD_IMAGE`,
+`TOOLKIT_BUILD_IMAGE` and `BUILDAH_BUILD_IMAGE` — all hard-coded to the same fixed toolkit
+tag. There is no per-language build image: Go, JDK + Maven, Python, Node and buildah are all
+baked into the toolkit. The three per-language args are gone, and `TOOLKIT_BUILD_IMAGE` now
+resolves from `vars.TOOLKIT_BUILD_IMAGE`, prefixed with `vars.IMAGE_REGISTRY` like the base
+images beside it. This matches what GitLab already passed.
+
+Set `TOOLKIT_BUILD_IMAGE` at organisation level; a repository that leaves it unset gets a
+pull failure naming the empty reference, which is the intended failure rather than a
+silently wrong image version.
+
+A Dockerfile that declares `ARG GO_BUILD_IMAGE`, `ARG JAVA25_BUILD_IMAGE` or
+`ARG BUILDAH_BUILD_IMAGE` must switch to `ARG TOOLKIT_BUILD_IMAGE` — those three now resolve
+empty. Only a multi-stage Dockerfile with a builder stage is affected.
 
 ## 1.0.0
 

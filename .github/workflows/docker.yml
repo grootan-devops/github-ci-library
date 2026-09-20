@@ -185,6 +185,7 @@ jobs:
           PYTHON_312_MICRO_BASE_IMAGE: ${{ vars.PYTHON_312_MICRO_BASE_IMAGE }}
           NODE_JS_24_MICRO_BASE_IMAGE: ${{ vars.NODE_JS_24_MICRO_BASE_IMAGE }}
           JAVA_25_MICRO_BASE_IMAGE: ${{ vars.JAVA_25_MICRO_BASE_IMAGE }}
+          TOOLKIT_BUILD_IMAGE: ${{ vars.TOOLKIT_BUILD_IMAGE }}
         run: |
           set -euo pipefail
           {
@@ -195,10 +196,7 @@ jobs:
             echo "PYTHON_312_MICRO_BASE_IMAGE=${REGISTRY}/${PYTHON_312_MICRO_BASE_IMAGE}"
             echo "NODE_JS_24_MICRO_BASE_IMAGE=${REGISTRY}/${NODE_JS_24_MICRO_BASE_IMAGE}"
             echo "JAVA_25_MICRO_BASE_IMAGE=${REGISTRY}/${JAVA_25_MICRO_BASE_IMAGE}"
-            echo "JAVA25_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
-            echo "GO_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
-            echo "TOOLKIT_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
-            echo "BUILDAH_BUILD_IMAGE=registry-1.docker.io/grootantech/toolkit:verify-v2"
+            echo "TOOLKIT_BUILD_IMAGE=${REGISTRY}/${TOOLKIT_BUILD_IMAGE}"
             if [[ -n "${EXTRA_BUILD_ARGS}" ]]; then
               printf '%s\n' "${EXTRA_BUILD_ARGS}"
             fi

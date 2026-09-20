@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  # actionlint and shellcheck ship in the organisation build container.
+  # actionlint, shellcheck and hadolint ship in the organisation build container.
   self-lint:
     name: ${{ matrix.tool }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [actionlint, shellcheck]
+        tool: [actionlint, shellcheck, readme-dockerfiles]
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     steps:
@@ -39,6 +39,7 @@ jobs:
           case "${TOOL}" in
             actionlint)  run_linted "🔧 Self lint: actionlint" actionlint ;;
             shellcheck)  run_linted "🔧 Self lint: shellcheck" shellcheck scripts/*.sh scripts/checks/*.sh ;;
+            readme-dockerfiles) scripts/readme-dockerfile-check.sh README.md ;;
           esac
 
   lint:
