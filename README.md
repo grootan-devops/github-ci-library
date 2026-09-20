@@ -153,6 +153,17 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
+  # Guards depend on init alone, and promotion waits for them: without that the
+  # production image publishes past a failed tag or changelog check.
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      image-tag: ${{ needs.init.outputs.image-tag }}
+      image-repository: ${{ needs.init.outputs.image-repository }}
+
   # The candidate is scanned here, not trusted from the pull request run: it may
   # have sat in the dev repository for days.
   scan:
