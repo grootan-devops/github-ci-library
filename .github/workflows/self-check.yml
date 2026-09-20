@@ -1,5 +1,5 @@
 name: Check · Library Release Guards
-run-name: "Check · ${{ github.event_name }} · ${{ github.short_sha }}"
+run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:

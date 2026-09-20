@@ -1,5 +1,5 @@
 name: Version · Library
-run-name: "Version · ${{ github.event_name }} · ${{ github.short_sha }}"
+run-name: "Version · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
