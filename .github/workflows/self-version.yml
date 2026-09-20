@@ -9,10 +9,6 @@ on:
         description: "Semantic version read from VERSION"
         value: ${{ jobs.version.outputs.tag }}
 
-concurrency:
-  group: "${{ github.workflow }}-${{ github.ref }}"
-  cancel-in-progress: true
-
 permissions:
   contents: read
 
