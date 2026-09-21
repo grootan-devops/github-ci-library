@@ -8,6 +8,11 @@ on:
         type: string
         default: ""
         description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: ""
+        description: "Directory containing Chart.yaml. Defaults to vars.CHART_DIR, then ./chart."
       lint-yaml-files:
         required: false
         type: string
@@ -18,13 +23,18 @@ on:
         type: string
         default: ""
         description: "Space-separated markdown globs. Empty lints every tracked markdown file."
+      md-lint-ignore-rule:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated markdownlint rule IDs to disable for this repository's documentation."
 
 env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-  CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+  CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
   DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
   HADOLINT_IGNORE: ${{ vars.HADOLINT_IGNORE }}
-  MD_LINT_IGNORE_RULE: ${{ vars.MD_LINT_IGNORE_RULE }}
+  MD_LINT_IGNORE_RULE: ${{ inputs.md-lint-ignore-rule || vars.MD_LINT_IGNORE_RULE }}
   CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
   MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
 
@@ -48,7 +58,7 @@ jobs:
         id: targets
         env:
           PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-          CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+          CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
           DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
@@ -106,7 +116,7 @@ jobs:
           SUBJECT: ${{ matrix.subject }}
           INPUT_YAML_FILES: ${{ inputs.lint-yaml-files }}
           INPUT_MD_FILES: ${{ inputs.lint-md-files }}
-          CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+          CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
           DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}

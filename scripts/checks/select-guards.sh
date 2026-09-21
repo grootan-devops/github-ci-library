@@ -20,6 +20,7 @@
 #   CHANGELOG_FILE_NAME   changelog path, relative to PROJECT_PATH (default: ./CHANGELOG.md)
 #   MIGRATION_FILE_NAME   migration guide path, relative to PROJECT_PATH (default: ./MIGRATION.md)
 #   CHECK_MIGRATION       "true" runs the migration guard when the file exists (default: true)
+#   CHECK_LIBRARY_PINNING "true" runs the reusable-workflow pinning guard (default: true)
 #   CHART_NAME            chart name; empty disables both chart guards (default: empty)
 #   IMAGE_TAG             image tag to guard; empty disables the image guard (default: empty)
 #   IMAGE_REPOSITORY      production image repository; empty disables the image guard (default: empty)
@@ -30,13 +31,18 @@ set -euo pipefail
 : "${CHANGELOG_FILE_NAME:=./CHANGELOG.md}"
 : "${MIGRATION_FILE_NAME:=./MIGRATION.md}"
 : "${CHECK_MIGRATION:=true}"
+: "${CHECK_LIBRARY_PINNING:=true}"
 : "${CHART_NAME:=}"
 : "${IMAGE_TAG:=}"
 : "${IMAGE_REPOSITORY:=}"
 
 cd "${PROJECT_PATH}"
 
-TARGETS='[{"name":"Git Tag Unused","subject":"tag","script":"tag-check.sh"},{"name":"Library Pinning","subject":"library-pin","script":"library-pin-check.sh"}]'
+TARGETS='[{"name":"Git Tag Unused","subject":"tag","script":"tag-check.sh"}]'
+
+if [[ "${CHECK_LIBRARY_PINNING}" == "true" ]]; then
+  TARGETS="$(jq -c '. + [{"name":"Library Pinning","subject":"library-pin","script":"library-pin-check.sh"}]' <<< "${TARGETS}")"
+fi
 
 if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
   TARGETS="$(jq -c '. + [{"name":"Changelog","subject":"changelog","script":"changelog-check.sh"}]' <<< "${TARGETS}")"

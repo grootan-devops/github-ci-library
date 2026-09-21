@@ -37,6 +37,11 @@ on:
         type: string
         default: ""
         description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: ""
+        description: "Directory containing Chart.yaml. Defaults to vars.CHART_DIR, then ./chart."
       allow-unstable-library-refs:
         required: false
         type: boolean
@@ -47,6 +52,11 @@ on:
         type: boolean
         default: true
         description: "Run the MIGRATION.md release guard. Disable for artifacts with no migration contract."
+      check-library-pinning:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the reusable-workflow library pinning guard. Disable temporarily while libraries are on a development branch."
 
 permissions:
   contents: read
@@ -79,6 +89,7 @@ jobs:
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
           CHECK_MIGRATION: ${{ inputs.check-migration }}
+          CHECK_LIBRARY_PINNING: ${{ inputs.check-library-pinning }}
           CHART_NAME: ${{ inputs.chart-name }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
@@ -123,7 +134,7 @@ jobs:
           RELEASE_VERSION: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
           PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-          CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+          CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
           CHART_NAME: ${{ inputs.chart-name }}
           CHART_VERSION: ${{ inputs.chart-version }}
           CHART_REPOSITORY: ${{ inputs.chart-repository }}

@@ -30,6 +30,7 @@ jobs:
     secrets: inherit
     with:
       tag: ${{ needs.version.outputs.tag }}
+      check-library-pinning: false
 
   release:
     name: Release

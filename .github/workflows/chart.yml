@@ -49,6 +49,11 @@ on:
         type: string
         default: ""
         description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: ""
+        description: "Directory containing Chart.yaml. Defaults to vars.CHART_DIR, then ./chart."
       check-docs:
         required: false
         type: boolean
@@ -67,7 +72,7 @@ on:
 
 env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-  CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+  CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   CHART_INFO_FILE_NAME: CHART_INFO.md
 
