@@ -34,7 +34,6 @@ permissions:
   contents: read
 
 jobs:
-  # An empty matrix runs no job at all: no root module, nothing provisioned.
   discover:
     name: Detect Terraform Root Module
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -147,8 +146,6 @@ jobs:
   destroy:
     name: Test Teardown
     needs: test
-    # A cancelled run strands infrastructure too, so this cannot be `failure()`
-    # alone; `skipped` means the test never ran and there is nothing to destroy.
     if: ${{ inputs.destroy-on-failure && (failure() || cancelled()) && needs.test.result != 'skipped' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 60

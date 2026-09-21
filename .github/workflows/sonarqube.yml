@@ -131,12 +131,8 @@ jobs:
           set -e
           exit "${SCANNER_RESULT}"
 
-      # GitHub caches are immutable, so a stable key freezes at whatever the first
-      # run stored. Delete the entry before rewriting it, at most once a day.
-      # Needs `actions: write`; without it the older entry survives and restores.
       - name: Refresh Cache Entry
         id: refresh
-        # Deletes the shared entry, so it must run only where that entry lives.
         if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -172,9 +168,6 @@ jobs:
           fi
 
       - name: Save Sonar Analysis Cache
-        # Default branch only. GitHub scopes every cache entry to the ref that wrote
-        # it, and a run can read only its own ref, its base branch and the default
-        # branch -- so a write from anywhere else is a duplicate nobody else can use.
         if: ${{ !cancelled() && steps.refresh.outputs.save == 'true'
           && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6

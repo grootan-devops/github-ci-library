@@ -59,7 +59,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # hashFiles returns "" for a missing go.sum, collapsing the key onto the bare `go-` prefix.
       - name: Compute Module Cache Key
         id: key
         run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
@@ -79,12 +78,7 @@ jobs:
           go mod download 2>&1 | tee "${RUNNER_TEMP}/go-mod-download.log"
           exit "${PIPESTATUS[0]}"
 
-      # Cache entries are immutable: saving after a failed resolve would freeze a
-      # half-populated tree under a valid key until go.sum changes.
       - name: Save Module Cache
-        # Default branch only. GitHub scopes every cache entry to the ref that wrote
-        # it, and a run can read only its own ref, its base branch and the default
-        # branch -- so a write from anywhere else is a duplicate nobody else can use.
         if: ${{ success() && steps.cache.outputs.cache-hit != 'true'
           && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6

@@ -85,10 +85,6 @@ jobs:
           path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_artifacts
           merge-multiple: true
 
-      # `gh` is not installed in the toolkit container, so `gh run download` failed with
-      # "command not found" and -- discarding stderr -- looked exactly like a run with no
-      # artifacts. Every release since has carried notes only. A JS action runs on the
-      # runner's own node even inside a container job, so it needs nothing from the image.
       - name: Download Candidate Run's Artifacts
         if: ${{ inputs.upstream-run-id != '' }}
         continue-on-error: true
@@ -128,12 +124,6 @@ jobs:
           CHART_README=CHART_README.md
           TF_README=TF_README.md
 
-          # IMAGE_CVE.md is the summary and belongs in the body; the full Trivy report is
-          # not. One row per finding with its ignore reason runs to tens of thousands of
-          # characters -- 134 ignored plus 221 unfixable findings pushed the release body
-          # past GitHub's 125000 limit and the publish failed with a 422 naming no field.
-          # The report is already attached as trivy_scan_report.tar.gz below, which is
-          # where the scanner's own summary says to look for it.
           for FILE in IMAGE_INFO.md IMAGE_CVE.md; do
             [[ -f "${FILE}" ]] && cat "${FILE}" >> "${IMAGE_README}"
           done
@@ -240,7 +230,6 @@ jobs:
   publish:
     name: Publish
     needs: collect
-    # `collect` may fail, so wait for it to finish rather than to succeed.
     if: ${{ !cancelled() && inputs.tag != '' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
@@ -271,14 +260,6 @@ jobs:
             echo "Release ${TAG}" > "${NOTES_FILE}"
           fi
 
-          # This job deliberately does not check the repository out -- it only needs the
-          # payload artifact. Without --repo, gh infers the repository from a git remote
-          # that is not there and dies with "failed to run git: not a git repository",
-          # which surfaced only as "gh refused to publish".
-          # GitHub rejects a release body over 125000 characters with a 422 that names no
-          # field you control. Consolidated notes exceed it as soon as the candidate run's
-          # scan reports are restored -- which is exactly when the release is most useful,
-          # so truncate the body and leave the full text attached as an asset.
           NOTES_LIMIT=124000
           NOTES_CHARS="$(wc -m < "${NOTES_FILE}" | tr -d ' ')"
           if [[ "${NOTES_CHARS}" -gt "${NOTES_LIMIT}" ]]; then
@@ -305,9 +286,6 @@ jobs:
           if [[ "${DRAFT}" == "true" ]]; then ARGS+=(--draft); fi
           if [[ "${PRERELEASE}" == "true" ]]; then ARGS+=(--prerelease); fi
 
-          # The changelog IS the release body, so attaching it too gives the reader the
-          # same text twice -- once inline, once as a download. It stays in the payload
-          # artifact because the notify job reads the Teams card body from there.
           shopt -s nullglob
           ASSETS=()
           for ASSET in payload/_release_assets/*; do

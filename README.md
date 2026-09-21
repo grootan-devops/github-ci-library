@@ -296,7 +296,7 @@ run-name: "Cache · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   schedule:
-    - cron: "17 2 * * *"
+    - cron: "0 0 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -1589,6 +1589,14 @@ Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
 - **Digest pinning**: `docker.yml` and `buildah.yml` output `image-ref-digest`
   (`registry/repo@sha256:...`). Feed it to `scan.yml` as `image-ref` so the scan cannot
   resolve a different tag than the one that was built.
+- The Buildah workflow selects the digest whose repository matches the pushed target;
+  it must not assume that `podman image inspect` returns the target at `.RepoDigests[0]`.
+  Podman may return multiple repository digests in an unspecified order, and selecting
+  the first one can send smoke tests or scans to a digest that does not exist in the
+  published repository.
+- Image smoke tests and image scans are independent caller jobs. An image scan should
+  depend on the image build and Trivy cache, not on `image-test`, so a smoke-test failure
+  does not suppress the CVE result.
 
 ---
 
@@ -1893,8 +1901,6 @@ run-name: "Audit · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -1964,8 +1970,6 @@ on:
         description: Image tag to scan. Defaults to the current version.
         required: false
         type: string
-  schedule:
-    - cron: "0 3 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2312,8 +2316,6 @@ run-name: "Scan · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2351,8 +2353,6 @@ run-name: "Scan · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2704,8 +2704,6 @@ run-name: "Security · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2981,8 +2979,6 @@ run-name: "Security · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3448,8 +3444,6 @@ on:
         description: Image tag to scan (defaults to the current version)
         required: false
         type: string
-  schedule:
-    - cron: "0 3 * * *"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3555,8 +3549,6 @@ run-name: "Secret Scan · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3860,8 +3852,6 @@ run-name: "Security · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3885,8 +3875,6 @@ run-name: "Supply Chain · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3981,8 +3969,6 @@ run-name: "Audit · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 2 * * 1"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"

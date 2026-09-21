@@ -28,7 +28,6 @@ jobs:
     uses: ./.github/workflows/self-lint.yml
     secrets: inherit
 
-  # Calls secret-scanning.yml directly; the self- hop only repeats the job name.
   secret-scan:
     name: Security
     uses: ./.github/workflows/secret-scanning.yml
@@ -39,7 +38,6 @@ jobs:
     uses: ./.github/workflows/self-version.yml
     secrets: inherit
 
-  # Calls check.yml directly; the self- hop only repeats the job name.
   guards:
     name: Guards
     needs: version

@@ -153,8 +153,6 @@ jobs:
         if: ${{ steps.target.outputs.skip != 'true' }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/${{ matrix.script }}"
 
-      # Linters write their own summary sections; only a failure before the
-      # linter ran needs one here.
       - name: Publish Lint Summary
         if: always()
         env:

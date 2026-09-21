@@ -413,8 +413,6 @@ jobs:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
     steps:
-      # A skipped job reads as success to the caller's graph, so this refuses
-      # with a failing step rather than an `if:` condition.
       - name: Verify The Candidate Was Scanned
         env:
           REQUIRE_SCAN: ${{ inputs.require-scan }}

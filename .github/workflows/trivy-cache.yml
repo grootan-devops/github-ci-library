@@ -35,10 +35,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      # Replaces the immutable trivy-db entry; a caller must grant it.
       actions: write
-    # No `permissions:` block on purpose: declaring actions: write would force
-    # every caller to grant it or fail at startup. Restores work without it.
     container:
       image: registry-1.docker.io/grootantech/toolkit:verify-v2
     defaults:
@@ -64,11 +61,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The vulnerability database is the whole point of this cache: it is what
-          # every image and SBOM scan loads. Warming only the checks and java-db left
-          # `db/` absent, so each scan restored ~920MB and then downloaded the ~115MB
-          # database anyway -- a cache that cost bandwidth and saved none.
-          echo "Warming trivy-db for downstream image and SBOM scans..."
           if trivy image --download-db-only --skip-version-check 2>&1 | tee "${RUNNER_TEMP}/vuln-db.log"; then
             VULN_DB="downloaded"
           else
@@ -83,8 +75,6 @@ jobs:
 
           if [[ "${ENABLE_JAVA_DB}" == "true" ]]; then
             echo "Warming trivy-java-db for downstream image and SBOM scans..."
-            # Downstream scans pass --skip-java-db-update, which Trivy treats as
-            # fatal on a cold cache, so a failure here fails every later Java scan.
             if trivy image --download-java-db-only --skip-version-check 2>&1 | tee "${RUNNER_TEMP}/java-db.log"; then
               JAVA_DB="downloaded"
             else
@@ -96,12 +86,8 @@ jobs:
             echo "enable-java-db is false — skipping trivy-java-db."
           fi
 
-      # GitHub caches are immutable, so a stable key must be deleted before it can
-      # be rewritten, or `trivy-db` freezes at whatever the first run stored.
-      # Deleting needs actions: write; without it the existing entry just stays.
       - name: Refresh Cache Entry
         id: refresh
-        # Deletes the shared entry, so it must run only where that entry lives.
         if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
         env:
           GH_TOKEN: ${{ github.token }}
@@ -139,11 +125,7 @@ jobs:
           fi
 
       - name: Save Trivy Database Cache
-        # Default branch only. GitHub scopes every cache entry to the ref that wrote
-        # it, and a run can read only its own ref, its base branch and the default
-        # branch -- so a write from anywhere else is a duplicate nobody else can use.
-        if: ${{ !cancelled() && steps.refresh.outputs.save == 'true'
-          && github.ref_name == github.event.repository.default_branch }}
+        if: ${{ !cancelled() && steps.refresh.outputs.save == 'true' && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
         with:
           path: .trivycache

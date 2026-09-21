@@ -211,7 +211,22 @@ jobs:
 
           TARGET="${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
 
-          DIGEST="$(podman image inspect "${TARGET}" --format '{{index .RepoDigests 0}}' | sed 's/.*@//')"
+          DIGEST="$(
+            podman image inspect "${TARGET}" --format '{{range .RepoDigests}}{{println .}}{{end}}' |
+              while IFS= read -r REPO_DIGEST; do
+                REPOSITORY="${REPO_DIGEST%@*}"
+                case "${REPOSITORY}" in
+                  "${REGISTRY_HOST}/${IMAGE_REPOSITORY}"|docker.io/"${IMAGE_REPOSITORY}"|index.docker.io/"${IMAGE_REPOSITORY}"|"${IMAGE_REPOSITORY}")
+                    printf '%s\n' "${REPO_DIGEST#*@}"
+                    break
+                    ;;
+                esac
+              done
+          )"
+          if [[ -z "${DIGEST}" ]]; then
+            echo "::error title=Image digest::Podman did not return a digest for ${TARGET}."
+            exit 1
+          fi
           REF="${REGISTRY_HOST}/${IMAGE_REPOSITORY}@${DIGEST}"
           echo "IMAGE_REF_DIGEST=${REF}" >> "${GITHUB_OUTPUT}"
 

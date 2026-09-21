@@ -97,8 +97,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      # hashFiles returns "" for a missing lock file, which would collapse the
-      # key onto the bare `tf-` restore-keys prefix and never invalidate.
       - name: Compute Provider Cache Key
         id: key
         run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
@@ -145,9 +143,6 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Save Provider Cache
-        # Default branch only. GitHub scopes every cache entry to the ref that wrote
-        # it, and a run can read only its own ref, its base branch and the default
-        # branch -- so a write from anywhere else is a duplicate nobody else can use.
         if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
         with:

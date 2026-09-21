@@ -79,12 +79,7 @@ jobs:
           uv sync --frozen --no-install-project --no-install-workspace 2>&1 | tee "${RUNNER_TEMP}/uv-sync.log"
           exit "${PIPESTATUS[0]}"
 
-      # Cache entries are immutable: saving after a failed resolve would freeze a
-      # half-populated tree under a valid key until uv.lock changes.
       - name: Save uv Cache
-        # Default branch only. GitHub scopes every cache entry to the ref that wrote
-        # it, and a run can read only its own ref, its base branch and the default
-        # branch -- so a write from anywhere else is a duplicate nobody else can use.
         if: ${{ success() && steps.cache.outputs.cache-hit != 'true'
           && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
@@ -124,8 +119,6 @@ jobs:
   build:
     name: Build
     needs: dependency
-    # An interpreted service has nothing to compile: dependencies -> test is the
-    # whole shape. Pass an empty build-command and no build job is created.
     if: ${{ inputs.build-command != '' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 30
