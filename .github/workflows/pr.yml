@@ -28,6 +28,14 @@ jobs:
     uses: ./.github/workflows/self-lint.yml
     secrets: inherit
 
+  docs:
+    name: Config & Docs
+    uses: ./.github/workflows/lint.yml
+    secrets: inherit
+    with:
+      lint-yaml-files: ".github/workflows/*.yml .yamllint.yml"
+      lint-md-files: "**/*.md"
+
   secret-scan:
     uses: ./.github/workflows/secret-scanning.yml
     secrets: inherit

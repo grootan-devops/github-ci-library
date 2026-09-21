@@ -4,12 +4,6 @@ run-name: "Lint · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   workflow_dispatch:
   workflow_call:
-    inputs:
-      lint-md-files:
-        required: false
-        type: string
-        default: "**/*.md"
-        description: "Space-separated markdown globs to lint."
 
 permissions:
   contents: read
@@ -20,7 +14,7 @@ jobs:
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
-      contents: read1.0.0
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -44,11 +38,3 @@ jobs:
                          run_linted "🔧 Self lint: shellcheck" shellcheck "${SCRIPTS[@]}" ;;
             readme-dockerfiles) scripts/lint/readme-dockerfile.sh README.md ;;
           esac
-
-  lint:
-    name: Config & Docs
-    uses: ./.github/workflows/lint.yml
-    secrets: inherit
-    with:
-      lint-yaml-files: ".github/workflows/*.yml .yamllint.yml"
-      lint-md-files: ${{ inputs.lint-md-files }}
