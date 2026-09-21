@@ -70,6 +70,8 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -1608,6 +1610,8 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2017,13 +2021,8 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "**.tf"
-      - "**.tfvars"
-      - "**.tftpl"
-      - "tests/**"
-      - "VERSION"
-      - ".github/**"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2359,11 +2358,8 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "chart/**"
-      - "CHANGELOG.md"
-      - "MIGRATION.md"
-      - ".github/**"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -2681,14 +2677,8 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "Dockerfile"
-      - ".dockerignore"
-      - "rootfs/**"
-      - "VERSION"
-      - "CHANGELOG.md"
-      - "MIGRATION.md"
-      - ".github/**"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3011,6 +3001,8 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -3452,12 +3444,8 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   pull_request:
     branches: [main]
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/**"
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
