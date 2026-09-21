@@ -1589,11 +1589,10 @@ Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
 - **Digest pinning**: `docker.yml` and `buildah.yml` output `image-ref-digest`
   (`registry/repo@sha256:...`). Feed it to `scan.yml` as `image-ref` so the scan cannot
   resolve a different tag than the one that was built.
-- The Buildah workflow selects the digest whose repository matches the pushed target;
+- The Buildah workflow reads the digest back from the registry after pushing the target;
   it must not assume that `podman image inspect` returns the target at `.RepoDigests[0]`.
-  Podman may return multiple repository digests in an unspecified order, and selecting
-  the first one can send smoke tests or scans to a digest that does not exist in the
-  published repository.
+  Podman may return stale or multiple local repository digests, so the registry response
+  is the authoritative reference for smoke tests and scans.
 - Image smoke tests and image scans are independent caller jobs. An image scan should
   depend on the image build and Trivy cache, not on `image-test`, so a smoke-test failure
   does not suppress the CVE result.
