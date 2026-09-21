@@ -272,6 +272,60 @@ warm job declares `actions: write` for it. A reusable workflow cannot request a 
 caller did not grant, so a caller that stops at `actions: read` fails at startup before any
 job begins.
 
+### Warming the Trivy cache from the default branch
+
+`trivy-cache.yml` is only worth calling if something in the repository scans — `scan.yml`
+with `scan-type: image`, or `sbom.yml`. **A repository that does not scan should not call it
+and needs no cache-warm workflow at all.** A CI image that never leaves the build farm is a
+fair reason not to scan; so is a repository that ships no image.
+
+If you do scan, one more workflow is needed, and its absence is silent. Every
+`actions/cache/save` in this library runs only on the default branch, because GitHub scopes
+a cache entry to the ref that wrote it — a run reads its own ref, its base branch and the
+default branch, so a write from anywhere else is a copy nobody else can use. Pull requests
+therefore *restore* the cache but never write one. If nothing runs on the default branch to
+write it, the entry never exists and every run re-downloads the ~115MB vulnerability
+database.
+
+A scheduled workflow closes that, because a schedule executes on the default branch:
+
+```yaml
+# .github/workflows/cache-warm.yml
+name: Cache · Trivy Database
+run-name: "Cache · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: "cache-warm-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  trivy-cache:
+    permissions:
+      contents: read
+      actions: write
+    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
+    secrets: inherit
+    with:
+      enable-java-db: false
+```
+
+Set `enable-java-db: true` only for a repository that ships a JVM artifact — the Java
+database is roughly 900MB and dominates the cached tree. Keep `workflow_dispatch` beside the
+schedule so the cache can be rebuilt on demand after a base-image change.
+
+> [!NOTE]
+> A `release.yml` that only promotes does not call `trivy-cache.yml`, so on that shape the
+> scheduled run is the only thing that writes the cache. Drop it and pull requests restore
+> an entry that nothing ever refreshes.
+
 > [!IMPORTANT]
 > The repository's default token scope caps all of this. If **Settings → Actions → General →
 > Workflow permissions** is set to read-only, `contents: write` is denied and the release
