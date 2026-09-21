@@ -128,7 +128,13 @@ jobs:
           CHART_README=CHART_README.md
           TF_README=TF_README.md
 
-          for FILE in IMAGE_INFO.md IMAGE_CVE.md image_trivy_scan_report.md; do
+          # IMAGE_CVE.md is the summary and belongs in the body; the full Trivy report is
+          # not. One row per finding with its ignore reason runs to tens of thousands of
+          # characters -- 134 ignored plus 221 unfixable findings pushed the release body
+          # past GitHub's 125000 limit and the publish failed with a 422 naming no field.
+          # The report is already attached as trivy_scan_report.tar.gz below, which is
+          # where the scanner's own summary says to look for it.
+          for FILE in IMAGE_INFO.md IMAGE_CVE.md; do
             [[ -f "${FILE}" ]] && cat "${FILE}" >> "${IMAGE_README}"
           done
           for FILE in CHART_INFO.md CHART_CVE.md; do
