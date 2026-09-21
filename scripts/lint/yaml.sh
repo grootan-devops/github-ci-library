@@ -19,8 +19,11 @@ if [[ ${#YAML_TARGETS[@]} -eq 0 ]]; then
 fi
 
 echo "Linting: ${YAML_TARGETS[*]}"
-# shellcheck source=scripts/lint-summary.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lint-summary.sh"
+# shellcheck source=scripts/lint/summary.sh
+# The reorg renamed lint-summary.sh to summary.sh. Under `set -e` a source of a
+# missing file aborts the script before yamllint runs, so the leg failed red
+# with "No such file or directory" and read as a lint failure.
+source "$(dirname "${BASH_SOURCE[0]}")/summary.sh"
 if [[ ! -f .yamllint.yml && ! -f .yamllint.yaml && ! -f .yamllint ]]; then
   run_linted "🧾 YAML lint" yamllint -s \
     -d "{extends: default, rules: {line-length: disable, document-start: disable, comments: disable, comments-indentation: disable}}" \

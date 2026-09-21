@@ -1,8 +1,5 @@
 name: Notify / Microsoft Teams
 
-# Standalone counterpart of the GitLab Release:Notification:Teams job, for
-# callers that want the Adaptive Card without the rest of the release chain.
-
 on:
   workflow_call:
     inputs:
@@ -53,7 +50,7 @@ jobs:
           RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL: ${{ secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL }}
           SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/teams-notify.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/notify/teams.sh"
 
       - name: Upload Notification Payload
         if: ${{ !cancelled() }}

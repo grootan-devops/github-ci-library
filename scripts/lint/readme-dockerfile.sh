@@ -5,11 +5,15 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/hadolint-ignores.sh
-source "${SCRIPT_DIR}/hadolint-ignores.sh"
+# The shared ignore list lives with the docker scripts, not beside this one. A sibling
+# path here fails the source under set -e, before a single example is linted.
+# shellcheck source=scripts/docker/hadolint-ignores.sh
+source "${SCRIPT_DIR}/../docker/hadolint-ignores.sh"
 
 FILES=("$@")
-[[ ${#FILES[@]} -eq 0 ]] && FILES=("README.md")
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  FILES=("README.md")
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
@@ -34,7 +38,9 @@ for MD in "${FILES[@]}"; do
   mapfile -t STARTS < <(grep -n '^```dockerfile$' "${MD}" | cut -d: -f1)
   for START in "${STARTS[@]}"; do
     END="$(awk -v s="${START}" 'NR>s && /^```$/ {print NR; exit}' "${MD}")"
-    [[ -z "${END}" ]] && continue
+    if [[ -z "${END}" ]]; then
+      continue
+    fi
     BLOCK="${WORK}/${MD//\//_}-L${START}.Dockerfile"
     awk -v s="${START}" -v e="${END}" 'NR>s && NR<e' "${MD}" > "${BLOCK}"
     TOTAL=$((TOTAL + 1))

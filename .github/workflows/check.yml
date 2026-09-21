@@ -1,9 +1,5 @@
 name: Check / Release Prerequisites
 
-# Counterpart of the GitLab `check` stage. `discover` emits only the guards
-# whose subject exists here, so a guard that does not apply never appears in
-# the run graph rather than showing up permanently skipped.
-
 on:
   workflow_call:
     inputs:
@@ -68,6 +64,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Select Applicable Guards
         id: targets
         env:
@@ -79,31 +83,7 @@ jobs:
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
         shell: bash
-        run: |
-          set -euo pipefail
-          cd "${PROJECT_PATH}"
-
-          TARGETS='[{"name":"Git Tag Unused","subject":"tag","script":"tag-check.sh"},{"name":"Library Pinning","subject":"library-pin","script":"library-pin-check.sh"}]'
-
-          if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Changelog","subject":"changelog","script":"changelog-check.sh"}]' <<< "${TARGETS}")"
-          else
-            echo "::warning title=Changelog::No ${CHANGELOG_FILE_NAME} in this repository — the changelog guard does not apply."
-          fi
-
-          if [[ "${CHECK_MIGRATION}" == "true" && -f "${MIGRATION_FILE_NAME}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Migration Guide","subject":"migration","script":"migration-check.sh"}]' <<< "${TARGETS}")"
-          fi
-
-          if [[ -n "${CHART_NAME}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Chart Version Unused","subject":"chart-version","script":"chart-version-check.sh"},{"name":"Chart Dependencies","subject":"chart-dependency","script":"chart-dependency-check.sh"}]' <<< "${TARGETS}")"
-          fi
-
-          if [[ -n "${IMAGE_TAG}" && -n "${IMAGE_REPOSITORY}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Image Tag Unused","subject":"image-tag","script":"image-tag-check.sh"}]' <<< "${TARGETS}")"
-          fi
-
-          echo "include=${TARGETS}" >> "${GITHUB_OUTPUT}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/select-guards.sh"
 
   guard:
     name: "${{ matrix.name }}"
@@ -161,11 +141,7 @@ jobs:
           RELEASE_MIGRATION_FILE_NAME: RELEASE_MIGRATION.md
         run: |
           set -euo pipefail
-          if [[ -f "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/${SCRIPT}" ]]; then
-            bash "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/${SCRIPT}"
-          else
-            bash "${GITHUB_WORKSPACE}/.ci-library/scripts/${SCRIPT}"
-          fi
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/${SCRIPT}"
 
       - name: Upload Release Notes
         if: ${{ !cancelled() && matrix.subject == 'changelog' }}
@@ -196,33 +172,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Consolidate Guard Results
         env:
           RESULT: ${{ needs.guard.result }}
           DISCOVER_RESULT: ${{ needs.discover.result }}
-        run: |
-          set -euo pipefail
-
-          if [[ "${RESULT}" != "success" ]]; then
-            {
-              echo "## 🚦 Release Prerequisites"
-              echo ""
-              case "${RESULT}" in
-                failure)   echo "❌ At least one guard failed. Open the failed **Check:** job for the exact remedy." ;;
-                cancelled) echo "🚫 The guards were cancelled." ;;
-                skipped)   echo "⏭️ No guards ran." ;;
-                *)         echo "Status: ${RESULT}" ;;
-              esac
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-          fi
-
-          if [[ "${DISCOVER_RESULT}" != "success" ]]; then
-            echo "::error title=Release prerequisites::Guard discovery did not succeed (${DISCOVER_RESULT})."
-            exit 1
-          fi
-          if [[ "${RESULT}" == "failure" || "${RESULT}" == "cancelled" ]]; then
-            echo "::error title=Release prerequisites::Not met. Open each failed guard job for the exact remedy."
-            exit 1
-          fi
-          echo "All applicable guards passed."
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/consolidate-results.sh"

@@ -387,7 +387,9 @@ categorize_license_items() {
     _RESULT_REF=()
     _IGNORED_REF=()
     while IFS= read -r ITEM; do
-      if [[ -z "${ITEM}" ]]; then continue; fi
+      if [[ -z "${ITEM}" ]]; then
+        continue
+      fi
       local PKG="${ITEM%%:::*}"
       local LIC="${ITEM#*:::}"
       if grep -Fxq "${ITEM}" "${IGNORED_ITEMS_FILE}" || grep -Fxq "${LIC}" "${IGNORED_ITEMS_FILE}"; then
@@ -399,7 +401,9 @@ categorize_license_items() {
   done
   FINAL_FIXED_IGNORED=()
   while IFS= read -r ITEM; do
-    if [[ -z "${ITEM}" ]]; then continue; fi
+    if [[ -z "${ITEM}" ]]; then
+      continue
+    fi
     if [[ "${ITEM}" == *":::"* ]]; then
       if ! grep -Fxq "${ITEM}" "${ALL_FOUND_FILE}"; then
         FINAL_FIXED_IGNORED+=("${ITEM}")
@@ -991,7 +995,9 @@ EOF
       NON_PERMISSIVE_LICENSES=$(jq -r '[.Results[]?.Licenses[]? | select((.Category == "restricted" or .Category == "reciprocal" or .Category == "unrecognized") and .Name != null and .Name != "") | "\(.PkgName // "unknown"):::\(.Name)"] | unique | .[]' "${SCAN_JSON}" 2>/dev/null | sort -u)
       local NEW_LIC_ITEMS=()
       while IFS= read -r LIC_ITEM; do
-        if [[ -z "${LIC_ITEM}" ]]; then continue; fi
+        if [[ -z "${LIC_ITEM}" ]]; then
+          continue
+        fi
         local PKG="${LIC_ITEM%%:::*}"
         local LIC="${LIC_ITEM#*:::}"
         if ! grep -Fxq "${LIC_ITEM}" "${IGNORED_ITEMS_FILE}" && ! grep -Fxq "${LIC}" "${IGNORED_ITEMS_FILE}"; then
@@ -1036,11 +1042,21 @@ generate_action_table() {
     license)
       generate_table "License category" "Needs review" "Ignored"
       # A classification the exit code never acts on is not left to act on.
-      is_classification_ignored "restricted" || echo "| Restricted | ${#FINAL_RESTRICTED[@]} | ${#FINAL_RESTRICTED_IGNORED[@]} |"
-      is_classification_ignored "reciprocal" || echo "| Reciprocal | ${#FINAL_RECIPROCAL[@]} | ${#FINAL_RECIPROCAL_IGNORED[@]} |"
-      is_classification_ignored "unrecognized" || echo "| Unrecognized | ${#FINAL_UNRECOGNIZED[@]} | ${#FINAL_UNRECOGNIZED_IGNORED[@]} |"
-      is_classification_ignored "notice" || echo "| Notice | ${#FINAL_NOTICE[@]} | ${#FINAL_NOTICE_IGNORED[@]} |"
-      is_classification_ignored "permissive" || echo "| Permissive | ${#FINAL_PERMISSIVE[@]} | ${#FINAL_PERMISSIVE_IGNORED[@]} |"
+      if ! is_classification_ignored "restricted"; then
+        echo "| Restricted | ${#FINAL_RESTRICTED[@]} | ${#FINAL_RESTRICTED_IGNORED[@]} |"
+      fi
+      if ! is_classification_ignored "reciprocal"; then
+        echo "| Reciprocal | ${#FINAL_RECIPROCAL[@]} | ${#FINAL_RECIPROCAL_IGNORED[@]} |"
+      fi
+      if ! is_classification_ignored "unrecognized"; then
+        echo "| Unrecognized | ${#FINAL_UNRECOGNIZED[@]} | ${#FINAL_UNRECOGNIZED_IGNORED[@]} |"
+      fi
+      if ! is_classification_ignored "notice"; then
+        echo "| Notice | ${#FINAL_NOTICE[@]} | ${#FINAL_NOTICE_IGNORED[@]} |"
+      fi
+      if ! is_classification_ignored "permissive"; then
+        echo "| Permissive | ${#FINAL_PERMISSIVE[@]} | ${#FINAL_PERMISSIVE_IGNORED[@]} |"
+      fi
       echo "| **Ignored but no longer present** | ${#FINAL_FIXED_IGNORED[@]} | — |"
       ;;
     *)
@@ -1048,7 +1064,9 @@ generate_action_table() {
       echo "| Active, fixable | ${#FINAL_FIXABLE[@]} |"
       echo "| Ignored (justified) | ${#FINAL_FIXABLE_IGNORED[@]} |"
       # Misconfigurations carry no fixed version, so nothing is ever unfixable.
-      [[ "${SCAN_TYPE}" == "config" ]] || echo "| Unfixable | ${#FINAL_UNFIXABLE[@]} |"
+      if [[ "${SCAN_TYPE}" != "config" ]]; then
+        echo "| Unfixable | ${#FINAL_UNFIXABLE[@]} |"
+      fi
       echo "| **Ignored but no longer present** | ${#FINAL_FIXED_IGNORED[@]} |"
       ;;
   esac

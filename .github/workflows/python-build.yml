@@ -1,8 +1,5 @@
 name: Python / Dependency, Build & Test
 
-# GitLab counterpart: Python:Dependency:Download -> Python:Build + Python:Test:Unit.
-# Dependencies resolve once; build and test run in parallel against that cache.
-
 on:
   workflow_call:
     inputs:
@@ -64,6 +61,14 @@ jobs:
         id: key
         run: echo "key=py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Restore uv Cache
         id: cache
         uses: actions/cache/restore@v6
@@ -90,31 +95,16 @@ jobs:
       - name: Publish Dependency Summary
         if: always()
         env:
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          STACK_LABEL: "🐍 Python dependencies"
+          OUTCOME: ${{ steps.resolve.outcome }}
           CACHE_KEY: ${{ steps.key.outputs.key }}
-          RESOLVE_OUTCOME: ${{ steps.resolve.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and the resolve never ran.
-          [[ "${RESOLVE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          CACHE_STATE="rebuilt — no entry matched"
-          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
-          {
-            echo "### 🐍 Python dependencies"
-            echo ""
-            if [[ "${RESOLVE_OUTCOME}" == "success" ]]; then
-              echo "✅ Environment resolved. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}."
-            else
-              echo "❌ \`uv sync --frozen\` failed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}. uv reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/uv-sync.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-              echo ""
-              echo "\`--frozen\` refuses to update \`uv.lock\`, so a drifted lock file has to be regenerated with \`uv lock\` and committed."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          SUCCESS_MESSAGE: "Environment resolved."
+          RESOLVE_COMMAND: "uv sync --frozen"
+          TOOL_LABEL: "uv"
+          LOG_FILE: "uv-sync.log"
+          REMEDY: '`--frozen` refuses to update `uv.lock`, so a drifted lock file has to be regenerated with `uv lock` and committed.'
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/dependency-summary.sh"
 
   build:
     name: Build
@@ -133,6 +123,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Export Build Environment
         if: ${{ inputs.build-env != '' }}
         env:
@@ -142,7 +140,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -176,33 +176,13 @@ jobs:
       - name: Publish Build Summary
         if: always()
         env:
+          STACK_LABEL: "Python"
           BUILD_COMMAND: ${{ inputs.build-command }}
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and the build never ran.
-          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          {
-            echo "### 📦 Python build"
-            echo ""
-            if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
-              echo "❌ \`${BUILD_COMMAND}\` failed. It reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            elif compgen -G "dist/*" > /dev/null; then
-              echo "| Artifact | Size |"
-              echo "|---|---|"
-              for F in dist/*; do
-                [[ -f "${F}" ]] || continue
-                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
-              done
-            else
-              echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote nothing to \`dist/\`, so the \`python-dist\` artifact will be empty."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          ARTIFACT_NAME: "python-dist"
+          ARTIFACT_DIR: "dist"
+          ARTIFACT_GLOB: "dist/*"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/summary.sh"
 
   test:
     name: Unit Test
@@ -239,7 +219,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -302,4 +284,4 @@ jobs:
           REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/**/*.xml"
           JOB_SUMMARY: "true"
           FAIL_ON_FAILURE: "true"
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

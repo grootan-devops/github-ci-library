@@ -1,8 +1,5 @@
 name: Go / Dependency, Build & Test
 
-# GitLab counterpart: Go:Dependency:Download -> build + test.
-# Modules resolve once; build and test run in parallel against that cache.
-
 on:
   workflow_call:
     inputs:
@@ -59,6 +56,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Compute Module Cache Key
         id: key
         run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
@@ -89,29 +94,15 @@ jobs:
       - name: Publish Dependency Summary
         if: always()
         env:
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          STACK_LABEL: "🐹 Go modules"
+          OUTCOME: ${{ steps.download.outcome }}
           CACHE_KEY: ${{ steps.key.outputs.key }}
-          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and the download never ran.
-          [[ "${DOWNLOAD_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          CACHE_STATE="rebuilt — no entry matched"
-          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
-          {
-            echo "### 🐹 Go modules"
-            echo ""
-            if [[ "${DOWNLOAD_OUTCOME}" == "success" ]]; then
-              echo "✅ Modules resolved. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}."
-            else
-              echo "❌ \`go mod download\` failed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}. Go reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/go-mod-download.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          SUCCESS_MESSAGE: "Modules resolved."
+          RESOLVE_COMMAND: "go mod download"
+          TOOL_LABEL: "Go"
+          LOG_FILE: "go-mod-download.log"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/dependency-summary.sh"
 
   build:
     name: Build
@@ -129,6 +120,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Export Build Environment
         if: ${{ inputs.build-env != '' }}
         env:
@@ -138,7 +137,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -170,33 +171,15 @@ jobs:
       - name: Publish Build Summary
         if: always()
         env:
+          STACK_LABEL: "Go"
+          TOOL_LABEL: "The compiler"
           BUILD_COMMAND: ${{ inputs.build-command }}
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and the build never ran.
-          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          {
-            echo "### 📦 Go build"
-            echo ""
-            if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
-              echo "❌ \`${BUILD_COMMAND}\` failed. The compiler reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            elif compgen -G "bin/*" > /dev/null; then
-              echo "| Binary | Size |"
-              echo "|---|---|"
-              for F in bin/*; do
-                [[ -f "${F}" ]] || continue
-                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
-              done
-            else
-              echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote nothing to \`bin/\`, so the \`go-binaries\` artifact will be empty."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          ARTIFACT_NAME: "go-binaries"
+          ARTIFACT_DIR: "bin"
+          ARTIFACT_GLOB: "bin/*"
+          ARTIFACT_COLUMN: "Binary"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/summary.sh"
 
   test:
     name: Unit Test
@@ -233,7 +216,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -290,4 +275,4 @@ jobs:
           REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/**/*.xml"
           JOB_SUMMARY: "true"
           FAIL_ON_FAILURE: "true"
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

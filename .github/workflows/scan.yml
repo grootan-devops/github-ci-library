@@ -1,9 +1,5 @@
 name: Scan / Trivy Security, Config, SBOM & License
 
-# Counterpart of the GitLab `.scan-script` template and the jobs extending it.
-# The scan engine is scripts/trivy-scan.sh, shared by every scan type.
-# Suppressions live in the project's ignored-cves.yml, keyed by scan type.
-
 on:
   workflow_call:
     inputs:
@@ -208,6 +204,8 @@ jobs:
           echo "IAC_SCAN_PATH=${SCAN_PATH}" >> "${GITHUB_ENV}"
 
       - name: Resolve Scan Path & Report Name
+        env:
+          SCAN_PATH_INPUT: ${{ inputs.scan-path }}
         run: |
           set -euo pipefail
           case "${SCAN_TYPE}" in
@@ -219,7 +217,7 @@ jobs:
           echo "TRIVY_SCAN_REPORT_NAME=${PREFIX}_trivy_scan_report" >> "${GITHUB_ENV}"
 
           if [[ "${SCAN_TYPE}" == "config" && "${CONFIG_TYPE}" == "terraform" ]]; then
-            echo "IAC_SCAN_PATH=${{ inputs.scan-path || '.' }}" >> "${GITHUB_ENV}"
+            echo "IAC_SCAN_PATH=${SCAN_PATH_INPUT:-.}" >> "${GITHUB_ENV}"
           fi
 
       - name: Run Trivy Scan
@@ -231,7 +229,7 @@ jobs:
         run: |
           set -uo pipefail
           RESULT=0
-          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/trivy-scan.sh" || RESULT=$?
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/trivy.sh" || RESULT=$?
 
           case "${RESULT}" in
             0) echo "Scan clean." ;;
@@ -274,13 +272,9 @@ jobs:
           JOB_SUMMARY: "false"
           FAIL_ON_FAILURE: "false"
           ANNOTATION_LEVEL: "warning"
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"
 
-      # !cancelled(), not success(): the providers are valid even after a failed scan.
       - name: Save Terraform Provider Cache
-        # Default branch only. GitHub scopes every cache entry to the ref that wrote
-        # it, and a run can read only its own ref, its base branch and the default
-        # branch -- so a write from anywhere else is a duplicate nobody else can use.
         if: ${{ !cancelled() && inputs.scan-type == 'config' && inputs.config-type == 'terraform'
           && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6

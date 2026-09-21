@@ -1,10 +1,5 @@
 name: Deploy / GitOps Komodo Synchronization
 
-# Counterpart of the GitLab Deploy:Komodo chain: the image is proven to exist
-# before the GitOps compose file is touched. A reusable workflow cannot declare
-# `concurrency:`, so the caller must set `cancel-in-progress: false` — otherwise
-# a cancelled run can push the GitOps commit without triggering the redeploy.
-
 on:
   workflow_call:
     inputs:
@@ -73,6 +68,9 @@ on:
       GITOPS_TOKEN:
         required: false
         description: "Token for the GitOps repository. Falls back to GITHUB_TOKEN."
+      CI_LIBRARY_TOKEN:
+        required: false
+        description: "Token used to check out this CI library. Falls back to GITHUB_TOKEN."
 
 permissions:
   contents: read
@@ -94,6 +92,14 @@ jobs:
       new-image: ${{ steps.resolve.outputs.new_image }}
 
     steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Resolve Deployment Target
         id: resolve
         env:
@@ -109,38 +115,7 @@ jobs:
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPO: ${{ inputs.image-repository }}
           DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
-        run: |
-          set -euo pipefail
-          MISSING=()
-          [[ -z "${GITOPS_REPO}" ]] && MISSING+=("gitops-repo")
-          [[ -z "${GITOPS_BRANCH}" ]] && MISSING+=("gitops-branch")
-          [[ -z "${COMPOSE_FILE}" ]] && MISSING+=("gitops-compose-file")
-          [[ -z "${YQ_PATH}" ]] && MISSING+=("gitops-service-image-yq-path")
-          [[ -z "${KOMODO_SERVER}" ]] && MISSING+=("komodo-server (or vars.KOMODO_SERVER)")
-          [[ -z "${STACK_NAME}" ]] && MISSING+=("komodo-stack-name")
-          [[ -z "${KOMODO_KEY}" ]] && MISSING+=("KOMODO_API_KEY secret")
-          [[ -z "${KOMODO_SECRET}" ]] && MISSING+=("KOMODO_API_SECRET secret")
-          [[ -z "${IMAGE_TAG}" ]] && MISSING+=("image-tag")
-          [[ -z "${IMAGE_REPO}" ]] && MISSING+=("image-repository")
-          if [[ ${#MISSING[@]} -gt 0 ]]; then
-            echo "::error::[HARD FAILURE] Missing mandatory deployment configuration: ${MISSING[*]}"
-            {
-              echo "### 🔎 Deployment prerequisites"
-              echo ""
-              echo "❌ Nothing was deployed. These inputs or secrets are not configured:"
-              echo ""
-              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
-              printf -- '- `%s`\n' "${MISSING[@]}"
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          NEW_IMAGE="${REGISTRY_HOST}/${IMAGE_REPO}${DEV_SUFFIX}:${IMAGE_TAG}"
-
-          {
-            echo "new_image=${NEW_IMAGE}"
-          } | tee -a "${GITHUB_OUTPUT}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/resolve-target.sh"
 
       - name: Validate Image Exists In Registry
         env:
@@ -197,6 +172,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Export Custom Environment Variables
         if: ${{ inputs.build-env != '' }}
         env:
@@ -206,7 +189,9 @@ jobs:
           while IFS='=' read -r key val; do
             key="${key#"${key%%[![:space:]]*}"}"
             key="${key%"${key##*[![:space:]]}"}"
-            [[ -z "${key}" || "${key}" =~ ^# ]] && continue
+            if [[ -z "${key}" || "${key}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${key}" "${val}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -222,57 +207,7 @@ jobs:
           GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN || github.token }}
           # Reuse the reference validate proved resolvable; recomputing can drift.
           NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
-        run: |
-          set -euo pipefail
-          REPO_DIR="_gitops_worktree"
-          rm -rf "${REPO_DIR}"
-
-          echo "Cloning GitOps repo '${GITOPS_REPO}' (branch: ${GITOPS_BRANCH})..."
-          AUTH_URL="https://x-access-token:${GITOPS_TOKEN}@github.com/${GITOPS_REPO}.git"
-          git clone --depth 1 --branch "${GITOPS_BRANCH}" "${AUTH_URL}" "${REPO_DIR}"
-
-          TARGET_COMPOSE="${REPO_DIR}/${COMPOSE_FILE}"
-          if [[ ! -f "${TARGET_COMPOSE}" ]]; then
-            echo "::error::Compose file '${COMPOSE_FILE}' not found in GitOps repository."
-            {
-              echo "## 🦎 Komodo GitOps Deployment Summary"
-              echo ""
-              echo "❌ \`${COMPOSE_FILE}\` does not exist in \`${GITOPS_REPO}\` on \`${GITOPS_BRANCH}\`, so nothing was committed and the stack is unchanged. These are at the repository root:"
-              echo ""
-              echo '```'
-              ls -1 "${REPO_DIR}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          CURRENT_IMAGE="$(yq -r "${YQ_PATH}" "${TARGET_COMPOSE}" 2>/dev/null || echo "")"
-          echo "Current image: ${CURRENT_IMAGE:-<empty>}"
-          echo "New image:     ${NEW_IMAGE}"
-
-          yq -i "${YQ_PATH} = \"${NEW_IMAGE}\"" "${TARGET_COMPOSE}"
-
-          COMMIT_SHA=""
-          if git -C "${REPO_DIR}" diff --quiet; then
-            echo "No changes detected in ${COMPOSE_FILE}. Image is already up to date."
-            COMMIT_SHA="$(git -C "${REPO_DIR}" rev-parse HEAD)"
-          else
-            echo "Changes detected:"
-            git -C "${REPO_DIR}" diff "${COMPOSE_FILE}"
-
-            git -C "${REPO_DIR}" config user.name "github-actions[bot]"
-            git -C "${REPO_DIR}" config user.email "github-actions[bot]@users.noreply.github.com"
-            git -C "${REPO_DIR}" add "${COMPOSE_FILE}"
-            git -C "${REPO_DIR}" commit -m "chore(gitops): update ${STACK_NAME} image to ${NEW_IMAGE} [skip ci]"
-            git -C "${REPO_DIR}" push origin "${GITOPS_BRANCH}"
-            COMMIT_SHA="$(git -C "${REPO_DIR}" rev-parse HEAD)"
-            echo "Pushed GitOps commit ${COMMIT_SHA} to ${GITOPS_BRANCH}."
-          fi
-
-          echo "commit_sha=${COMMIT_SHA}" >> "${GITHUB_OUTPUT}"
-          echo "previous_image=${CURRENT_IMAGE}" >> "${GITHUB_OUTPUT}"
-          echo "NEW_IMAGE_REF=${NEW_IMAGE}" >> "${GITHUB_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/commit.sh"
 
       - name: Trigger Komodo Stack Deployment
         id: trigger_komodo
@@ -281,54 +216,7 @@ jobs:
           KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
           KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
           STACK_NAME: ${{ inputs.komodo-stack-name }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${KOMODO_API_KEY:-}" || -z "${KOMODO_API_SECRET:-}" ]]; then
-            echo "::error::KOMODO_API_KEY and KOMODO_API_SECRET are required to trigger deployment."
-            {
-              echo "## 🦎 Komodo GitOps Deployment Summary"
-              echo ""
-              echo "❌ \`KOMODO_API_KEY\` / \`KOMODO_API_SECRET\` are not configured, so \`${STACK_NAME}\` was never told to redeploy — but the GitOps commit has already been pushed, so the compose file now names an image the running stack is not using."
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          echo "Triggering redeployment for Komodo stack '${STACK_NAME}'..."
-
-          BODY_FILE="${RUNNER_TEMP}/komodo-update-stack.json"
-          HTTP_CODE="$(curl -sSL --location \
-            --output "${BODY_FILE}" --write-out '%{http_code}' \
-            --request POST "${KOMODO_SERVER}/api/v1/update-stack" \
-            --header "Content-Type: application/json" \
-            --header "x-api-key: ${KOMODO_API_KEY}" \
-            --header "x-api-secret: ${KOMODO_API_SECRET}" \
-            --data "{\"name\": \"${STACK_NAME}\"}")"
-
-          RESPONSE="$(cat "${BODY_FILE}" 2>/dev/null || echo "")"
-          echo "Komodo update-stack response (HTTP ${HTTP_CODE}): ${RESPONSE}"
-
-          if [[ ! "${HTTP_CODE}" =~ ^2[0-9][0-9]$ ]]; then
-            echo "::error::Komodo rejected the redeployment request for stack '${STACK_NAME}' (HTTP ${HTTP_CODE})."
-            {
-              echo "## 🦎 Komodo GitOps Deployment Summary"
-              echo ""
-              echo "❌ Komodo refused to redeploy \`${STACK_NAME}\` with HTTP ${HTTP_CODE}. The GitOps commit is already pushed, so the compose file names an image the running stack is not using. Komodo replied:"
-              echo ""
-              echo '```'
-              head -c 2000 "${BODY_FILE}" 2>/dev/null || echo "(empty response body)"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          EXEC_ID="$(jq -r '.execution_id // .id // .data.execution_id // empty' <<<"${RESPONSE}" 2>/dev/null || echo "")"
-          if [[ -z "${EXEC_ID}" ]]; then
-            echo "::notice::Komodo accepted the request (HTTP ${HTTP_CODE}) without an execution id; it will be treated as asynchronous."
-          fi
-
-          echo "execution_id=${EXEC_ID}" >> "${GITHUB_OUTPUT}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/trigger.sh"
 
       - name: Poll Komodo Execution Status
         id: poll_komodo
@@ -338,63 +226,7 @@ jobs:
           KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
           STACK_NAME: ${{ inputs.komodo-stack-name }}
           EXEC_ID: ${{ steps.trigger_komodo.outputs.execution_id }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${EXEC_ID}" ]]; then
-            echo "⚠️ Komodo accepted the request without an execution ID; completion cannot be verified."
-            echo "status=ACCEPTED_ASYNC" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          SYNC_TIMEOUT=300
-          echo "Tracking Komodo execution: ${EXEC_ID} (timeout: ${SYNC_TIMEOUT}s)..."
-          START_TIME=$(date +%s)
-          POLL_INTERVAL=10
-          STATUS="UNKNOWN"
-
-          while true; do
-            STATUS_RESP=$(curl -fsSL --location \
-              --request GET "${KOMODO_SERVER}/api/v1/execution/${EXEC_ID}" \
-              --header "x-api-key: ${KOMODO_API_KEY}" \
-              --header "x-api-secret: ${KOMODO_API_SECRET}" 2>/dev/null || echo "{}")
-
-            STATUS=$(echo "${STATUS_RESP}" | jq -r '.status // .data.status // empty' 2>/dev/null || echo "UNKNOWN")
-            echo "Deployment status: ${STATUS}"
-
-            case "${STATUS}" in
-              SUCCESS|success|Completed|completed)
-                echo "✅ Komodo stack '${STACK_NAME}' deployed successfully."
-                echo "status=SUCCESS" >> "${GITHUB_OUTPUT}"
-                break
-                ;;
-              FAILED|failed|Error|error)
-                echo "::error::Komodo deployment failed. Response: ${STATUS_RESP}"
-                echo "status=FAILED" >> "${GITHUB_OUTPUT}"
-                {
-                  echo "## 🦎 Komodo GitOps Deployment Summary"
-                  echo ""
-                  echo "❌ Komodo execution \`${EXEC_ID}\` for \`${STACK_NAME}\` reported \`${STATUS}\`. Komodo replied:"
-                  echo ""
-                  echo '```json'
-                  head -c 2000 <<< "${STATUS_RESP}"
-                  echo '```'
-                  echo ""
-                } >> "${GITHUB_STEP_SUMMARY}"
-                exit 1
-                ;;
-              *)
-                CURRENT_TIME=$(date +%s)
-                ELAPSED=$((CURRENT_TIME - START_TIME))
-                if [[ ${ELAPSED} -ge ${SYNC_TIMEOUT} ]]; then
-                  echo "::error::Komodo deployment timed out after ${SYNC_TIMEOUT}s."
-                  echo "status=TIMEOUT" >> "${GITHUB_OUTPUT}"
-                  exit 1
-                fi
-                echo "Waiting ${POLL_INTERVAL}s... (${ELAPSED}s elapsed)"
-                sleep "${POLL_INTERVAL}"
-                ;;
-            esac
-          done
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/poll-status.sh"
 
       - name: Publish Komodo Deployment Summary
         if: always()
@@ -417,10 +249,16 @@ jobs:
             echo "| :--- | :--- |"
             echo "| **Environment** | \`${ENVIRONMENT}\` |"
             echo "| **Stack Name** | \`${STACK_NAME}\` |"
-            [[ -n "${PREVIOUS_IMAGE}" ]] && echo "| **Previous Image** | \`${PREVIOUS_IMAGE}\` |"
+            if [[ -n "${PREVIOUS_IMAGE}" ]]; then
+              echo "| **Previous Image** | \`${PREVIOUS_IMAGE}\` |"
+            fi
             echo "| **Deployed Image** | \`${DEPLOYED_IMAGE}\` |"
             echo "| **GitOps Repository** | \`${GITOPS_REPO}\` |"
-            [[ -n "${COMMIT_SHA}" ]] && echo "| **GitOps Commit** | \`${COMMIT_SHA}\` |"
-            [[ -n "${EXEC_ID}" ]] && echo "| **Komodo Execution ID** | \`${EXEC_ID}\` |"
+            if [[ -n "${COMMIT_SHA}" ]]; then
+              echo "| **GitOps Commit** | \`${COMMIT_SHA}\` |"
+            fi
+            if [[ -n "${EXEC_ID}" ]]; then
+              echo "| **Komodo Execution ID** | \`${EXEC_ID}\` |"
+            fi
             echo "| **Deployment Verdict** | **${VERDICT}** |"
           } >> "${GITHUB_STEP_SUMMARY}"

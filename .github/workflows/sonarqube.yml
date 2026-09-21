@@ -1,8 +1,5 @@
 name: Quality / SonarQube
 
-# Counterpart of the GitLab Sonarqube job. Runs in the SonarSource scanner image
-# and waits on the quality gate, so a failing gate fails the run.
-
 on:
   workflow_call:
     inputs:
@@ -53,6 +50,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Download Test & Coverage Reports
         continue-on-error: true
         uses: actions/download-artifact@v8
@@ -76,8 +81,12 @@ jobs:
         run: |
           set -euo pipefail
           MISSING=()
-          [[ -n "${SONAR_URL}" ]] || MISSING+=("vars.SONAR_URL")
-          [[ -n "${SONARQUBE_TOKEN}" ]] || MISSING+=("secrets.SONARQUBE_TOKEN")
+          if [[ -z "${SONAR_URL}" ]]; then
+            MISSING+=("vars.SONAR_URL")
+          fi
+          if [[ -z "${SONARQUBE_TOKEN}" ]]; then
+            MISSING+=("secrets.SONARQUBE_TOKEN")
+          fi
           if [[ ${#MISSING[@]} -gt 0 ]]; then
             echo "::error title=SonarQube::Missing configuration: ${MISSING[*]}"
             {
@@ -101,35 +110,7 @@ jobs:
           PROJECT_VERSION: ${{ inputs.project-version }}
           SUBPATH: ${{ inputs.project-path }}
           WAIT: ${{ inputs.wait-for-quality-gate }}
-        run: |
-          set -euo pipefail
-
-          PROJECT_KEY="${PROJECT_KEY_INPUT:-${VAR_PROJECT_KEY:-${GITHUB_REPOSITORY//\//_}}}"
-          if [[ -n "${SUBPATH}" && "${SUBPATH}" != "." ]]; then
-            SLUG="$(tr -c 'a-zA-Z0-9_.:-' '-' <<<"${SUBPATH}" | sed 's/-\+/-/g;s/^-//;s/-$//')"
-            PROJECT_KEY="${PROJECT_KEY}_${SLUG}"
-          fi
-          echo "Analysing as project key '${PROJECT_KEY}'."
-
-          SCANNER_ARGS=(
-            "-Dsonar.projectKey=${PROJECT_KEY}"
-            "-Dsonar.host.url=${SONAR_URL}"
-            "-Dsonar.token=${SONAR_TOKEN}"
-            "-Dsonar.qualitygate.wait=${WAIT}"
-            "-Dsonar.links.ci=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions"
-            "-Dsonar.links.scm=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          )
-          [[ -n "${PROJECT_VERSION}" ]] && SCANNER_ARGS+=("-Dsonar.projectVersion=${PROJECT_VERSION}")
-          [[ -f sonar.properties ]] && SCANNER_ARGS+=("-Dproject.settings=sonar.properties")
-
-          # Exported before the scanner runs: the summary needs the key even on failure.
-          echo "SONAR_PROJECT_KEY=${PROJECT_KEY}" >> "${GITHUB_ENV}"
-
-          set +e
-          sonar-scanner "${SCANNER_ARGS[@]}" 2>&1 | tee "${RUNNER_TEMP}/sonar-scanner.log"
-          SCANNER_RESULT="${PIPESTATUS[0]}"
-          set -e
-          exit "${SCANNER_RESULT}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/sonarqube/analysis.sh"
 
       - name: Refresh Cache Entry
         id: refresh
@@ -137,35 +118,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CACHE_KEY: sonar-${{ github.repository_id }}
-        run: |
-          set -euo pipefail
-
-          STAMP=".sonar/.cached-on"
-          TODAY="$(date -u +%Y-%m-%d)"
-
-          # The caches API matches `key` as a PREFIX, so filter for the exact key.
-          EXISTING="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" \
-            --jq "[.actions_caches[] | select(.key == \"${CACHE_KEY}\")] | length" 2>/dev/null || echo 0)"
-
-          if [[ "${EXISTING}" == "0" ]]; then
-            mkdir -p .sonar && echo "${TODAY}" > "${STAMP}"
-            echo "save=true" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          if [[ -f "${STAMP}" ]] && [[ "$(cat "${STAMP}")" == "${TODAY}" ]]; then
-            echo "Analysis cache was already refreshed today; keeping it."
-            echo "save=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          mkdir -p .sonar && echo "${TODAY}" > "${STAMP}"
-          if curl -sS -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -o /dev/null -w "%{http_code}" "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" | grep -qE "^(200|204)$"; then
-            echo "save=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "::warning title=Sonar cache::Could not replace '${CACHE_KEY}'. Grant 'actions: write' in the calling workflow to let it refresh."
-            echo "save=false" >> "${GITHUB_OUTPUT}"
-          fi
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/sonarqube/cache-refresh.sh"
 
       - name: Save Sonar Analysis Cache
         if: ${{ !cancelled() && steps.refresh.outputs.save == 'true'
@@ -182,35 +135,14 @@ jobs:
           DASHBOARD: ${{ vars.SONAR_EXTERNAL_URL || vars.SONAR_URL }}
         run: |
           set -euo pipefail
-          LOG="${RUNNER_TEMP}/sonar-scanner.log"
-          GATE="$(grep -aE 'QUALITY GATE STATUS|^\s*-\s' "${LOG}" 2>/dev/null | tail -n 12 || true)"
-          {
-            echo "### 🔍 SonarQube"
-            echo ""
-            case "${OUTCOME}" in
-              success) echo "✅ Analysis complete and the quality gate passed." ;;
-              failure) echo "❌ Analysis failed or the quality gate was not met." ;;
-              *)       echo "Status: ${OUTCOME}" ;;
-            esac
-            echo ""
-            # Unset when the run never got past configuration validation.
-            if [[ -n "${SONAR_PROJECT_KEY:-}" ]]; then
-              KEY_CELL="\`${SONAR_PROJECT_KEY}\`"
-              [[ -z "${DASHBOARD}" ]] || KEY_CELL="[${KEY_CELL}](${DASHBOARD}/dashboard?id=${SONAR_PROJECT_KEY})"
-              echo "| Property | Value |"
-              echo "|---|---|"
-              echo "| **Project key** | ${KEY_CELL} |"
-            fi
-            if [[ -n "${GATE}" ]]; then
+          SUMMARY_SCRIPT="${GITHUB_WORKSPACE}/.ci-library/scripts/sonarqube/summary.sh"
+          if [[ -f "${SUMMARY_SCRIPT}" ]]; then
+            bash "${SUMMARY_SCRIPT}"
+          else
+            {
+              echo "### 🔍 SonarQube"
               echo ""
-              echo '```'
-              echo "${GATE}"
-              echo '```'
-            elif [[ "${OUTCOME}" != "success" && -s "${LOG}" ]]; then
+              echo "❌ Status: ${OUTCOME}. The CI library checkout is unavailable, so no analysis detail could be collected."
               echo ""
-              echo '```'
-              tail -n 30 "${LOG}"
-              echo '```'
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi

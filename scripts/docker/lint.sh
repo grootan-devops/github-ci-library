@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=scripts/hadolint-ignores.sh
+# shellcheck source=scripts/docker/hadolint-ignores.sh
 source "${SCRIPT_DIR}/hadolint-ignores.sh"
 
 : "${DOCKERFILE:=Dockerfile}"

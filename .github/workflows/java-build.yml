@@ -1,7 +1,5 @@
 name: Java / Dependency, Build & Test
 
-# GitLab counterpart: Java:Dependency:Download -> Java:Build + Java:Test:Unit.
-
 on:
   workflow_call:
     inputs:
@@ -66,6 +64,14 @@ jobs:
         id: key
         run: echo "key=m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Restore Maven Repository
         id: cache
         uses: actions/cache/restore@v6
@@ -92,29 +98,15 @@ jobs:
       - name: Publish Dependency Summary
         if: always()
         env:
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          STACK_LABEL: "☕ Java dependencies"
+          OUTCOME: ${{ steps.resolve.outcome }}
           CACHE_KEY: ${{ steps.key.outputs.key }}
-          RESOLVE_OUTCOME: ${{ steps.resolve.outcome }}
-        run: |
-          set -euo pipefail
-
-          [[ "${RESOLVE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          CACHE_STATE="rebuilt — no entry matched"
-          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
-          {
-            echo "### ☕ Java dependencies"
-            echo ""
-            if [[ "${RESOLVE_OUTCOME}" == "success" ]]; then
-              echo "✅ Repository resolved offline. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}."
-            else
-              echo "❌ \`mvn dependency:go-offline\` failed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}. Maven reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/mvn-resolve.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          SUCCESS_MESSAGE: "Repository resolved offline."
+          RESOLVE_COMMAND: "mvn dependency:go-offline"
+          TOOL_LABEL: "Maven"
+          LOG_FILE: "mvn-resolve.log"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/dependency-summary.sh"
 
   build:
     name: Build
@@ -132,6 +124,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Export Build Environment
         if: ${{ inputs.build-env != '' }}
         env:
@@ -141,7 +141,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -174,33 +176,15 @@ jobs:
       - name: Publish Build Summary
         if: always()
         env:
+          STACK_LABEL: "Java"
+          TOOL_LABEL: "Maven"
           BUILD_COMMAND: ${{ inputs.build-command }}
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and the build never ran.
-          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          {
-            echo "### 📦 Java build"
-            echo ""
-            if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
-              echo "❌ \`${BUILD_COMMAND}\` failed. Maven reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            elif compgen -G "target/*.jar" > /dev/null || compgen -G "target/*.war" > /dev/null; then
-              echo "| Artifact | Size |"
-              echo "|---|---|"
-              for F in target/*.jar target/*.war; do
-                [[ -f "${F}" ]] || continue
-                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
-              done
-            else
-              echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote no JAR or WAR to \`target/\`, so the \`java-artifacts\` artifact will be empty."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          ARTIFACT_NAME: "java-artifacts"
+          ARTIFACT_DIR: "target"
+          ARTIFACT_GLOB: "target/*.jar target/*.war"
+          EMPTY_PHRASE: "no JAR or WAR"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/summary.sh"
 
   test:
     name: Unit Test
@@ -237,7 +221,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -293,4 +279,4 @@ jobs:
           REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ inputs.test-report-glob }}"
           JOB_SUMMARY: "true"
           FAIL_ON_FAILURE: "true"
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

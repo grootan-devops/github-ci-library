@@ -1,11 +1,5 @@
 name: Release / Publish & Notify
 
-# Counterpart of the GitLab Release:Upload -> Release -> Notification chain.
-# The release is assembled from the candidate run's artifacts, not a fresh build.
-#
-# A reusable workflow cannot declare `concurrency:`, so the caller must set
-# `cancel-in-progress: false` or a cancelled run leaves a release part-published.
-
 on:
   workflow_call:
     inputs:
@@ -78,6 +72,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Download This Run's Artifacts
         continue-on-error: true
         uses: actions/download-artifact@v8
@@ -112,94 +114,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           ADDITIONAL_RELEASE_ARTIFACT: ${{ inputs.additional-artifacts }}
-        run: |
-          set -euo pipefail
-          if [[ -d _artifacts ]]; then
-            cp -a _artifacts/. . 2>/dev/null || true
-          fi
-
-          mkdir -p _release_assets
-
-          IMAGE_README=IMAGE_README.md
-          CHART_README=CHART_README.md
-          TF_README=TF_README.md
-
-          for FILE in IMAGE_INFO.md IMAGE_CVE.md; do
-            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${IMAGE_README}"
-          done
-          for FILE in CHART_INFO.md CHART_CVE.md; do
-            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${CHART_README}"
-          done
-          for FILE in TF_CVE.md; do
-            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${TF_README}"
-          done
-
-          : > "${CONSOLIDATED_README_FILE_NAME}"
-          for FILE in "${IMAGE_README}" "${CHART_README}" "${TF_README}" LICENSE_CVE.md SBOM_CVE.md; do
-            [[ -f "${FILE}" ]] && cat "${FILE}" >> "${CONSOLIDATED_README_FILE_NAME}"
-          done
-
-          : > "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}"
-          for FILE in "${RELEASE_CHANGELOG_FILE_NAME}" "${RELEASE_MIGRATION_FILE_NAME}" "${CONSOLIDATED_README_FILE_NAME}"; do
-            if [[ -f "${FILE}" && -s "${FILE}" ]]; then
-              {
-                printf '\n'
-                cat "${FILE}"
-                printf '\n'
-              } >> "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}"
-            fi
-          done
-
-          if [[ ! -s "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}" ]]; then
-            echo "::warning title=Release::No changelog, migration guide or scan report was available. The release notes will be minimal."
-            echo "Release ${TAG}" > "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}"
-          fi
-
-          stage() {
-            if [[ -f "${1}" ]]; then
-              cp "${1}" _release_assets/
-              echo "  + ${1}"
-            fi
-          }
-
-          shopt -s nullglob
-          TRIVY_REPORTS=( ./*_trivy_scan_report.* )
-          shopt -u nullglob
-          if [[ ${#TRIVY_REPORTS[@]} -gt 0 ]]; then
-            tar -czf "${TRIVY_SCAN_REPORT_FILE_NAME}" "${TRIVY_REPORTS[@]}"
-            stage "${TRIVY_SCAN_REPORT_FILE_NAME}"
-          fi
-
-          stage installed_pkgs.txt
-          stage sbom.cdx.json
-          stage "${RELEASE_MIGRATION_FILE_NAME}"
-          stage "${RELEASE_CHANGELOG_FILE_NAME}"
-
-          shopt -s nullglob
-          for CHART_TGZ in ./*.tgz; do
-            cp "${CHART_TGZ}" _release_assets/
-            echo "  + ${CHART_TGZ}"
-          done
-          shopt -u nullglob
-
-          if [[ -d "${TEST_REPORT_DIR}" ]]; then
-            tar -czf "${TEST_REPORT_DIR}.tar.gz" "${TEST_REPORT_DIR}"
-            stage "${TEST_REPORT_DIR}.tar.gz"
-          fi
-
-          for ITEM in ${ADDITIONAL_RELEASE_ARTIFACT}; do
-            if [[ -f "${ITEM}" ]]; then
-              stage "${ITEM}"
-            elif [[ -d "${ITEM}" ]]; then
-              TAR_FILE="$(basename "${ITEM}").tar.gz"
-              tar -czf "${TAR_FILE}" -C "$(dirname "${ITEM}")" "$(basename "${ITEM}")"
-              stage "${TAR_FILE}"
-            else
-              echo "::warning title=Release::Additional artifact '${ITEM}' does not exist."
-            fi
-          done
-
-          echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') release assets."
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/release/consolidate-assets.sh"
 
       - name: Publish Collection Summary
         if: always()
@@ -236,6 +151,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Download Release Payload
         continue-on-error: true
         uses: actions/download-artifact@v8
@@ -250,81 +173,7 @@ jobs:
           TAG: ${{ inputs.tag }}
           DRAFT: ${{ inputs.draft }}
           PRERELEASE: ${{ inputs.prerelease }}
-        run: |
-          set -euo pipefail
-
-          NOTES_FILE=payload/CONSOLIDATED_RELEASE_CHANGELOG.md
-          if [[ ! -s "${NOTES_FILE}" ]]; then
-            echo "::warning title=Release::No consolidated release notes were collected. Publishing '${TAG}' with a minimal body."
-            mkdir -p payload
-            echo "Release ${TAG}" > "${NOTES_FILE}"
-          fi
-
-          NOTES_LIMIT=124000
-          NOTES_CHARS="$(wc -m < "${NOTES_FILE}" | tr -d ' ')"
-          if [[ "${NOTES_CHARS}" -gt "${NOTES_LIMIT}" ]]; then
-            echo "::warning title=Release::Release notes are ${NOTES_CHARS} characters, over GitHub's ${NOTES_LIMIT} limit. The body is truncated; the full notes stay attached as an asset."
-            TRUNCATED="${RUNNER_TEMP}/release-notes-truncated.md"
-            head -c "${NOTES_LIMIT}" "${NOTES_FILE}" | iconv -f utf-8 -t utf-8 -c > "${TRUNCATED}"
-            {
-              echo ""
-              echo "---"
-              echo ""
-              echo "> These notes were truncated at ${NOTES_LIMIT} characters, which is GitHub's"
-              echo "> limit for a release body. The complete text is attached to this release as"
-              echo "> \`$(basename "${NOTES_FILE}")\`."
-            } >> "${TRUNCATED}"
-            mkdir -p payload/_release_assets
-            cp -f "${NOTES_FILE}" "payload/_release_assets/$(basename "${NOTES_FILE}")" 2>/dev/null || true
-            NOTES_FILE="${TRUNCATED}"
-          fi
-
-          ARGS=(--repo "${GITHUB_REPOSITORY}"
-                --title "Release ${TAG}"
-                --notes-file "${NOTES_FILE}"
-                --target "${GITHUB_SHA}")
-          if [[ "${DRAFT}" == "true" ]]; then ARGS+=(--draft); fi
-          if [[ "${PRERELEASE}" == "true" ]]; then ARGS+=(--prerelease); fi
-
-          shopt -s nullglob
-          ASSETS=()
-          for ASSET in payload/_release_assets/*; do
-            if [[ "$(basename "${ASSET}")" == "$(basename "${RELEASE_CHANGELOG_FILE_NAME}")" ]]; then
-              continue
-            fi
-            ASSETS+=("${ASSET}")
-          done
-          shopt -u nullglob
-
-          # Re-running an existing release updates it rather than failing.
-          set +e
-          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            echo "::notice title=Release::'${TAG}' already exists. Updating it."
-            GH_OUTPUT="$( { gh release edit "${TAG}" "${ARGS[@]}" &&
-              { [[ ${#ASSETS[@]} -eq 0 ]] || gh release upload "${TAG}" "${ASSETS[@]}" --repo "${GITHUB_REPOSITORY}" --clobber ; } ; } 2>&1 )"
-          else
-            GH_OUTPUT="$(gh release create "${TAG}" "${ARGS[@]}" "${ASSETS[@]}" 2>&1)"
-          fi
-          GH_RESULT=$?
-          set -e
-
-          [[ -n "${GH_OUTPUT}" ]] && echo "${GH_OUTPUT}"
-          if [[ "${GH_RESULT}" -ne 0 ]]; then
-            echo "::error title=Release::gh refused to publish '${TAG}'."
-            {
-              echo "## 🚀 Release ${TAG}"
-              echo ""
-              echo "❌ The release was not published. \`gh\` reported:"
-              echo ""
-              echo '```'
-              tail -n 30 <<< "${GH_OUTPUT}"
-              echo '```'
-              echo ""
-              echo "The git tag may already have been created by the release guards; check before re-running."
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit "${GH_RESULT}"
-          fi
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/release/publish.sh"
 
       - name: Publish Release Summary
         if: ${{ always() && steps.gh_release.outcome == 'success' }}
@@ -341,8 +190,9 @@ jobs:
               echo "| Asset | Size |"
               echo "|---|---|"
               for F in payload/_release_assets/*; do
-                [[ -f "${F}" ]] || continue
-                echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
+                if [[ -f "${F}" ]]; then
+                  echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
+                fi
               done
             fi
             echo ""
@@ -383,7 +233,7 @@ jobs:
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
           RELEASE_CHANGELOG_CARD_FILE_NAME: payload/RELEASE_CHANGELOG_CARD.json
           RELEASE_CHANGELOG_FILE_NAME: payload/_release_assets/RELEASE_CHANGELOG.md
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/teams-notify.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/notify/teams.sh"
 
       - name: Upload Notification Payload
         if: ${{ !cancelled() }}

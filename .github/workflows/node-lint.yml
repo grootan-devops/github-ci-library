@@ -1,7 +1,5 @@
 name: Node / Lint
 
-# GitLab counterpart: Node:Lint. Biome is the only formatter and linter, so biome.json is required.
-
 on:
   workflow_call:
     inputs:
@@ -36,32 +34,16 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Verify Biome Configuration
-        run: |
-          set -euo pipefail
-          if [[ -f biome.json ]]; then
-            echo "biome.json found."
-            exit 0
-          fi
-          echo "::error title=Biome::biome.json not found in ${PROJECT_PATH}. Create it at the project root."
-          {
-            echo "### 📗 Node lint: biome"
-            echo ""
-            echo "❌ \`biome.json\` is missing. Create it at the project root:"
-            echo ""
-            echo '```json'
-            echo '{'
-            # shellcheck disable=SC2016 # $schema is a JSON key, not a shell variable
-            echo '  "$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",'
-            echo '  "formatter": { "lineWidth": 320 },'
-            echo '  "files": {'
-            echo '    "includes": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx", "**/*.json", "**/*.html", "**/*.css", "**/*.scss", "!!node_modules", "!!dist", "!!coverage"]'
-            echo '  }'
-            echo '}'
-            echo '```'
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
-          exit 1
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/node-biome-config.sh"
 
       - name: Restore npm Cache
         uses: actions/cache/restore@v6
@@ -83,41 +65,7 @@ jobs:
         if: always()
         env:
           OUTCOME: ${{ steps.biome.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and Biome never ran.
-          [[ "${OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          TALLY="$(grep -E '^(Checked|Found|Fixed|Skipped) ' "${BIOME_REPORT}" 2>/dev/null | tail -n 5 || true)"
-          {
-            echo "### 📗 Node lint: biome"
-            echo ""
-            if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ No diagnostics."
-            elif [[ -s "${BIOME_REPORT}" ]]; then
-              echo "❌ Biome reported diagnostics."
-            else
-              echo "❌ Biome exited \`${OUTCOME}\` without writing a report — it did not get as far as checking anything."
-            fi
-            if [[ -n "${TALLY}" ]]; then
-              echo ""
-              echo '```'
-              echo "${TALLY}"
-              echo '```'
-            fi
-            if [[ "${OUTCOME}" != "success" && -s "${BIOME_REPORT}" ]]; then
-              echo ""
-              echo "<details><summary>Biome diagnostics</summary>"
-              echo ""
-              echo '```'
-              tail -c 60000 "${BIOME_REPORT}"
-              echo '```'
-              echo ""
-              echo "</details>"
-              echo ""
-              echo "Every diagnostic is in the \`node-biome-report\` artifact."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/node-summary.sh"
 
       - name: Upload Biome Report
         if: ${{ !cancelled() }}

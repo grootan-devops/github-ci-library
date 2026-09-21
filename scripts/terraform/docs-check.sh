@@ -38,7 +38,9 @@ check_dir() {
 
 if [[ -d modules ]]; then
   for DIR in modules/*; do
-    [[ -d "${DIR}" ]] || continue
+    if [[ ! -d "${DIR}" ]]; then
+      continue
+    fi
     check_dir "${DIR}"
   done
 fi

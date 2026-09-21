@@ -1,10 +1,5 @@
 name: Terraform / Module Test
 
-# Counterpart of the GitLab Terraform:Module:Test jobs: destroy runs when the
-# test fails or is cancelled, so real infrastructure is not left behind. The
-# caller must set `cancel-in-progress: false`, or a superseded run is cancelled
-# before teardown can claim a runner and the fixtures stay provisioned.
-
 on:
   workflow_call:
     inputs:
@@ -84,6 +79,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Run Module Test Suite
         env:
           TF_TEST_TIMEOUT: ${{ inputs.test-timeout }}
@@ -109,39 +112,7 @@ jobs:
         if: always()
         env:
           OUTCOME: ${{ job.status }}
-        run: |
-          set -euo pipefail
-          LOG="tests/${TF_LOG_FILE_NAME}"
-          TALLY="$(grep -aE '^(--- FAIL|--- PASS|FAIL|ok|PASS)' "${LOG}" 2>/dev/null | tail -n 15 || true)"
-          {
-            echo "### 🌍 Terraform module test"
-            echo ""
-            case "${OUTCOME}" in
-              success)   echo "✅ Passed." ;;
-              failure)   echo "❌ Failed — the destroy job will tear down anything the test provisioned." ;;
-              cancelled) echo "🚫 Cancelled — the destroy job will tear down anything the test provisioned." ;;
-              *)         echo "Status: ${OUTCOME}" ;;
-            esac
-            if [[ -n "${TALLY}" ]]; then
-              echo ""
-              echo '```'
-              echo "${TALLY}"
-              echo '```'
-            fi
-            if [[ "${OUTCOME}" != "success" && -s "${LOG}" ]]; then
-              echo ""
-              echo "<details><summary>Last of the test transcript</summary>"
-              echo ""
-              echo '```'
-              tail -n 50 "${LOG}"
-              echo '```'
-              echo ""
-              echo "</details>"
-              echo ""
-              echo "The whole transcript is \`tf_test.log\` in the \`terraform-test-artifacts\` artifact."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform/test-summary.sh"
 
   destroy:
     name: Test Teardown

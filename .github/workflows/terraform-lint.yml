@@ -1,9 +1,5 @@
 name: Terraform / Init, Validate & Lint
 
-# Counterpart of the GitLab Terraform:Init/Validate/Lint/Check:README jobs.
-# Init runs once; validate and tflint then run in parallel behind it. The docs
-# check reads only the sources, so it runs beside init rather than behind it.
-
 on:
   workflow_call:
     inputs:
@@ -251,4 +247,4 @@ jobs:
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
       - name: Check Generated Documentation
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform-docs-check.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform/docs-check.sh"

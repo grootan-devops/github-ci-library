@@ -118,6 +118,9 @@ on:
       GITOPS_TOKEN:
         required: false
         description: "Token for the GitOps repository. Falls back to GITHUB_TOKEN."
+      CI_LIBRARY_TOKEN:
+        required: false
+        description: "Token used to check out this CI library. Falls back to GITHUB_TOKEN."
 
 env:
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
@@ -169,125 +172,24 @@ jobs:
       manifest-file: ${{ steps.resolve.outputs.manifest_file }}
 
     steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Resolve Deployment Target
         id: resolve
-        run: |
-          set -euo pipefail
-
-          refuse() {
-            {
-              echo "### 🔎 Deployment prerequisites"
-              echo ""
-              echo "❌ Nothing was deployed to **${ENVIRONMENT}**: ${1}"
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          }
-
-          MISSING=()
-          [[ -z "${ARGOCD_APP_NAME}" ]] && MISSING+=("argocd-app-name")
-          [[ -z "${ARGOCD_SERVER}" ]] && MISSING+=("argocd-server (or vars.ARGOCD_SERVER)")
-          [[ -z "${ARGOCD_AUTH_TOKEN}" ]] && MISSING+=("ARGOCD_AUTH_TOKEN secret")
-          [[ -z "${GITOPS_REPO}" ]] && MISSING+=("gitops-repo")
-          [[ -z "${GITOPS_BRANCH}" ]] && MISSING+=("gitops-branch")
-          if [[ ${#MISSING[@]} -gt 0 ]]; then
-            echo "::error::[HARD FAILURE] Missing mandatory deployment configuration: ${MISSING[*]}"
-            {
-              echo "### 🔎 Deployment prerequisites"
-              echo ""
-              echo "❌ Nothing was deployed to **${ENVIRONMENT}**. These are not configured:"
-              echo ""
-              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
-              printf -- '- `%s`\n' "${MISSING[@]}"
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          RESOLVED_CHART_APP_YQ_PATH="${CHART_APP_YQ_PATH:-${APP_PATH:-}}"
-          MODE=""
-          if [[ -n "${CHART_VALUES_FILE}" || -n "${RESOLVED_CHART_APP_YQ_PATH}" ]]; then
-            MODE="helm"
-          fi
-          if [[ -n "${MANIFEST_FILE}" ]]; then
-            if [[ -n "${MODE}" ]]; then
-              echo "::error::[HARD FAILURE] Both Helm parameters (chart-values-file/chart-app-yq-path) and Manifest parameters (manifest-file) are configured. Choose either Helm or Manifest deployment."
-              refuse "both the Helm inputs (\`chart-values-file\`/\`chart-app-yq-path\`) and the manifest input (\`manifest-file\`) are set, so the target is ambiguous. Choose one."
-            fi
-            MODE="manifest"
-          fi
-
-          if [[ -z "${MODE}" ]]; then
-            echo "::error::[HARD FAILURE] Either chart-values-file (for Helm) or manifest-file (for Manifest) must be configured."
-            refuse "neither \`chart-values-file\` (Helm) nor \`manifest-file\` (Manifest) is set, so there is nothing to update in the GitOps repository."
-          fi
-
-          if [[ "${MODE}" == "helm" ]]; then
-            if [[ -z "${RESOLVED_CHART_APP_YQ_PATH}" ]]; then
-              echo "::error::[HARD FAILURE] chart-app-yq-path (or app-path) is mandatory when chart-values-file is specified."
-              refuse "\`chart-values-file\` is set but \`chart-app-yq-path\` is not, so there is no path in the values file to write the version to."
-            fi
-            if [[ -n "${IMAGE_VALUES_FILE}" ]]; then
-              HELM_IMG_MISSING=()
-              [[ -z "${IMAGE_REPO_YQ_PATH}" ]] && HELM_IMG_MISSING+=("image-repo-yq-path")
-              [[ -z "${IMAGE_TAG_YQ_PATH}" ]] && HELM_IMG_MISSING+=("image-tag-yq-path")
-              if [[ ${#HELM_IMG_MISSING[@]} -gt 0 ]]; then
-                echo "::error::[HARD FAILURE] When image-values-file is used with chart-values-file, the following are mandatory: ${HELM_IMG_MISSING[*]}"
-                refuse "\`image-values-file\` is set, which also requires: ${HELM_IMG_MISSING[*]}."
-              fi
-            fi
-          elif [[ "${MODE}" == "manifest" ]]; then
-            if [[ -z "${NEW_IMAGE_INPUT}" ]]; then
-              echo "::error::[HARD FAILURE] new-image is mandatory when manifest-file is specified."
-              refuse "\`manifest-file\` is set but \`new-image\` is not, so there is no image reference to write into the manifest."
-            fi
-          fi
-
-          TARGET_VERSION="${CHART_VERSION}"
-          CHART_REPO_URL="${REGISTRY_HOST}/${CHART_REPOSITORY}${DEV_SUFFIX}"
-          NEW_IMAGE="${NEW_IMAGE_INPUT:-${REGISTRY_HOST}/${IMAGE_REPOSITORY}${DEV_SUFFIX}:${TARGET_VERSION}}"
-
-          {
-            echo "gitops_branch=${GITOPS_BRANCH}"
-            echo "target_version=${TARGET_VERSION}"
-            echo "chart_repo_url=${CHART_REPO_URL}"
-            echo "new_image=${NEW_IMAGE}"
-            echo "mode=${MODE}"
-            echo "chart_values_file=${CHART_VALUES_FILE:-values.yaml}"
-            echo "chart_app_yq_path=${RESOLVED_CHART_APP_YQ_PATH}"
-            echo "manifest_file=${MANIFEST_FILE}"
-          } | tee -a "${GITHUB_OUTPUT}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/resolve-target.sh"
 
       - name: Validate Chart Exists In Registry
         if: ${{ steps.resolve.outputs.mode == 'helm' && inputs.chart-name != '' && inputs.chart-version != '' }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${REGISTRY_USERNAME}" || -z "${REGISTRY_PASSWORD}" ]]; then
-            echo "::error::REGISTRY_USERNAME / REGISTRY_PASSWORD are required to verify the chart before deploying."
-            exit 1
-          fi
-          printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
-
-          TARGET="oci://${{ steps.resolve.outputs.chart_repo_url }}/${CHART_NAME}"
-          VERSION="${{ steps.resolve.outputs.target_version }}"
-          if ! CHART_OUTPUT="$(helm show chart "${TARGET}" --version "${VERSION}" 2>&1)"; then
-            echo "${CHART_OUTPUT}" >&2
-            echo "::error::Helm chart '${CHART_NAME}' version '${VERSION}' does not exist at ${TARGET}. Refusing to commit a GitOps change that cannot resolve."
-            {
-              echo "### 🔎 Deployment prerequisites"
-              echo ""
-              echo "❌ Nothing was deployed: \`${TARGET}\` has no version \`${VERSION}\`, so the GitOps commit would point ArgoCD at a chart that does not exist. Helm reported:"
-              echo ""
-              echo '```'
-              tail -n 20 <<< "${CHART_OUTPUT}"
-              echo '```'
-              echo ""
-              echo "Check that the chart job published \`${VERSION}\` to the candidate repository before this deploy ran."
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          echo "Chart ${CHART_NAME}:${{ steps.resolve.outputs.target_version }} verified at ${TARGET}."
+        env:
+          CHART_REPO_URL: ${{ steps.resolve.outputs.chart_repo_url }}
+          TARGET_VERSION: ${{ steps.resolve.outputs.target_version }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validate-chart.sh"
 
       - name: Validate Image Exists In Registry
         if: steps.resolve.outputs.new_image != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != ''
@@ -326,24 +228,7 @@ jobs:
           NEW_IMAGE: ${{ steps.resolve.outputs.new_image }}
           CHART_REPO_URL: ${{ steps.resolve.outputs.chart_repo_url }}
           IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
-        run: |
-          set -euo pipefail
-          # Manifest mode resolves no chart; helm mode writes an image only when image-values-file is set.
-          WANT_CHART=false; [[ "${MODE}" == "helm" ]] && WANT_CHART=true
-          WANT_IMAGE=false; [[ "${MODE}" == "manifest" || -n "${IMAGE_VALUES_FILE}" ]] && WANT_IMAGE=true
-
-          {
-            echo "### 🔎 Deployment prerequisites"
-            echo ""
-            echo "✅ Verified in the registry — ready to deploy to **${ENVIRONMENT}** (${MODE} mode)."
-            echo ""
-            echo "| Property | Value |"
-            echo "|---|---|"
-            [[ "${WANT_CHART}" == "true" && -n "${VERSION}" ]] && echo "| **Chart version** | \`${VERSION}\` |"
-            [[ "${WANT_CHART}" == "true" ]] && echo "| **Chart repository** | \`${CHART_REPO_URL}\` |"
-            [[ "${WANT_IMAGE}" == "true" ]] && echo "| **Image** | \`${NEW_IMAGE}\` |"
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validation-summary.sh"
 
   gitops-commit:
     name: Update GitOps Repository
@@ -373,82 +258,29 @@ jobs:
           token: ${{ secrets.GITOPS_TOKEN || secrets.GITHUB_TOKEN }}
           path: gitops
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Update Version / Manifest Configurations
         id: update
         working-directory: gitops
-        run: |
-          set -euo pipefail
-
-          gitops_refuse() {
-            {
-              echo "### 🚢 GitOps commit"
-              echo ""
-              echo "❌ \`${GITOPS_REPO}\` was not updated: ${1}"
-              echo ""
-              echo '```'
-              echo "${2}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          }
-
-          MODE="${{ needs.validate.outputs.mode }}"
-          if [[ "${MODE}" == "manifest" ]]; then
-            MANIFEST_PATH="${{ needs.validate.outputs.manifest-file }}"
-            NEW_IMG="${{ needs.validate.outputs.new-image }}"
-            echo "Updating manifest ${MANIFEST_PATH} -> image = ${NEW_IMG}..."
-            if [[ ! -f "${MANIFEST_PATH}" ]]; then
-              echo "::error::Manifest file not found: ${MANIFEST_PATH}"
-              gitops_refuse "\`${MANIFEST_PATH}\` does not exist in the GitOps repository. These are at its root:" "$(ls -1)"
-            fi
-            PREVIOUS="$(yq -r '.spec.template.spec.containers[0].image // .spec.containers[0].image // ""' "${MANIFEST_PATH}" 2>/dev/null || echo "")"
-            yq eval '(.spec.template.spec.containers[0].image // .spec.containers[0].image) = "'"${NEW_IMG}"'"' -i "${MANIFEST_PATH}"
-            {
-              echo "previous=${PREVIOUS}"
-              echo "current=${NEW_IMG}"
-              echo "skip=false"
-              echo "commit_msg=chore(deploy): update ${MANIFEST_PATH} image to ${NEW_IMG} [skip ci]"
-            } >> "${GITHUB_OUTPUT}"
-          else
-            VALUES_PATH="${{ needs.validate.outputs.chart-values-file }}"
-            APP_PATH="${{ needs.validate.outputs.chart-app-yq-path }}"
-            TARGET_VERSION="${{ needs.validate.outputs.target-version }}"
-            CHART_REPO_URL="${{ needs.validate.outputs.chart-repo-url }}"
-            IMAGE_VALUES_FILE="${{ inputs.image-values-file }}"
-            IMAGE_REPO_YQ_PATH="${{ inputs.image-repo-yq-path }}"
-            IMAGE_TAG_YQ_PATH="${{ inputs.image-tag-yq-path }}"
-
-            if [[ ! -f "${VALUES_PATH}" ]]; then
-              echo "::error::Values file not found: ${VALUES_PATH}"
-              gitops_refuse "\`${VALUES_PATH}\` does not exist in the GitOps repository. These are at its root:" "$(ls -1)"
-            fi
-
-            echo "Updating ${CHART_NAME:-chart} (${APP_PATH}) to ${TARGET_VERSION} in ${VALUES_PATH}..."
-            PREVIOUS="$(yq -r "${APP_PATH}.chart.version // \"\"" "${VALUES_PATH}" 2>/dev/null || echo "")"
-            if [[ -n "${CHART_REPO_URL}" ]]; then
-              yq eval "${APP_PATH}.chart.repoURL = \"${CHART_REPO_URL}\"" -i "${VALUES_PATH}"
-            fi
-            yq eval "${APP_PATH}.chart.version = \"${TARGET_VERSION}\"" -i "${VALUES_PATH}"
-
-            if [[ -n "${IMAGE_VALUES_FILE}" ]]; then
-              if [[ ! -f "${IMAGE_VALUES_FILE}" ]]; then
-                echo "::error::Image values file not found: ${IMAGE_VALUES_FILE}"
-                gitops_refuse "\`${IMAGE_VALUES_FILE}\` does not exist in the GitOps repository. These are at its root:" "$(ls -1)"
-              fi
-              echo "Updating image repo (${IMAGE_REPO_YQ_PATH}) and tag (${IMAGE_TAG_YQ_PATH}) in ${IMAGE_VALUES_FILE}..."
-              yq eval "${IMAGE_REPO_YQ_PATH} = \"${CHART_REPO_URL}\"" -i "${IMAGE_VALUES_FILE}"
-              yq eval "${IMAGE_TAG_YQ_PATH} = \"${TARGET_VERSION}\"" -i "${IMAGE_VALUES_FILE}"
-            fi
-            {
-              echo "previous=${PREVIOUS}"
-              echo "current=${TARGET_VERSION}"
-              echo "skip=false"
-              echo "commit_msg=chore(deploy): update ${CHART_NAME:-workload} to ${TARGET_VERSION} [skip ci]"
-            } >> "${GITHUB_OUTPUT}"
-          fi
-
-          git --no-pager diff
+        env:
+          MODE: ${{ needs.validate.outputs.mode }}
+          MANIFEST_PATH: ${{ needs.validate.outputs.manifest-file }}
+          NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
+          VALUES_PATH: ${{ needs.validate.outputs.chart-values-file }}
+          APP_PATH: ${{ needs.validate.outputs.chart-app-yq-path }}
+          TARGET_VERSION: ${{ needs.validate.outputs.target-version }}
+          CHART_REPO_URL: ${{ needs.validate.outputs.chart-repo-url }}
+          IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
+          IMAGE_REPO_YQ_PATH: ${{ inputs.image-repo-yq-path }}
+          IMAGE_TAG_YQ_PATH: ${{ inputs.image-tag-yq-path }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/update-values.sh"
 
       - name: Commit and Push Changes
         id: commit
@@ -461,7 +293,7 @@ jobs:
           set -euo pipefail
 
           git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.email "github-actions-bot@users.noreply.github.com"
 
           COMMIT_MSG="${RAW_COMMIT_MSG}
 
@@ -492,30 +324,7 @@ jobs:
           PREVIOUS: ${{ steps.update.outputs.previous }}
           CURRENT: ${{ steps.update.outputs.current }}
           UPDATE_OUTCOME: ${{ steps.update.outcome }}
-        run: |
-          set -euo pipefail
-          # The update step already wrote its own section on a refusal.
-          {
-            echo "### 🚢 GitOps commit"
-            echo ""
-            if [[ "${OUTCOME}" != "success" && "${UPDATE_OUTCOME}" == "failure" ]]; then
-              exit 0
-            elif [[ "${OUTCOME}" != "success" ]]; then
-              echo "❌ \`${GITOPS_REPO}\` was not updated — the checkout or the push failed, so **${ENVIRONMENT} is still on \`${PREVIOUS:-its previous version}\`**. The failing step in the log says which."
-            elif [[ -z "${SHA}" ]]; then
-              echo "ℹ️ No change required — \`${GITOPS_REPO}\` already targets \`${VERSION}\`."
-            else
-              echo "| Property | Value |"
-              echo "|---|---|"
-              echo "| **Repository** | \`${GITOPS_REPO}\` |"
-              echo "| **Branch** | \`${BRANCH}\` |"
-              echo "| **Commit** | \`${SHA}\` |"
-              [[ -n "${PREVIOUS}" ]] && echo "| **Previous** | \`${PREVIOUS}\` |"
-              echo "| **Now** | \`${CURRENT}\` |"
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
-
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/commit-summary.sh"
   argocd-sync:
     name: Sync ArgoCD Application
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
@@ -536,6 +345,14 @@ jobs:
       SYNC_TIMEOUT: 600
 
     steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Cache ArgoCD CLI
         id: cache-argocd
         uses: actions/cache/restore@v6
@@ -558,81 +375,7 @@ jobs:
         id: sync
         env:
           EXPECTED_REVISION: ${{ needs.gitops-commit.outputs.commit-sha }}
-        run: |
-          set -uo pipefail
-
-          if [[ -z "${ARGOCD_AUTH_TOKEN}" ]]; then
-            echo "::error::ARGOCD_AUTH_TOKEN is not configured. Refusing to report a successful deployment without performing one."
-            {
-              echo "## 🚢 Deployment Summary"
-              echo ""
-              echo "❌ **${ENVIRONMENT} was not synced.** \`ARGOCD_AUTH_TOKEN\` is not configured, so no sync was attempted — but the GitOps commit has already been pushed, so ArgoCD will pick the change up on its own refresh interval rather than now."
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          OVERALL_HEALTH="Healthy"
-          OVERALL_SYNC="Synced"
-          FAILED_APPS=()
-
-          APP_ROWS="${RUNNER_TEMP}/argocd-apps.tsv"
-          : > "${APP_ROWS}"
-
-          for APP in ${ARGOCD_APP_NAME}; do
-            echo "=== ${APP} ==="
-
-            argocd app get "${APP}" --hard-refresh || true
-
-            SYNC_OK=true
-            if ! argocd app sync "${APP}" --async; then
-              echo "::error::Sync request failed for ${APP}."
-              SYNC_OK=false
-            fi
-
-            if [[ "${SYNC_OK}" == "true" ]]; then
-              if ! argocd app wait "${APP}" --health --sync --operation \
-                   --timeout "${SYNC_TIMEOUT}"; then
-                SYNC_OK=false
-              fi
-            fi
-
-            if [[ "${SYNC_OK}" != "true" ]]; then
-              FAILED_APPS+=("${APP}")
-              OVERALL_HEALTH="Unhealthy"
-              OVERALL_SYNC="OutOfSync"
-            fi
-
-            APP_JSON="$(argocd app get "${APP}" -o json 2>/dev/null || true)"
-            if [[ -n "${APP_JSON}" ]]; then
-              APP_SYNC="$(jq -r '.status.sync.status // "Unknown"' <<<"${APP_JSON}")"
-              APP_HEALTH="$(jq -r '.status.health.status // "Unknown"' <<<"${APP_JSON}")"
-              APP_REV="$(jq -r '.status.sync.revision // "" | .[0:7]' <<<"${APP_JSON}")"
-              APP_MSG="$(jq -r '.status.operationState.message // "" | gsub("\n"; " ") | .[0:120]' <<<"${APP_JSON}")"
-
-              FULL_REV="$(jq -r '.status.sync.revision // ""' <<<"${APP_JSON}")"
-              if [[ "${SYNC_OK}" == "true" && -n "${EXPECTED_REVISION}" && -n "${FULL_REV}" && "${FULL_REV}" != "${EXPECTED_REVISION}" ]]; then
-                echo "::error::${APP} is synced to ${FULL_REV:0:7}, not the revision this run pushed (${EXPECTED_REVISION:0:7})."
-                FAILED_APPS+=("${APP}")
-                OVERALL_SYNC="OutOfSync"
-                APP_MSG="synced to ${FULL_REV:0:7}, expected ${EXPECTED_REVISION:0:7}"
-              fi
-            else
-              APP_SYNC="Unknown"; APP_HEALTH="Unknown"; APP_REV=""; APP_MSG="could not read application state"
-            fi
-            printf '%s\t%s\t%s\t%s\t%s\n' "${APP}" "${APP_SYNC}" "${APP_HEALTH}" "${APP_REV}" "${APP_MSG}" >> "${APP_ROWS}"
-          done
-
-          {
-            echo "health=${OVERALL_HEALTH}"
-            echo "sync=${OVERALL_SYNC}"
-          } >> "${GITHUB_OUTPUT}"
-
-          if [[ ${#FAILED_APPS[@]} -gt 0 ]]; then
-            echo "::error::ArgoCD sync or health check failed for: ${FAILED_APPS[*]}"
-            exit 1
-          fi
-          echo "All applications are Synced and Healthy."
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/sync-wait.sh"
 
       - name: Publish Deployment Summary
         if: always()
@@ -645,45 +388,7 @@ jobs:
           BRANCH: ${{ needs.validate.outputs.gitops-branch }}
           COMMIT_SHA: ${{ needs.gitops-commit.outputs.commit-sha }}
           LIVE_URL: ${{ inputs.github-environment-url }}
-        run: |
-          set -euo pipefail
-          APP_ROWS="${RUNNER_TEMP}/argocd-apps.tsv"
-          # Manifest mode resolves no chart; helm mode writes an image only when image-values-file is set.
-          WANT_CHART=false; [[ "${MODE}" == "helm" ]] && WANT_CHART=true
-          WANT_IMAGE=false; [[ "${MODE}" == "manifest" || -n "${IMAGE_VALUES_FILE}" ]] && WANT_IMAGE=true
-
-          {
-            echo "## 🚢 Deployment Summary"
-            echo ""
-            echo "| Property | Value |"
-            echo "|---|---|"
-            echo "| **Environment** | \`${ENVIRONMENT}\` |"
-            # The per-application table below carries the names; list them here only when it never rendered.
-            [[ ! -s "${APP_ROWS}" ]] && echo "| **Applications** | \`${ARGOCD_APP_NAME}\` |"
-            [[ "${WANT_CHART}" == "true" && -n "${VERSION}" ]] && echo "| **Chart Version** | \`${VERSION}\` |"
-            [[ "${WANT_CHART}" == "true" ]] && echo "| **Chart repoURL** | \`${CHART_REPO_URL}\` |"
-            [[ "${WANT_IMAGE}" == "true" ]] && echo "| **Image** | \`${NEW_IMAGE}\` |"
-            echo "| **GitOps Branch** | \`${BRANCH}\` |"
-            echo "| **GitOps Commit** | \`${COMMIT_SHA:-no change}\` |"
-            if [[ -n "${LIVE_URL}" ]]; then
-              echo "| **Live URL** | [${LIVE_URL}](${LIVE_URL}) |"
-            fi
-
-            if [[ -s "${APP_ROWS}" ]]; then
-              echo ""
-              echo "### 📦 Applications"
-              echo ""
-              echo "| Application | Sync | Health | Revision | Message |"
-              echo "|---|:--:|:--:|---|---|"
-              while IFS=$'\t' read -r APP APP_SYNC APP_HEALTH APP_REV APP_MSG; do
-                [[ -z "${APP}" ]] && continue
-                case "${APP_SYNC}" in   Synced)  SYNC_ICON="✅ Synced" ;;   *) SYNC_ICON="❌ ${APP_SYNC}" ;; esac
-                case "${APP_HEALTH}" in Healthy) HEALTH_ICON="✅ Healthy" ;; *) HEALTH_ICON="❌ ${APP_HEALTH}" ;; esac
-                echo "| \`${APP}\` | ${SYNC_ICON} | ${HEALTH_ICON} | \`${APP_REV:-n/a}\` | ${APP_MSG:-—} |"
-              done < "${APP_ROWS}"
-            fi
-
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/summary.sh"
 
       - name: Save ArgoCD CLI Cache
         if: ${{ !cancelled() && steps.cache-argocd.outputs.cache-hit != 'true'

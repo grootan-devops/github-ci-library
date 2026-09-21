@@ -1,7 +1,5 @@
 name: Python / Lint
 
-# GitLab counterpart: Python:Lint:Ruff / :MyPy / :ISort / :PyCodeStyle — one matrix leg each.
-
 on:
   workflow_call:
     inputs:
@@ -87,8 +85,8 @@ jobs:
           LINTER: ${{ matrix.linter }}
         run: |
           set -euo pipefail
-          # shellcheck source=scripts/lint-summary.sh
-          source "${GITHUB_WORKSPACE}/.ci-library/scripts/lint-summary.sh"
+          # shellcheck source=scripts/lint/summary.sh
+          source "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/summary.sh"
           if ! uv run "${LINTER}" --version >/dev/null 2>&1; then
             echo "::error title=${LINTER}::Not available. Add it to the project's dev dependencies."
             # shellcheck disable=SC2016 # backticks are markdown, not command substitution

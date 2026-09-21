@@ -188,7 +188,7 @@ jobs:
           CONTAINER_CMD: ${{ inputs.container-cmd }}
         run: |
           set -uo pipefail
-          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah-build.sh" 2>&1 | tee "${RUNNER_TEMP}/buildah.log"
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/build.sh" 2>&1 | tee "${RUNNER_TEMP}/buildah.log"
           exit "${PIPESTATUS[0]}"
 
       - name: Push Image
@@ -198,39 +198,7 @@ jobs:
           REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
-        run: |
-          set -uo pipefail
-          {
-            podman login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}" &&
-            podman tag "${IMAGE_NAME}" "${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}" &&
-            podman push "${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
-          } 2>&1 | tee "${RUNNER_TEMP}/podman-push.log"
-          PUSH_RESULT="${PIPESTATUS[0]}"
-          [[ "${PUSH_RESULT}" -eq 0 ]] || exit "${PUSH_RESULT}"
-          set -euo pipefail
-
-          TARGET="${REGISTRY_HOST}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
-
-          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
-          DIGEST="$(crane digest "${TARGET}")"
-          if [[ ! "${DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error title=Image digest::The registry returned an invalid digest for ${TARGET}: ${DIGEST}"
-            exit 1
-          fi
-          REF="${REGISTRY_HOST}/${IMAGE_REPOSITORY}@${DIGEST}"
-          echo "IMAGE_REF_DIGEST=${REF}" >> "${GITHUB_OUTPUT}"
-
-          {
-            echo "### 🐳 Container Image"
-            echo ""
-            echo "| Property | Value |"
-            echo "|---|---|"
-            echo "| **Tag** | \`${TARGET}\` |"
-            echo "| **Digest** | \`${DIGEST}\` |"
-            echo "| **Pinned reference** | \`${REF}\` |"
-            echo ""
-          } > "${IMAGE_INFO_FILE_NAME}"
-          cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/push-image.sh"
 
       - name: Upload Package List
         if: ${{ !cancelled() }}
@@ -259,26 +227,10 @@ jobs:
           BASE_TAG: ${{ steps.base.outputs.tag }}
           REPO: ${{ inputs.image-repository }}
           TAG: ${{ inputs.image-tag }}
+          BASE_OUTCOME: ${{ steps.base.outcome }}
           BUILD_OUTCOME: ${{ steps.build.outcome }}
-        run: |
-          set -euo pipefail
-          if [[ "${BUILD_OUTCOME}" == "failure" ]]; then
-            STAGE="the buildah assembly"
-            LOG="${RUNNER_TEMP}/buildah.log"
-          else
-            STAGE="the push to the registry"
-            LOG="${RUNNER_TEMP}/podman-push.log"
-          fi
-          {
-            echo "### 🐳 Container Image"
-            echo ""
-            echo "❌ \`${REGISTRY_HOST}/${REPO}:${TAG}\` was not published: ${STAGE} failed. It was being assembled from \`${BASE_REPO:-unresolved}:${BASE_TAG:-unresolved}\`. No candidate exists for the scan or the promotion to consume."
-            echo ""
-            echo '```'
-            tail -n 50 "${LOG}" 2>/dev/null || echo "(the failing step ran before any output was captured)"
-            echo '```'
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/build-failure-summary.sh"
 
   promote:
     name: Promote
@@ -294,39 +246,26 @@ jobs:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
     steps:
-      # A skipped job reads as success to the caller's graph, so this refuses
-      # with a failing step rather than an `if:` condition.
+      # The working-directory default above points into the caller's tree, so
+      # that tree has to exist before the first run step. Without this checkout
+      # a monorepo child setting project-path aborts every step on a missing
+      # directory and the release is never promoted.
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Verify The Candidate Was Scanned
         env:
           REQUIRE_SCAN: ${{ inputs.require-scan }}
           SCAN_RESULT: ${{ inputs.scan-result }}
-        run: |
-          set -euo pipefail
-
-          if [[ "${REQUIRE_SCAN}" != "true" ]]; then
-            echo "::notice title=Promotion::require-scan is off; promoting without a scan verdict."
-            exit 0
-          fi
-
-          if [[ "${SCAN_RESULT}" == "success" ]]; then
-            echo "Candidate was scanned and the scan passed."
-            exit 0
-          fi
-
-          if [[ -z "${SCAN_RESULT}" ]]; then
-            echo "::error title=Promotion refused::No scan result was passed. The scan runs in your workflow, so this one cannot depend on it directly — pass the scan job's result through the 'scan-result' input, or set 'require-scan: false' if this artifact has no scan."
-            REASON="no \`scan-result\` was passed. The scan runs in your workflow, so this one cannot depend on it directly — pass the scan job's \`result\` through the \`scan-result\` input, or set \`require-scan: false\` if this artifact has no scan."
-          else
-            echo "::error title=Promotion refused::The scan did not succeed (result: ${SCAN_RESULT}). Refusing to promote an image that failed or skipped its scan."
-            REASON="the scan job reported \`${SCAN_RESULT}\`, not \`success\`. Fix the scan, or justify its findings in \`ignored-cves.yml\`, before promoting."
-          fi
-          {
-            echo "### 🚫 Promotion refused"
-            echo ""
-            echo "The candidate image has not been promoted: ${REASON}"
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
-          exit 1
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/verify-scanned.sh"
 
       - name: Promote Candidate Image To Production
         env:
@@ -336,81 +275,7 @@ jobs:
           CANDIDATE_TAG: ${{ inputs.candidate-tag }}
           DEV_REPOSITORY: ${{ inputs.image-dev-repository }}
           PROD_REPOSITORY: ${{ inputs.image-repository }}
-        run: |
-          set -euo pipefail
-          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
-
-          DEV_IMAGE="${REGISTRY_HOST}/${DEV_REPOSITORY}"
-          PROD_IMAGE="${REGISTRY_HOST}/${PROD_REPOSITORY}"
-          SOURCE=""
-
-          if [[ -n "${CANDIDATE_TAG}" ]] && crane manifest "${DEV_IMAGE}:${CANDIDATE_TAG}" >/dev/null 2>&1; then
-            SOURCE="${DEV_IMAGE}:${CANDIDATE_TAG}"
-          else
-            RC_TAG="$(crane ls "${DEV_IMAGE}" 2>/dev/null | grep -E "^${TAG//./\\.}-" | sort -V | tail -n1 || true)"
-            if [[ -n "${RC_TAG}" ]] && crane manifest "${DEV_IMAGE}:${RC_TAG}" >/dev/null 2>&1; then
-              SOURCE="${DEV_IMAGE}:${RC_TAG}"
-            elif crane manifest "${DEV_IMAGE}:${TAG}" >/dev/null 2>&1; then
-              SOURCE="${DEV_IMAGE}:${TAG}"
-            fi
-          fi
-
-          if [[ -z "${SOURCE}" ]]; then
-            echo "::error title=Image promote::No candidate image found in ${DEV_IMAGE} for ${TAG}."
-            {
-              echo "### 🐳 Container Image"
-              echo ""
-              echo "❌ \`${TAG}\` was not promoted: no candidate in \`${DEV_IMAGE}\` matched \`${CANDIDATE_TAG:-${TAG}-*}\`. The production tag is unchanged."
-              echo ""
-              echo "Tags that do exist in the candidate repository:"
-              echo ""
-              echo '```'
-              crane ls "${DEV_IMAGE}" 2>&1 | tail -n 20 || echo "(the candidate repository could not be listed either)"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          SOURCE_DIGEST="$(crane digest "${SOURCE}")"
-          echo "📦 Promoting ${SOURCE} (${SOURCE_DIGEST}) to ${PROD_IMAGE}:${TAG}"
-          if ! MUTATE_OUTPUT="$(crane mutate "${SOURCE}" --label "org.opencontainers.image.version=${TAG}" --tag "${PROD_IMAGE}:${TAG}" 2>&1)"; then
-            echo "${MUTATE_OUTPUT}" >&2
-            echo "::error title=Image promote::${PROD_IMAGE}:${TAG} was refused by the registry."
-            {
-              echo "### 🐳 Container Image"
-              echo ""
-              echo "❌ \`${PROD_IMAGE}:${TAG}\` was refused. The scanned candidate \`${SOURCE}\` (\`${SOURCE_DIGEST}\`) is unchanged in the dev repository, so a re-run can promote it once this is fixed. crane reported:"
-              echo ""
-              echo '```'
-              tail -n 30 <<< "${MUTATE_OUTPUT}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          echo "${MUTATE_OUTPUT}"
-          crane tag "${PROD_IMAGE}:${TAG}" latest
-          MAJOR="$(grep -Eo '^[0-9]+' <<<"${TAG}" || true)"
-          MINOR="$(grep -Eo '^[0-9]+\.[0-9]+' <<<"${TAG}" || true)"
-          [[ -n "${MAJOR}" ]] && crane tag "${PROD_IMAGE}:${TAG}" "${MAJOR}"
-          [[ -n "${MINOR}" ]] && crane tag "${PROD_IMAGE}:${TAG}" "${MINOR}"
-
-          PROD_DIGEST="$(crane digest "${PROD_IMAGE}:${TAG}")"
-          {
-            echo "### 🐳 Container Image"
-            echo ""
-            echo "| Property | Value |"
-            echo "|---|---|"
-            echo "| **Promoted from** | \`${SOURCE}\` |"
-            echo "| **Released as** | \`${PROD_IMAGE}:${TAG}\` |"
-            echo "| **Digest** | \`${PROD_DIGEST}\` |"
-            # `crane mutate` rewrites the version label, so the scanned
-            # candidate's digest differs from the released one by design.
-            echo "| **Scanned candidate digest** | \`${SOURCE_DIGEST}\` |"
-            echo ""
-          } > "${IMAGE_INFO_FILE_NAME}"
-          cat "${IMAGE_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/promote-image.sh"
 
       - name: Upload Image Info
         if: ${{ !cancelled() }}

@@ -11,7 +11,9 @@ run_linted() {
   RESULT=$?
   set -e
 
-  [[ -n "${OUTPUT}" ]] && echo "${OUTPUT}"
+  if [[ -n "${OUTPUT}" ]]; then
+    echo "${OUTPUT}"
+  fi
 
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     {

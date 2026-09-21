@@ -1,7 +1,5 @@
 name: Go / Lint
 
-# GitLab counterpart: Go:Fmt, Go:Vet, Go:Lint, Go:Security:Scan — one matrix leg each.
-
 on:
   workflow_call:
     inputs:
@@ -69,48 +67,4 @@ jobs:
         env:
           LINTER: ${{ matrix.linter }}
           GOLANGCI_TIMEOUT: ${{ inputs.golangci-timeout }}
-        run: |
-          set -euo pipefail
-          # shellcheck source=scripts/lint-summary.sh
-          source "${GITHUB_WORKSPACE}/.ci-library/scripts/lint-summary.sh"
-          case "${LINTER}" in
-            fmt)
-              go fmt ./...
-              DRIFT="$(git --no-pager diff)"
-              if [[ -n "${DRIFT}" ]]; then
-                echo "${DRIFT}"
-                echo "::error title=go fmt::Formatting drift. Run 'go fmt ./...' and 'go mod tidy' locally and push the result."
-                {
-                  echo "### 🐹 Go lint: fmt"
-                  echo ""
-                  echo "❌ \`go fmt ./...\` rewrote these files, so the committed source is not gofmt-clean:"
-                  echo ""
-                  echo '```'
-                  git --no-pager diff --stat
-                  echo '```'
-                  echo ""
-                  echo "Run \`go fmt ./...\` and \`go mod tidy\` locally and push the result."
-                  echo ""
-                } >> "${GITHUB_STEP_SUMMARY}"
-                exit 1
-              fi
-              echo "Formatting and dependency check passed."
-              printf '### 🐹 Go lint: fmt\n\n✅ Already gofmt-clean.\n\n' >> "${GITHUB_STEP_SUMMARY}"
-              ;;
-            vet)
-              bash "${GITHUB_WORKSPACE}/.ci-library/scripts/go-vet.sh"
-              ;;
-            golangci-lint)
-              run_linted "🐹 Go lint: golangci-lint" golangci-lint run --timeout "${GOLANGCI_TIMEOUT}"
-              ;;
-            gosec)
-              run_linted "🐹 Go lint: gosec" gosec -exclude-generated -exclude-dir=.go-cache ./...
-              ;;
-            *)
-              echo "::error title=Lint::Unknown Go check '${LINTER}'."
-              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
-              printf '### 🐹 Go lint: %s\n\n❌ `%s` is not a Go check this workflow knows. The `linters` input accepts: fmt, vet, golangci-lint, gosec.\n\n' \
-                "${LINTER}" "${LINTER}" >> "${GITHUB_STEP_SUMMARY}"
-              exit 1
-              ;;
-          esac
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/golang.sh"

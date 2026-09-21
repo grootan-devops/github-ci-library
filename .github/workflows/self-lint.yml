@@ -30,12 +30,13 @@ jobs:
           TOOL: ${{ matrix.tool }}
         run: |
           set -euo pipefail
-          # shellcheck source=scripts/lint-summary.sh
-          source scripts/lint-summary.sh
+          # shellcheck source=scripts/lint/summary.sh
+          source scripts/lint/summary.sh
           case "${TOOL}" in
             actionlint)  run_linted "🔧 Self lint: actionlint" actionlint ;;
-            shellcheck)  run_linted "🔧 Self lint: shellcheck" shellcheck scripts/*.sh scripts/checks/*.sh ;;
-            readme-dockerfiles) scripts/readme-dockerfile-check.sh README.md ;;
+            shellcheck)  mapfile -t SCRIPTS < <(find scripts -name "*.sh" | sort)
+                         run_linted "🔧 Self lint: shellcheck" shellcheck "${SCRIPTS[@]}" ;;
+            readme-dockerfiles) scripts/lint/readme-dockerfile.sh README.md ;;
           esac
 
   lint:

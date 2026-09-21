@@ -52,6 +52,7 @@ Reusable GitHub Actions workflows (`workflow_call`)
   - [6. Language Library (No Image, No Chart)](#6-language-library-no-image-no-chart)
   - [7. Security & Code Quality Audit Only](#7-security--code-quality-audit-only)
   - [8. GitOps Deploy Entry Point](#8-gitops-deploy-entry-point)
+- [Repository Layout](#repository-layout)
 - [Migration Guide & Standard](#migration-guide--standard)
 
 ---
@@ -162,37 +163,8 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
-  trivy-cache:
-    needs: init
-    permissions:
-      contents: read
-      actions: write
-    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
-    secrets: inherit
-
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-      image-tag: ${{ needs.init.outputs.image-tag }}
-      image-repository: ${{ needs.init.outputs.image-repository }}
-
-  scan:
-    needs: [init, trivy-cache]
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: image
-      image-repository: ${{ needs.init.outputs.image-repository }}
-      target-version: ${{ needs.init.outputs.candidate-image-tag }}
-
   image:
-    needs: [init, check, scan]
+    needs: init
     permissions:
       contents: read
       packages: write
@@ -200,12 +172,12 @@ jobs:
     secrets: inherit
     with:
       is-release: true
+      require-scan: false
       image-tag: ${{ needs.init.outputs.tag }}
       release-tag: ${{ needs.init.outputs.tag }}
       candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
       image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
-      scan-result: ${{ needs.scan.result }}
 
   release:
     needs: [init, image]
@@ -1381,6 +1353,12 @@ The second shape trusts that the candidate was scanned on its pull request. That
 while nothing reaches the default branch outside a pull request — so it belongs with a
 protected branch, not with one anybody can push to.
 
+**Every `release.yml` example below takes the GitLab parity shape**, so each one passes
+`require-scan: false` to `docker.yml` / `buildah.yml`. Drop that input and `promote` refuses
+with an empty `scan-result`, which is the correct behaviour for the fail-closed shape and a
+confusing failure in this one. If your default branch is not protected, use the fail-closed
+shape instead and restore the `trivy-cache`, `scan` and `check` jobs alongside it.
+
 Keeping `check` while dropping `scan` is a reasonable middle: it needs only `init`, costs
 one fast job, and still refuses to re-release over a tag or image version that already
 exists.
@@ -1777,51 +1755,8 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/init.yml@1.0.0
     secrets: inherit
 
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-      chart-name: ${{ needs.init.outputs.chart-name }}
-      chart-version: ${{ needs.init.outputs.chart-version }}
-      chart-repository: ${{ needs.init.outputs.chart-repository }}
-      image-tag: ${{ needs.init.outputs.image-tag }}
-      image-repository: ${{ needs.init.outputs.image-repository }}
-
-  trivy-cache:
-    needs: init
-    permissions:
-      contents: read
-      actions: write
-    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
-    secrets: inherit
-
-  image-scan:
-    needs: [init, trivy-cache]
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: image
-      image-repository: ${{ needs.init.outputs.image-repository }}
-      target-version: ${{ needs.init.outputs.candidate-image-tag }}
-
-  chart-scan:
-    needs: [init, trivy-cache]
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: config
-      config-type: chart
-
   image:
-    needs: [init, check, image-scan]
+    needs: init
     permissions:
       contents: read
       packages: write
@@ -1829,15 +1764,15 @@ jobs:
     secrets: inherit
     with:
       is-release: true
+      require-scan: false
       image-tag: ${{ needs.init.outputs.tag }}
       release-tag: ${{ needs.init.outputs.tag }}
       candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
       image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
-      scan-result: ${{ needs.image-scan.result }}
 
   chart:
-    needs: [init, check, image, chart-scan]
+    needs: [init, image]
     permissions:
       contents: read
       packages: write
@@ -1854,7 +1789,7 @@ jobs:
       candidate-version: ${{ needs.init.outputs.candidate-chart-version }}
 
   release:
-    needs: [init, check, image, chart]
+    needs: [init, image, chart]
     permissions:
       contents: write
       actions: read
@@ -2223,15 +2158,8 @@ jobs:
       ignore-chart: "true"
       ignore-docker: "true"
 
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-
   release:
-    needs: [init, check]
+    needs: init
     permissions:
       contents: write
       actions: read
@@ -2540,37 +2468,8 @@ jobs:
     with:
       ignore-docker: "true"
 
-  trivy-cache:
-    needs: init
-    permissions:
-      contents: read
-      actions: write
-    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
-    secrets: inherit
-
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-      chart-name: ${{ needs.init.outputs.chart-name }}
-      chart-version: ${{ needs.init.outputs.chart-version }}
-      chart-repository: ${{ needs.init.outputs.chart-repository }}
-
-  chart-scan:
-    needs: [init, trivy-cache]
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: config
-      config-type: chart
-
   chart:
-    needs: [init, check, chart-scan]
+    needs: init
     permissions:
       contents: read
       packages: write
@@ -2600,8 +2499,10 @@ jobs:
 
 `chart.yml` · `promote` pulls the exact candidate named by `candidate-version`, repackages
 it at the release tag and pushes it to production — the released bytes are the scanned
-bytes. It has no `scan-result` input: unlike `docker.yml` / `buildah.yml`, it is gated by
-the caller's `needs:` alone, which is why `chart` needs `chart-scan` above.
+bytes. It has no `scan-result` input: unlike `docker.yml` / `buildah.yml`, nothing inside it
+checks that a scan happened, so the only way to require one on a release is to put a scan
+job in the caller and name it in `chart`'s `needs:`. The examples here do not — they take
+the **GitLab parity** shape and rely on the pull request's scan.
 
 ```yaml
 # .github/workflows/check.yml
@@ -2891,37 +2792,8 @@ jobs:
     with:
       ignore-chart: "true"
 
-  trivy-cache:
-    needs: init
-    permissions:
-      contents: read
-      actions: write
-    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
-    secrets: inherit
-
-  scan:
-    needs: [init, trivy-cache]
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: image
-      image-repository: ${{ needs.init.outputs.image-repository }}
-      target-version: ${{ needs.init.outputs.candidate-image-tag }}
-
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-      image-tag: ${{ needs.init.outputs.image-tag }}
-      image-repository: ${{ needs.init.outputs.image-repository }}
-
   image:
-    needs: [init, scan, check]
+    needs: init
     permissions:
       contents: read
       packages: write
@@ -2929,12 +2801,12 @@ jobs:
     secrets: inherit
     with:
       is-release: true
+      require-scan: false
       image-tag: ${{ needs.init.outputs.tag }}
       release-tag: ${{ needs.init.outputs.tag }}
       candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
       image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
-      scan-result: ${{ needs.scan.result }}
 
   release:
     needs: [init, image]
@@ -3267,36 +3139,8 @@ jobs:
       ignore-chart: "true"
       tag: "1.4.0"
 
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-      image-tag: ${{ needs.init.outputs.image-tag }}
-      image-repository: ${{ needs.init.outputs.image-repository }}
-
-  trivy-cache:
-    permissions:
-      contents: read
-      actions: write
-    uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
-    secrets: inherit
-
-  image-scan:
-    needs: [init, trivy-cache]
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.0.0
-    secrets: inherit
-    with:
-      scan-type: image
-      image-repository: ${{ needs.init.outputs.image-repository }}
-      target-version: ${{ needs.init.outputs.candidate-image-tag }}
-
   image:
-    needs: [init, check, image-scan]
+    needs: init
     permissions:
       contents: read
       packages: write
@@ -3304,15 +3148,15 @@ jobs:
     secrets: inherit
     with:
       is-release: true
+      require-scan: false
       image-tag: ${{ needs.init.outputs.tag }}
       image-repository: ${{ needs.init.outputs.image-repository }}
       image-dev-repository: ${{ needs.init.outputs.image-dev-repository }}
       release-tag: ${{ needs.init.outputs.tag }}
       candidate-tag: ${{ needs.init.outputs.candidate-image-tag }}
-      scan-result: ${{ needs.image-scan.result }}
 
   release:
-    needs: [init, check, image]
+    needs: [init, image]
     permissions:
       contents: write
       actions: read
@@ -3721,23 +3565,8 @@ jobs:
       ignore-docker: "true"
       ignore-chart: "true"
 
-  check:
-    needs: init
-    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
-    secrets: inherit
-    with:
-      tag: ${{ needs.init.outputs.tag }}
-
-  build:
-    needs: init
-    permissions:
-      contents: read
-      checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/python-build.yml@1.0.0
-    secrets: inherit
-
   release:
-    needs: [init, check, build]
+    needs: init
     permissions:
       contents: write
       actions: read
@@ -4081,6 +3910,92 @@ jobs:
 instead; its inputs are in the [deploy/gitops](#deploygitops) module catalog.
 
 ---
+
+## Repository Layout
+
+A workflow in this library is a thin shell: inputs, permissions, step wiring, and a call out
+to a script. Anything longer than a couple of dozen lines of bash lives in `scripts/`, where
+`shellcheck` can see it, a reviewer can read it without YAML indentation in the way, and it
+can be run outside CI.
+
+```text
+scripts/
+├── build/      step summaries shared by every language stack
+├── buildah/    rootless image build, push, promote, scan verification
+├── chart/      Helm package, push, promote, unit-test summary, docs drift
+├── checks/     the release guards check.yml dispatches, and its two drivers
+├── deploy/
+│   ├── argocd/ resolve target, patch manifests, sync, wait for health
+│   └── komodo/ resolve target, commit, trigger, poll execution
+├── docker/     hadolint, build failure summary, promote, scan verification
+├── init/       config validation, version resolution, provenance, summary
+├── lint/       the linter runner plus one script per linter
+├── notify/     Teams adaptive card
+├── release/    asset consolidation, GitHub Release publication
+├── scan/       Trivy engine, SBOM, secret history, Trivy DB cache
+├── self/       the library's own release version
+├── sonarqube/  analysis, quality gate, cache refresh, summary
+└── terraform/  docs drift, test summary
+```
+
+Names do not repeat what the directory already says: it is `init/resolve-version.sh`, not
+`init/init-resolve-version.sh`.
+
+### Reaching a script from a workflow
+
+Scripts live in this repository, so a consumer's job has to clone it first. Every job that
+calls one carries this step, after `Checkout Code`:
+
+```yaml
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+```
+
+`job.workflow_sha` pins the clone to the same commit as the reusable workflow being called,
+so the script and the YAML calling it can never disagree. The call is then:
+
+```yaml
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/push.sh"
+```
+
+Values reach a script only through `env:`. A `${{ ... }}` expression is interpolated by
+GitHub before bash starts, so it does not survive into an external file — a script that
+needs an input needs an `env:` entry for it.
+
+Two workflows dispatch by name instead of calling a fixed path. `check.yml` builds a matrix
+of guards and runs `scripts/checks/${SCRIPT}`, so every release guard lives in `checks/` and
+is named in `scripts/checks/select-guards.sh`. `lint.yml` does the same with
+`scripts/${{ matrix.script }}`, where the matrix value carries the subdirectory
+(`lint/yaml.sh`, `docker/lint.sh`).
+
+### Conventions
+
+- `#!/usr/bin/env bash` and `set -euo pipefail`, except where a script deliberately runs
+  without `-e` because its exit code is a contract — `scan/trivy.sh` returns 0 clean,
+  1 errors, 2 warnings-only, and says so in its header.
+- Required inputs are asserted up front with `: "${VAR:?VAR must be set}"`. Scripts whose
+  step runs under `if: always()` use `: "${VAR?...}"` instead, because `steps.<id>.outcome`
+  is an empty string when the step never ran and aborting there would turn a green job red.
+  Each such script records that reasoning in its header.
+- Conditionals are always written as a block, never as `[[ ... ]] && cmd` or on one line:
+
+  ```bash
+  if [[ "${CACHE_HIT}" == "true" ]]; then
+    CACHE_STATE="restored"
+  fi
+  ```
+
+- Two files are sourced rather than executed and therefore set no shell options of their
+  own: `lint/summary.sh` (the `run_linted` helper) and `docker/hadolint-ignores.sh`.
+- `self-lint.yml` runs `shellcheck` over every `*.sh` under `scripts/`, found recursively,
+  so a new subdirectory is covered without touching the workflow.
 
 ## Migration Guide & Standard
 

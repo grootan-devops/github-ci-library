@@ -31,7 +31,9 @@ if [[ ! -f "${CHART_FILE}" ]]; then
 fi
 
 summarise() {
-  [[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
+  if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    return 0
+  fi
   {
     echo "### ⎈ Chart dependencies"
     echo ""

@@ -39,7 +39,9 @@ while IFS= read -r LINE; do
   SPEC="$(printf '%s' "${REST}" | sed -E 's;.*uses:[[:space:]]*;;; s;[[:space:]]*(#.*)?$;;' | tr -d "\"'")"
   REPO="${SPEC%%/.github/workflows/*}"
   REF="${SPEC##*@}"
-  [[ -z "${REF}" || "${REF}" == "${SPEC}" ]] && continue
+  if [[ -z "${REF}" || "${REF}" == "${SPEC}" ]]; then
+    continue
+  fi
   CHECKED=$((CHECKED + 1))
 
   if [[ "${REF}" =~ ${STABLE_TAG} ]]; then

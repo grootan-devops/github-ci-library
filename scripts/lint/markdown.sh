@@ -38,7 +38,7 @@ if [[ ${#MD_TARGETS[@]} -eq 0 ]]; then
 fi
 
 echo "Linting: ${MD_TARGETS[*]}"
-# shellcheck source=scripts/lint-summary.sh
-source "$(dirname "${BASH_SOURCE[0]}")/lint-summary.sh"
+# shellcheck source=scripts/lint/summary.sh
+source "$(dirname "${BASH_SOURCE[0]}")/summary.sh"
 run_linted "📝 Markdown lint" \
   npx --yes markdownlint-cli2@0.23.2 --config "${MARKDOWNLINT_CONFIG}" "${MD_TARGETS[@]}"

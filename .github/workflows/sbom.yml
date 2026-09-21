@@ -1,9 +1,5 @@
 name: SBOM / Generate & Scan
 
-# Counterpart of the GitLab SBOM:Generate -> SBOM:Scan pair. Generation and the
-# scan are separate jobs, so a scan failure is distinguishable from a
-# generation failure and the SBOM is published either way.
-
 on:
   workflow_call:
     inputs:
@@ -48,6 +44,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Restore Trivy Database Cache
         uses: actions/cache/restore@v6
         with:
@@ -65,39 +69,7 @@ jobs:
 
       - name: Generate CycloneDX SBOM
         id: generate
-        run: |
-          set -euo pipefail
-
-          if [[ -f pom.xml ]]; then
-            if [[ -d "${GITHUB_WORKSPACE}/.m2/repository" ]]; then
-              mkdir -p ~/.m2
-              ln -sfn "${GITHUB_WORKSPACE}/.m2/repository" ~/.m2/repository
-            else
-              echo "::warning title=SBOM::Maven cache did not restore — resolving inline. Run the Java dependency job first to avoid this."
-              mvn dependency:go-offline -q -B -DskipTests || mvn dependency:resolve -q -B -DskipTests || true
-            fi
-          fi
-
-          set +e
-          TRIVY_OUTPUT="$(trivy fs --format cyclonedx --output "${SBOM_FILE}" \
-            --skip-version-check --skip-db-update --skip-java-db-update . 2>&1)"
-          TRIVY_RESULT=$?
-          set -e
-          [[ -n "${TRIVY_OUTPUT}" ]] && echo "${TRIVY_OUTPUT}"
-          if [[ "${TRIVY_RESULT}" -ne 0 ]]; then
-            echo "::error title=SBOM::Trivy could not produce a CycloneDX document."
-            {
-              echo "### 📄 SBOM"
-              echo ""
-              echo "❌ No SBOM was produced, so the SBOM scan has nothing to check. Trivy reported:"
-              echo ""
-              echo '```'
-              tail -n 30 <<< "${TRIVY_OUTPUT}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit "${TRIVY_RESULT}"
-          fi
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/sbom-generate.sh"
 
       - name: Upload SBOM
         if: ${{ !cancelled() }}
@@ -128,8 +100,6 @@ jobs:
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # Not a nested `uses: ./.github/workflows/scan.yml`: a relative reusable-workflow
-  # path resolves against the caller's repository, not this library's.
   scan:
     name: Scan
     if: ${{ inputs.scan }}
@@ -184,7 +154,7 @@ jobs:
         run: |
           set -uo pipefail
           RESULT=0
-          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/trivy-scan.sh" || RESULT=$?
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/trivy.sh" || RESULT=$?
           case "${RESULT}" in
             0) echo "Scan clean." ;;
             2)

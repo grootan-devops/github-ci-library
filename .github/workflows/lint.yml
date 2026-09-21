@@ -1,8 +1,5 @@
 name: Lint / Config & Documentation
 
-# Counterpart of the GitLab `lint` stage. Each linter is its own job, so they
-# run in parallel and the run graph names whichever one failed.
-
 on:
   workflow_call:
     inputs:
@@ -59,18 +56,18 @@ jobs:
         run: |
           set -euo pipefail
           cd "${PROJECT_PATH}"
-          TARGETS='[{"name":"YAML","script":"yaml-lint.sh","subject":"yaml"}]'
+          TARGETS='[{"name":"YAML","script":"lint/yaml.sh","subject":"yaml"}]'
           if [[ -f "${DOCKERFILE}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Dockerfile","script":"docker-lint.sh","subject":"dockerfile"}]' <<< "${TARGETS}")"
+            TARGETS="$(jq -c '. + [{"name":"Dockerfile","script":"docker/lint.sh","subject":"dockerfile"}]' <<< "${TARGETS}")"
           fi
           if [[ -f "${CHART_DIR}/values.yaml" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Chart Values","script":"yaml-lint.sh","subject":"chart-values"}]' <<< "${TARGETS}")"
+            TARGETS="$(jq -c '. + [{"name":"Chart Values","script":"lint/yaml.sh","subject":"chart-values"}]' <<< "${TARGETS}")"
           fi
           if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Changelog","script":"markdown-lint.sh","subject":"changelog"}]' <<< "${TARGETS}")"
+            TARGETS="$(jq -c '. + [{"name":"Changelog","script":"lint/markdown.sh","subject":"changelog"}]' <<< "${TARGETS}")"
           fi
           if [[ -f "${MIGRATION_FILE_NAME}" ]]; then
-            TARGETS="$(jq -c '. + [{"name":"Migration Guide","script":"markdown-lint.sh","subject":"migration"}]' <<< "${TARGETS}")"
+            TARGETS="$(jq -c '. + [{"name":"Migration Guide","script":"lint/markdown.sh","subject":"migration"}]' <<< "${TARGETS}")"
           fi
           echo "include=${TARGETS}" >> "${GITHUB_OUTPUT}"
 
@@ -109,44 +106,11 @@ jobs:
           SUBJECT: ${{ matrix.subject }}
           INPUT_YAML_FILES: ${{ inputs.lint-yaml-files }}
           INPUT_MD_FILES: ${{ inputs.lint-md-files }}
-        run: |
-          set -euo pipefail
-
-          SKIP=false
-          case "${SUBJECT}" in
-            dockerfile)
-              [[ -f "${DOCKERFILE}" ]] || SKIP=true
-              ;;
-            chart-values)
-              if [[ -f "${CHART_DIR}/values.yaml" ]]; then
-                echo "LINT_YAML_FILES=${CHART_DIR}/values.yaml" >> "${GITHUB_ENV}"
-              else
-                SKIP=true
-              fi
-              ;;
-            yaml)
-              echo "LINT_YAML_FILES=${INPUT_YAML_FILES}" >> "${GITHUB_ENV}"
-              ;;
-            changelog)
-              if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
-                echo "LINT_MD_FILES=${INPUT_MD_FILES:-${CHANGELOG_FILE_NAME}}" >> "${GITHUB_ENV}"
-              else
-                SKIP=true
-              fi
-              ;;
-            migration)
-              if [[ -f "${MIGRATION_FILE_NAME}" ]]; then
-                echo "LINT_MD_FILES=${MIGRATION_FILE_NAME}" >> "${GITHUB_ENV}"
-              else
-                SKIP=true
-              fi
-              ;;
-          esac
-
-          echo "skip=${SKIP}" >> "${GITHUB_OUTPUT}"
-          if [[ "${SKIP}" == "true" ]]; then
-            echo "Nothing to lint for '${SUBJECT}'."
-          fi
+          CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+          DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+          CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+          MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/resolve-target.sh"
 
       - name: Run ${{ matrix.name }} Linter
         id: lint

@@ -1,8 +1,5 @@
 name: Node / Dependency, Build & Test
 
-# GitLab counterpart: Node:Dependency:Download -> Node:Build + Node:Test:Unit.
-# No production-install job: the packaging Dockerfile installs offline from the
-# npm cache, so re-running `npm ci --omit=dev` here would prove nothing.
 
 on:
   workflow_call:
@@ -69,6 +66,14 @@ jobs:
         id: key
         run: echo "key=node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Restore npm Cache
         id: cache
         uses: actions/cache/restore@v6
@@ -100,29 +105,15 @@ jobs:
       - name: Publish Dependency Summary
         if: always()
         env:
-          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          STACK_LABEL: "📗 Node dependencies"
+          OUTCOME: ${{ steps.download.outcome }}
           CACHE_KEY: ${{ steps.key.outputs.key }}
-          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and the download never ran.
-          [[ "${DOWNLOAD_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          CACHE_STATE="rebuilt — no entry matched"
-          [[ "${CACHE_HIT}" == "true" ]] && CACHE_STATE="restored"
-          {
-            echo "### 📗 Node dependencies"
-            echo ""
-            if [[ "${DOWNLOAD_OUTCOME}" == "success" ]]; then
-              echo "✅ Dependencies installed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}."
-            else
-              echo "❌ \`npm ci\` failed. Cache \`${CACHE_KEY}\`: ${CACHE_STATE}. npm reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/npm-ci.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          SUCCESS_MESSAGE: "Dependencies installed."
+          RESOLVE_COMMAND: "npm ci"
+          TOOL_LABEL: "npm"
+          LOG_FILE: "npm-ci.log"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/dependency-summary.sh"
 
   build:
     name: Build
@@ -140,6 +131,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Export Build Environment
         if: ${{ inputs.build-env != '' }}
         env:
@@ -149,7 +148,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -184,30 +185,13 @@ jobs:
       - name: Publish Build Summary
         if: always()
         env:
-          OUT_DIR: ${{ inputs.build-artifact-path }}
+          STACK_LABEL: "Node"
           BUILD_COMMAND: ${{ inputs.build-command }}
           COMPILE_OUTCOME: ${{ steps.compile.outcome }}
-        run: |
-          set -euo pipefail
-          # Anything else means an earlier step failed and the build never ran.
-          [[ "${COMPILE_OUTCOME}" =~ ^(success|failure)$ ]] || exit 0
-          FILE_COUNT="$(find "${OUT_DIR}" -type f 2>/dev/null | wc -l | tr -d ' ')" || FILE_COUNT=0
-          {
-            echo "### 📦 Node build"
-            echo ""
-            if [[ "${COMPILE_OUTCOME}" != "success" ]]; then
-              echo "❌ \`${BUILD_COMMAND}\` failed. It reported:"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/build.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-            elif [[ "${FILE_COUNT}" -gt 0 ]]; then
-              echo "✅ Output \`${OUT_DIR}/\` — $(du -sh "${OUT_DIR}" | cut -f1) across ${FILE_COUNT} files."
-            else
-              echo "⚠️ \`${BUILD_COMMAND}\` succeeded but wrote nothing to \`${OUT_DIR}/\`, so the \`node-dist\` artifact will be empty."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+          ARTIFACT_NAME: "node-dist"
+          ARTIFACT_DIR: ${{ inputs.build-artifact-path }}
+          SUMMARY_MODE: "directory"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/summary.sh"
 
   test:
     name: Unit Test
@@ -246,7 +230,9 @@ jobs:
           while IFS='=' read -r KEY VAL; do
             KEY="${KEY#"${KEY%%[![:space:]]*}"}"
             KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            [[ -z "${KEY}" || "${KEY}" =~ ^# ]] && continue
+            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
+              continue
+            fi
             printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
           done <<< "${BUILD_ENV}"
 
@@ -308,4 +294,4 @@ jobs:
           REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/**/*.xml"
           JOB_SUMMARY: "true"
           FAIL_ON_FAILURE: "true"
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/junit-report.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

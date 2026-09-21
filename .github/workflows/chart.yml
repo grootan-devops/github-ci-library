@@ -1,8 +1,5 @@
 name: Chart / Lint, Package, Push & Promote
 
-# Counterpart of the GitLab chart module: Chart:Check:README, Chart:Lint,
-# Chart:Build, Chart:Push and Chart:Promote.
-
 on:
   workflow_call:
     inputs:
@@ -103,7 +100,7 @@ jobs:
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
       - name: Verify Generated Chart Documentation
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart-docs-check.sh"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/docs-check.sh"
 
   lint:
     name: Lint
@@ -201,6 +198,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Update Mock Chart Dependencies
         run: helm dependency update "${CHART_DIR}/${{ inputs.mock-chart }}"
 
@@ -219,37 +224,7 @@ jobs:
         env:
           MOCK_CHART: ${{ inputs.mock-chart }}
           OUTCOME: ${{ steps.unittest.outcome }}
-        run: |
-          set -euo pipefail
-          TALLY="$(grep -E '^(Charts|Test Suites|Tests|Snapshot):' "${RUNNER_TEMP}/helm-unittest.log" 2>/dev/null || true)"
-          {
-            echo "### 📘 Chart unit tests"
-            echo ""
-            if [[ "${OUTCOME}" == "success" ]]; then
-              echo "✅ \`helm unittest --strict\` passed against \`${CHART_DIR}/${MOCK_CHART}\`."
-            else
-              echo "❌ \`helm unittest --strict\` failed against \`${CHART_DIR}/${MOCK_CHART}\`."
-            fi
-            if [[ -n "${TALLY}" ]]; then
-              echo ""
-              echo '```'
-              echo "${TALLY}"
-              echo '```'
-            fi
-            if [[ "${OUTCOME}" != "success" ]]; then
-              echo ""
-              echo "<details><summary>helm-unittest output</summary>"
-              echo ""
-              echo '```'
-              tail -n 50 "${RUNNER_TEMP}/helm-unittest.log" 2>/dev/null || echo "(no output was captured)"
-              echo '```'
-              echo ""
-              echo "</details>"
-              echo ""
-              echo "Every assertion is in the \`chart-unittest-report\` artifact."
-            fi
-            echo ""
-          } >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/unittest-summary.sh"
 
       - name: Upload Unit Test Report
         if: always()
@@ -344,6 +319,14 @@ jobs:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
     steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Download Chart Package
         uses: actions/download-artifact@v8
         with:
@@ -362,68 +345,7 @@ jobs:
           CHART_VERSION: ${{ inputs.chart-version }}
           CHART_REPOSITORY: ${{ inputs.chart-repository }}
           CHART_DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
-        run: |
-          set -euo pipefail
-          PACKAGE="${CHART_NAME}-${CHART_VERSION}.tgz"
-          if [[ ! -f "${PACKAGE}" ]]; then
-            echo "::error title=Chart push::Package '${PACKAGE}' not found."
-            {
-              echo "### ⎈ Helm Chart Package Info"
-              echo ""
-              echo "❌ \`${PACKAGE}\` is not in the downloaded \`chart-package\` artifact, so there is nothing to push. The package job names its output from \`chart-name\` and \`chart-version\`; these are what arrived:"
-              echo ""
-              echo '```'
-              ls -1
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}"
-          echo "Pushing ${PACKAGE} to ${TARGET}..."
-          if ! PUSH_OUTPUT="$(helm push "${PACKAGE}" "${TARGET}" 2>&1)"; then
-            echo "${PUSH_OUTPUT}" >&2
-            echo "::error title=Chart push::${TARGET} refused ${PACKAGE}."
-            {
-              echo "### ⎈ Helm Chart Package Info"
-              echo ""
-              echo "❌ \`${TARGET}\` refused \`${PACKAGE}\`. Helm reported:"
-              echo ""
-              echo '```'
-              tail -n 30 <<< "${PUSH_OUTPUT}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          echo "${PUSH_OUTPUT}"
-
-          # Mirror a stable push into the dev channel so consumers pinned there
-          # still resolve it. A convenience: a failed mirror warns, not fails.
-          MIRROR_STATE=""
-          if [[ -n "${CHART_DEV_REPOSITORY}" && "${CHART_REPOSITORY}" != "${CHART_DEV_REPOSITORY}" ]]; then
-            DEV_TARGET="oci://${REGISTRY_HOST}/${CHART_DEV_REPOSITORY}"
-            echo "Mirroring ${PACKAGE} to the dev channel at ${DEV_TARGET}..."
-            if helm push "${PACKAGE}" "${DEV_TARGET}"; then
-              echo "✅ Mirrored ${PACKAGE} to ${DEV_TARGET}."
-              MIRROR_STATE="\`${DEV_TARGET}\`"
-            else
-              echo "::warning title=Chart push::Optional dev mirror push failed for '${PACKAGE}'. The chart is published at ${TARGET}."
-              MIRROR_STATE="⚠️ failed — consumers pinned to \`${CHART_DEV_REPOSITORY}\` will not resolve \`${CHART_VERSION}\`"
-            fi
-          fi
-
-          {
-            echo "### ⎈ Helm Chart Package Info"
-            echo "- **📦 Name:** \`${CHART_NAME}\`"
-            echo "- **🏷️ Version:** \`${CHART_VERSION}\`"
-            echo "- **🌐 Registry:** \`${TARGET}\`"
-            if [[ -n "${MIRROR_STATE}" ]]; then
-              echo "- **🔁 Dev mirror:** ${MIRROR_STATE}"
-            fi
-          } > "${CHART_INFO_FILE_NAME}"
-          cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/push.sh"
 
       - name: Upload Chart Info
         if: ${{ !cancelled() }}
@@ -451,6 +373,14 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Authenticate To Chart Registry
         env:
           REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
@@ -464,76 +394,7 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.candidate-version }}
           DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
           PROD_REPOSITORY: ${{ inputs.chart-repository }}
-        run: |
-          set -euo pipefail
-          DEV_REF="oci://${REGISTRY_HOST}/${DEV_REPOSITORY}/${CHART_NAME}"
-          mkdir -p _promote
-          PULLED=0
-
-          if [[ -n "${CANDIDATE_VERSION}" ]] \
-             && helm pull "${DEV_REF}" --version "${CANDIDATE_VERSION}" --untar --untardir _promote 2>/dev/null; then
-            echo "📦 Pulled candidate ${CHART_NAME}:${CANDIDATE_VERSION}"
-            PULLED=1
-          else
-            LATEST="$(helm show chart "${DEV_REF}" --version "^${TAG}-0" 2>/dev/null | yq -r '.version // ""' || true)"
-            if [[ -n "${LATEST}" ]] \
-               && helm pull "${DEV_REF}" --version "${LATEST}" --untar --untardir _promote 2>/dev/null; then
-              echo "📦 Pulled newest candidate ${CHART_NAME}:${LATEST}"
-              PULLED=1
-            fi
-          fi
-
-          if [[ ${PULLED} -eq 1 ]]; then
-            echo "🚀 Re-packaging the scanned candidate at ${TAG}..."
-            helm package "_promote/${CHART_NAME}" --version "${TAG}" --app-version "${TAG}"
-            rm -rf _promote
-          elif [[ -f "${CHART_DIR}/Chart.yaml" ]]; then
-            echo "::warning title=Chart promote::No candidate found — packaging from the working tree instead. These bytes were not scanned as a candidate."
-            helm dependency update "${CHART_DIR}/"
-            helm package "${CHART_DIR}" --version "${TAG}" --app-version "${TAG}"
-          else
-            echo "::error title=Chart promote::No candidate and no local chart to publish."
-            {
-              echo "### ⎈ Helm Chart Package Info"
-              echo ""
-              echo "❌ \`${TAG}\` was not promoted: nothing in \`${DEV_REF}\` matched \`${CANDIDATE_VERSION:-^${TAG}-0}\`, and there is no \`${CHART_DIR}/Chart.yaml\` to fall back to. The production repository is unchanged."
-              echo ""
-              echo "Candidate versions currently published:"
-              echo ""
-              echo '```'
-              helm show chart "${DEV_REF}" --version "^${TAG}-0" 2>&1 | head -n 20 || echo "(the dev repository could not be listed either)"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-
-          PROMOTED_FROM="${CANDIDATE_VERSION:-${LATEST:-working tree}}"
-          if ! PUSH_OUTPUT="$(helm push "${CHART_NAME}-${TAG}.tgz" "oci://${REGISTRY_HOST}/${PROD_REPOSITORY}" 2>&1)"; then
-            echo "${PUSH_OUTPUT}" >&2
-            echo "::error title=Chart promote::The production repository refused ${CHART_NAME}-${TAG}.tgz."
-            {
-              echo "### ⎈ Helm Chart Package Info"
-              echo ""
-              echo "❌ \`oci://${REGISTRY_HOST}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged in the dev repository. Helm reported:"
-              echo ""
-              echo '```'
-              tail -n 30 <<< "${PUSH_OUTPUT}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          echo "${PUSH_OUTPUT}"
-
-          {
-            echo "### ⎈ Helm Chart Package Info"
-            echo "- **📦 Name:** \`${CHART_NAME}\`"
-            echo "- **🏷️ Version:** \`${TAG}\`"
-            echo "- **🌐 Registry:** \`oci://${REGISTRY_HOST}/${PROD_REPOSITORY}\`"
-            echo "- **🔗 Promoted from:** \`${PROMOTED_FROM}\`"
-          } > "${CHART_INFO_FILE_NAME}"
-          cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/promote.sh"
 
       - name: Upload Chart Info
         if: ${{ !cancelled() }}
