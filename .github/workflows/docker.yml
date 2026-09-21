@@ -192,7 +192,7 @@ jobs:
           PYTHON_312_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-python-3-12:verify-v1
           NODE_JS_24_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-node-24:verify-v1
           JAVA_25_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-java-25:verify-v1
-          TOOLKIT_BUILD_IMAGE: registry-1.docker.io/grootantech/toolkit:verify-v2
+          TOOLKIT_BUILD_IMAGE: registry-1.docker.io/grootantech/toolkit:1.0.0
         run: |
           set -euo pipefail
           {
@@ -391,7 +391,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
     # Deliberately no `defaults.run.working-directory` and no caller checkout,
     # unlike `build` and `test`: nothing here reads the caller's tree, this job
     # only talks to the registry. Pointing it at `project-path` killed every

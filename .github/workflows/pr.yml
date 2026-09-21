@@ -3,7 +3,9 @@ run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
 
 on:
   pull_request:
-    branches: [master, main, dev]
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 concurrency:
@@ -12,30 +14,30 @@ concurrency:
 
 permissions:
   contents: read
-  actions: read
-  checks: write
 
 jobs:
+  init:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: ./.github/workflows/init.yml
+    secrets: inherit
+
   lint:
-    name: Lint
     uses: ./.github/workflows/self-lint.yml
     secrets: inherit
 
   secret-scan:
-    name: Security
     uses: ./.github/workflows/secret-scanning.yml
     secrets: inherit
+    with:
+      full-history: false
 
-  version:
-    name: Version
-    uses: ./.github/workflows/self-version.yml
-    secrets: inherit
-
-  guards:
-    name: Guards
-    needs: version
+  check:
+    needs: init
     uses: ./.github/workflows/check.yml
     secrets: inherit
     with:
-      tag: ${{ needs.version.outputs.tag }}
+      tag: ${{ needs.init.outputs.tag }}
       check-library-pinning: false

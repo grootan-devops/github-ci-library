@@ -226,7 +226,7 @@ code.
 Each workflow needs exactly this, and nothing else:
 
 | Called workflow | `permissions:` on the calling job |
-|---|---|
+| --- | --- |
 | `init` | `contents: read`, `actions: read`, `pull-requests: read` |
 | `release` | `contents: write`, `actions: read` |
 | `docker`, `buildah`, `chart` | `contents: read`, `packages: write` |
@@ -299,7 +299,7 @@ schedule so the cache can be rebuilt on demand after a base-image change.
 > A `release.yml` that only promotes does not call `trivy-cache.yml`, so on that shape the
 > scheduled run is the only thing that writes the cache. Drop it and pull requests restore
 > an entry that nothing ever refreshes.
-
+>
 > [!IMPORTANT]
 > The repository's default token scope caps all of this. If **Settings → Actions → General →
 > Workflow permissions** is set to read-only, `contents: write` is denied and the release
@@ -324,7 +324,7 @@ on it — the verdict has to be handed over:
 ```
 
 | Input | Default | Effect |
-|---|---|---|
+| --- | --- | --- |
 | `require-scan` | `true` | Promotion refuses unless `scan-result` is `success`. |
 | `scan-result` | `""` | The scan job's `result`. Empty means refused. |
 
@@ -342,7 +342,7 @@ pushes or scans it. It is `test: false` by default, so a pipeline that never set
 an artifact nobody executed.
 
 | Input | Default | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | `test` | `false` | Run the smoke test at all. |
 | `test-script` | `ci_image_test.sh` | Script executed inside the image, relative to `test-path`. |
 | `test-path` | the project path | Directory mounted into the image at `/tmp`. |
@@ -380,7 +380,7 @@ calling workflow. The guarantee therefore does not survive the port on its own; 
 caller's to reinstate.
 
 | Calling scenario | `group:` | `cancel-in-progress:` |
-|---|---|:--:|
+| --- | --- | :--: |
 | Pull request verification | `${{ github.workflow }}-${{ github.ref }}` | `true` |
 | Production release (`release.yml`) | `release-${{ github.ref }}` | **`false`** |
 | GitOps deploy (`deploy-*-gitops.yml`) | `deploy-${{ inputs.environment }}` | **`false`** |
@@ -413,7 +413,7 @@ flowchart LR
 ```
 
 | Phase | Purpose | Workflow · Job |
-|---|---|---|
+| --- | --- | --- |
 | `init` | Version discovery, registry target resolution, promotion provenance | `init.yml` · `initialize` |
 | `prepare` | Warm package manager and Trivy database caches | `*-build.yml` · `dependency`, `trivy-cache.yml` · `warm` |
 | `lint` | Style, syntax, YAML, Dockerfile and chart linting | `lint.yml`, `python-lint.yml`, `golang-lint.yml`, `node-lint.yml`, `terraform-lint.yml`, `chart.yml` · `lint` |
@@ -446,7 +446,7 @@ Edges marked *internal* are already declared inside the library workflow; a call
 repeat them.
 
 | Library workflow · job | GitLab job(s) | Caller must declare | Derived from |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `init.yml` · `initialize` | `Common:Init` | *(nothing — it is the root)* | — |
 | `trivy-cache.yml` · `warm` | `Trivy:Cache:Warm` | `needs: init` | `Common:Init` |
 | `lint.yml` | `.YAML:Lint`, `Changelog:Lint`, Dockerfile & chart-values lint | `needs: init` | `Common:Init` |
@@ -535,7 +535,7 @@ run graph, so **one workflow file per scenario** keeps each graph clean and lets
 be specific. Add `workflow_dispatch` to any of these for on-demand runs.
 
 | Scenario file | Calls | Description | Key dispatch inputs |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `pr.yml` | `init` + `lint` + `*-build` + `docker` + `scan` + `check` | Full pre-merge verification. | — |
 | `release.yml` | `init` + `docker`/`chart` promote + `release` | Tag, promote, publish, notify. | — |
 | `deploy.yml` | `deploy-argocd-gitops` / `deploy-komodo-gitops` | Targeted GitOps deployment without building. | `environment` *(required)*, `target-version` |
@@ -554,7 +554,7 @@ be specific. Add `workflow_dispatch` to any of these for on-demand runs.
 Three guards enforce it, and all three are on by default for every consumer:
 
 | Guard | Rejects |
-|---|---|
+| --- | --- |
 | `check.yml` · `library-pin` (GitHub) | `uses: …/workflows/x.yml@dev`, `@main`, a commit SHA, or a `-rc` tag |
 | `Common:Check:Library:Pin` (GitLab) | `include: ref:` on a branch, and a `remote:` raw URL whose ref segment is not a tag |
 | `check.yml` · `chart-dependency` | a `Chart.yaml` dependency on the dev repository, **or** a version that is a range (`^1.2.0`) or a pre-release |
@@ -591,7 +591,7 @@ it enabled is pinned to nothing.
 ### Comprehensive Execution Matrix
 
 | # | Scenario | Trigger | Automatic? | Jobs | Scope & Primary Purpose |
-|---|---|---|:---:|:---:|---|
+| --- | --- | --- | :---: | :---: | --- |
 | **1** | **PR to the default branch** | `pull_request` → `main` | ✅ Yes | ~30 | **Full verification suite**: linters, unit tests, candidate image and chart builds, CVE scans, SonarQube gate. |
 | **2** | **Production release** | `push` → `main` | ✅ Yes | 6 | **Release stamping & OCI promotion**: resolves the PR's run, promotes candidate image/chart by digest, creates the GitHub Release and tag, alerts Teams. Zero builds, tests or scans. |
 | **3** | **Branch push / non-release PR** | `push` → `dev`, `feature/*` | ❌ No | 0 | **Silenced**: no runner minutes consumed on developer branches. |
@@ -733,7 +733,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `init.yml` · `initialize` | Discovers the application version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **26 outputs.** |
 | `check.yml` · `library-pin` | Fails when a reusable-workflow call pins a branch, a commit SHA or a pre-release instead of a published tag. Runs by default; set `check-library-pinning: false` temporarily while testing against a library branch, or use `allow-unstable-library-refs: true` to downgrade it to a warning. |
 | `check.yml` · `tag-existence` | Fails when the git tag already exists on a different commit. A tag already on *this* commit is treated as a re-run, not a collision. |
@@ -751,7 +751,7 @@ flowchart LR
 #### `init.yml` outputs
 
 | Output | Example | Used by |
-|---|---|---|
+| --- | --- | --- |
 | `tag` | `1.4.0` | `check`, `release`, promote jobs |
 | `release-version` | `1.4.0` | scan target resolution |
 | `is-release` | `true` | promote vs build routing |
@@ -778,7 +778,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `node-build.yml` · `dependency` | `npm ci --include=dev --prefer-offline`. Caches `.npm` keyed by `package-lock.json`. |
 | `node-build.yml` · `build` | Runs `build-command` (default `npm run build`). Uploads `node-dist`. |
 | `node-build.yml` · `test` | Runs `test-command`, publishes JUnit as a GitHub Check. |
@@ -796,7 +796,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `python-build.yml` · `dependency` | `uv sync --frozen --no-install-project`. Caches `.uv-cache` keyed by `uv.lock`. Strictly frozen — never mutates the lockfile. |
 | `python-build.yml` · `build` | `uv build --offline`. Uploads `python-dist`. Not created when `build-command` is empty — an interpreted service goes `dependency` → `test`. |
 | `python-build.yml` · `test` | `pytest --junitxml --cov`, published as a GitHub Check. |
@@ -814,7 +814,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `golang-build.yml` · `dependency` | `go mod download`. Caches `.go-cache` keyed by `go.sum`. |
 | `golang-build.yml` · `build` | `go build -trimpath -o bin/ ./...`. Uploads `go-binaries`. |
 | `golang-build.yml` · `test` | `go test` piped through `go-junit-report`. |
@@ -834,7 +834,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `java-build.yml` · `dependency` | `mvn dependency:go-offline`. Caches `.m2` keyed by `pom.xml`. |
 | `java-build.yml` · `build` | Offline `mvn package`. Uploads `java-artifacts` (`*.jar`, `*.war`). |
 | `java-build.yml` · `test` | Offline `mvn test`; Surefire XML published as a GitHub Check. |
@@ -855,7 +855,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `docker.yml` · `build` | Buildx build and push, with every organisation base image injected as a build argument and registry layer cache. Outputs `image-ref-digest`. |
 | `docker.yml` · `test` | Optional smoke test executed **inside** the built image. Off by default. |
 | `docker.yml` · `promote` | Release-mode only. Refuses unless the caller passes a successful `scan-result`. Resolves the candidate and copies it by digest with `crane mutate --tag`, then tags `latest`, `MAJOR`, `MINOR`. |
@@ -894,7 +894,7 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
    variable.
 
    | Tech stack | Injected build arg | Organisation variable | Description |
-   |---|---|---|---|
+   | --- | --- | --- | --- |
    | **Java** | `JAVA_25_MICRO_BASE_IMAGE` | `vars.JAVA_25_MICRO_BASE_IMAGE` | Minimal hardened Java 25 JRE runtime |
    | **Golang** | `MICRO_ROOT_BASE_IMAGE` | `vars.MICRO_ROOT_BASE_IMAGE` | Distroless minimal root container for static binaries |
    | **Python** | `PYTHON_312_MICRO_BASE_IMAGE` | `vars.PYTHON_312_MICRO_BASE_IMAGE` | Minimal Python 3.12 micro runtime |
@@ -1157,7 +1157,7 @@ an image, every project uses an **inverted allowlist**:
 2. **Explicit allowlist (`!`).** Unignore only the exact files the Dockerfile copies.
 
 | Tech stack | Allowlisted packaging targets |
-|---|---|
+| --- | --- |
 | **Python** (`uv` + `src/`) | `pyproject.toml`, `uv.lock`, `.uv-cache/`, `src/` |
 | **Java** (Spring Boot fat JAR) | `target/*.jar` or `build/libs/*.jar` |
 | **Golang** (static binary) | `bin/` |
@@ -1180,7 +1180,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `chart.yml` · `docs` | Regenerates `chart/README.md` with `helm-docs` and fails on drift, showing the diff and the exact command in the summary. |
 | `chart.yml` · `lint` | `helm lint --strict`, with optional inline value overrides. |
 | `chart.yml` · `unittest` | **Optional, opt-in** (`run-unittest: true`, default `false`). Renders the mock consumer chart at `mock-chart` (default `test`) with `helm unittest --strict` and uploads `chart-unittest-report`. For repositories that *ship* a chart others depend on; requires the `unittest` Helm plugin in the job image. |
@@ -1203,7 +1203,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `terraform-lint.yml` · `init` | `terraform init` with the backend workspace key prefix. Caches providers by `.terraform.lock.hcl`. |
 | `terraform-lint.yml` · `validate` | `terraform validate` and `terraform fmt -recursive -check`. |
 | `terraform-lint.yml` · `tflint` | Recursive `tflint` across all module call types. |
@@ -1237,7 +1237,7 @@ module "eks" {
 ### sonarqube
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `sonarqube.yml` · `sonarqube` | Runs in the SonarSource scanner container. Fetches full history (Sonar attributes issues to authors and measures new code against a baseline), downloads any `*-test-reports` artifacts for coverage, and waits on the quality gate. A monorepo child analyses as its own project, keyed by its subpath. |
 
 ---
@@ -1245,7 +1245,7 @@ module "eks" {
 ### secret-scanning
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `secret-scanning.yml` · `secret-scan` | betterleaks over git history. On a pull request only the branch range is scanned; elsewhere the full history. Findings are redacted in the log. |
 
 ---
@@ -1274,7 +1274,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `sbom.yml` · `generate` | CycloneDX `sbom.cdx.json`. Links the Maven cache into place first so Java components resolve completely. Uploads `sbom`. |
 | `sbom.yml` · `scan` | Scans the generated document for CVEs. Separate job, so a scan failure is distinguishable from a generation failure and the SBOM is published either way. |
 
@@ -1293,7 +1293,7 @@ Docker Compose stacks. Verifies the image exists, patches the compose file in th
 repository, and triggers a Komodo stack redeploy.
 
 | Input | Required | Description |
-|---|:--:|---|
+| --- | :--: | --- |
 | `environment` | ✅ | Target environment |
 | `stack-name` | ✅ | Komodo stack to redeploy |
 | `gitops-repo` | ✅ | GitOps repository holding the compose file |
@@ -1307,7 +1307,7 @@ Kubernetes. Supports both **Helm mode** (patch `targetRevision` / values) and **
 mode** (patch an image reference), then syncs and waits for `Healthy`.
 
 | Input | Required | Description |
-|---|:--:|---|
+| --- | :--: | --- |
 | `environment` | ✅ | Target environment |
 | `gitops-repo` | ✅ | GitOps repository |
 | `app-path` | ✅ | Path to the application within it |
@@ -1326,7 +1326,7 @@ flowchart LR
 ```
 
 | Workflow · Job | Description |
-|---|---|
+| --- | --- |
 | `release.yml` · `collect` | Downloads this run's artifacts and, via `gh run download`, the candidate run's. Consolidates `RELEASE_CHANGELOG.md`, `RELEASE_MIGRATION.md`, image/chart/Terraform info and every scan report into the release body, and stages the assets. |
 | `release.yml` · `publish` | Creates the git tag and the GitHub Release with all staged assets. |
 | `release.yml` · `notify` | Microsoft Teams Adaptive Card with the rendered release notes and links. |
@@ -1347,7 +1347,7 @@ That leaves a choice about how much of the pull request's verification to repeat
 default-branch push:
 
 | Shape | Jobs on a release | Trade-off |
-|---|---|---|
+| --- | --- | --- |
 | **Fail-closed** | `init`, `trivy-cache`, `scan`, `check`, `image`, `release` | `promote` refuses an image this run did not see scanned. Costs a second scan of an artifact that has not changed. |
 | **GitLab parity** | `init`, `image`, `release` | Matches the GitLab library, where `.image-build-workflow-rules`, `.image-scan-workflow-rules` and `.image-check-rules` all end in `when: never` for a default-branch push, and `Image:Promote` declares `needs: [Common:Init]` alone. Requires `require-scan: false`. |
 
@@ -1379,7 +1379,7 @@ wherever possible.
 ### Required variables
 
 | Variable | Description |
-|---|---|
+| --- | --- |
 | `IMAGE_REGISTRY` | Container and chart registry host, e.g. `registry.domain.local`. |
 | `IMAGE_REPOSITORY` | Image repository path, e.g. `myapp/order-backend`. |
 | `TOOLKIT_BUILD_IMAGE` | Default build container, e.g. `devops/build-containers/bt-container:3.2.1`. |
@@ -1393,7 +1393,7 @@ wherever possible.
 ### Build & base image variables
 
 | Variable | Used by | Description |
-|---|---|---|
+| --- | --- | --- |
 | `TOOLKIT_BUILD_IMAGE` | every `*-build`, `*-lint`, `buildah`, `terraform-*` | The one build container. Go, JDK + Maven, Python, Node, buildah and the linters are all baked into it; there is no per-language build image. |
 | `SONAR_SCANNER_IMAGE` | `sonarqube` | SonarSource scanner container |
 | `BUILDKIT_IMAGE` | `docker` | Buildx driver image |
@@ -1406,7 +1406,7 @@ wherever possible.
 ### Behavioural variables
 
 | Variable | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `CI_RUNNER` | `ubuntu-26.04` | Runner label for every job. Pinned rather than tracking `ubuntu-latest`, so a platform migration cannot change the build environment under a release. |
 | `PROJECT_PATH` | `.` | Root directory of the application inside the repository. |
 | `CHART_DIR` | `./chart` | Path to the Helm chart folder. |
@@ -1421,12 +1421,11 @@ wherever possible.
 | `MIGRATION_FILE_NAME` | `./MIGRATION.md` | Migration guide path. |
 | `UPSTREAM_WORKFLOW` | `pr.yml` | Workflow file whose successful run produced the candidate artifacts. |
 | `HADOLINT_IGNORE` | — | Comma-separated extra hadolint rules to ignore. |
-| `MD_LINT_IGNORE_RULE` | — | Space-separated extra markdownlint rules to exclude. |
 
 ### Security & quality variables
 
 | Variable | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `TRIVY_HOST` | — | Shared Trivy server. **Unset means every scan downloads the ~1.2 GB database.** |
 | `TRIVY_TIMEOUT` | `60m` | Scan timeout. |
 | `TRIVY_IGNORE_CONFIG_FILE` | `ignored-cves.yml` | Suppression configuration path. |
@@ -1439,7 +1438,7 @@ wherever possible.
 ### Secrets
 
 | Secret | Required | Description |
-|---|:--:|---|
+| --- | :--: | --- |
 | `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` | ✅ | Pull the build containers; push images and charts. Every job needs these because every job is containerised. |
 | `CI_LIBRARY_TOKEN` | | Only when this library lives in a repository `GITHUB_TOKEN` cannot read. |
 | `TRIVY_TOKEN` | | Authenticate to a shared Trivy server. |
@@ -1512,7 +1511,7 @@ When a scan finds something not yet suppressed, it prints a ready-to-paste
 All scanning jobs evaluate results with the same status codes:
 
 | Exit code | Meaning | Job result |
-|---|---|---|
+| --- | --- | --- |
 | `0` | Clean scan — all checks passed. | Success ✅ |
 | `1` | Fixable vulnerabilities, stale ignore entries, or invalid reasons. | Failed ❌ |
 | `2` | Warnings only — unfixable vulnerabilities or approved suppressions. | Success with warning ⚠️ |
@@ -4003,14 +4002,14 @@ Consuming projects are expected to follow the same standard the library applies 
 
 ### The library's own pipeline
 
-`self-ci.yml` (pull request) and `self-cd.yml` (push to the default branch) are this library's counterpart of
-`ci-templates/.gitlab-ci.yml`. They run the library against itself:
+`pr.yml` (pull request) and `release-trigger.yml` (push to the default branch) are this library's
+counterpart of `ci-templates/.gitlab-ci.yml`. They run the library against itself:
 
 | Phase | Jobs |
-|---|---|
+| --- | --- |
 | Lint | `actionlint`, `shellcheck`, plus `lint.yml` for YAML, changelog and migration guide |
 | Check | `check.yml` — git tag availability, changelog section, migration section |
-| Release | `self-cd.yml` → `release.yml` — tags the repository, publishes the GitHub Release with the extracted notes, posts the Teams card |
+| Release | `release-trigger.yml` → reusable `release.yml` — tags the repository, publishes the GitHub Release with the extracted notes, posts the Teams card |
 
 The released version is the contents of `VERSION`. Bump it in the pull request that ships
 the change, the same way `RELEASE_VERSION` is bumped in the GitLab library's own

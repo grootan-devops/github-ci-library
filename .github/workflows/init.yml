@@ -126,7 +126,7 @@ jobs:
       pull-requests: read
 
     container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
 
     env:
       PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}

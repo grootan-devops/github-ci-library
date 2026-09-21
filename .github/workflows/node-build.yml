@@ -51,7 +51,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
@@ -123,7 +123,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
@@ -203,7 +203,7 @@ jobs:
       contents: read
       checks: write
     container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}

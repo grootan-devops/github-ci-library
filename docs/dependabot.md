@@ -1,6 +1,6 @@
 # Dependabot Reference
 
-Ref: https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-manifests-for-dependency-scope https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference
+Ref: <https://docs.github.com/en/code-security/reference/supply-chain-security/supported-ecosystems-and-manifests-for-dependency-scope> <https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference>
 
 ```yaml
 # .github/dependabot.yml
