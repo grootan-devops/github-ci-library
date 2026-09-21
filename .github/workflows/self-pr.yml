@@ -23,6 +23,9 @@ jobs:
       pull-requests: read
     uses: ./.github/workflows/init.yml
     secrets: inherit
+    with:
+      ignore-docker: ${{ 'true' }}
+      ignore-chart: ${{ 'true' }}
 
   lint:
     uses: ./.github/workflows/self-lint.yml
