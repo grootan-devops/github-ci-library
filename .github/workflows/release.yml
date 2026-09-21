@@ -305,8 +305,17 @@ jobs:
           if [[ "${DRAFT}" == "true" ]]; then ARGS+=(--draft); fi
           if [[ "${PRERELEASE}" == "true" ]]; then ARGS+=(--prerelease); fi
 
+          # The changelog IS the release body, so attaching it too gives the reader the
+          # same text twice -- once inline, once as a download. It stays in the payload
+          # artifact because the notify job reads the Teams card body from there.
           shopt -s nullglob
-          ASSETS=(payload/_release_assets/*)
+          ASSETS=()
+          for ASSET in payload/_release_assets/*; do
+            if [[ "$(basename "${ASSET}")" == "$(basename "${RELEASE_CHANGELOG_FILE_NAME}")" ]]; then
+              continue
+            fi
+            ASSETS+=("${ASSET}")
+          done
           shopt -u nullglob
 
           # Re-running an existing release updates it rather than failing.
