@@ -69,6 +69,11 @@ on:
         type: string
         default: "test"
         description: "Mock consumer chart directory, relative to the chart directory, used by run-unittest."
+      publish-candidate:
+        required: false
+        type: boolean
+        default: true
+        description: "Publish the candidate chart. Disable for PR verification when the OCI registry is not provisioned."
 
 env:
   PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
@@ -312,7 +317,7 @@ jobs:
   push:
     name: Push
     needs: build
-    if: ${{ !cancelled() && !inputs.is-release && needs.build.result == 'success' }}
+    if: ${{ inputs.publish-candidate && !cancelled() && !inputs.is-release && needs.build.result == 'success' }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
