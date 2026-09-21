@@ -41,6 +41,11 @@ on:
         type: string
         default: ""
         description: "Project root. Monorepo children set this."
+      allow-unstable-library-refs:
+        required: false
+        type: boolean
+        default: false
+        description: "TESTING ONLY. Warn instead of failing when a library ref is not a stable tag."
       check-migration:
         required: false
         type: boolean
@@ -78,7 +83,7 @@ jobs:
           set -euo pipefail
           cd "${PROJECT_PATH}"
 
-          TARGETS='[{"name":"Git Tag Unused","subject":"tag","script":"tag-check.sh"}]'
+          TARGETS='[{"name":"Git Tag Unused","subject":"tag","script":"tag-check.sh"},{"name":"Library Pinning","subject":"library-pin","script":"library-pin-check.sh"}]'
 
           if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
             TARGETS="$(jq -c '. + [{"name":"Changelog","subject":"changelog","script":"changelog-check.sh"}]' <<< "${TARGETS}")"
@@ -143,6 +148,7 @@ jobs:
           CHART_VERSION: ${{ inputs.chart-version }}
           CHART_REPOSITORY: ${{ inputs.chart-repository }}
           CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
+          ALLOW_UNSTABLE_LIBRARY_REFS: ${{ inputs.allow-unstable-library-refs }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
           REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}

@@ -185,7 +185,6 @@ jobs:
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  # Requires the `unittest` Helm plugin in the job image.
   unittest:
     name: Unit Test
     if: ${{ inputs.run-unittest }}

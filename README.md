@@ -575,6 +575,43 @@ be specific. Add `workflow_dispatch` to any of these for on-demand runs.
 | `build.yml` | `init` + `*-build` | Build and unit test only. | — |
 | `check.yml` | `init` + `check` | Release prerequisite guards only. | — |
 
+### Only stable library versions reach a release
+
+Three guards enforce it, and all three are on by default for every consumer:
+
+| Guard | Rejects |
+|---|---|
+| `check.yml` · `library-pin` (GitHub) | `uses: …/workflows/x.yml@dev`, `@main`, a commit SHA, or a `-rc` tag |
+| `Common:Check:Library:Pin` (GitLab) | `include: ref:` on a branch, and a `remote:` raw URL whose ref segment is not a tag |
+| `check.yml` · `chart-dependency` | a `Chart.yaml` dependency on the dev repository, **or** a version that is a range (`^1.2.0`) or a pre-release |
+
+A branch or a range moves underneath the repository: the pipeline that passed review is not
+the one that ships, and the release cannot be reproduced from its tag. A commit SHA is
+reproducible but opaque — it says nothing about which migrations the consumer still owes,
+which is what `MIGRATION.md` chains are keyed on.
+
+**The escape hatch is for testing only.** `allow-unstable-library-refs: true` (GitHub) and
+`ALLOW_UNSTABLE_LIBRARY_REFS: "true"` (GitLab) downgrade the failure to a warning so a pull
+request can track a library branch while that branch is still being written. The run then
+says so loudly in its summary. Leaving it on defeats the guard entirely — a release cut with
+it enabled is pinned to nothing.
+
+```yaml
+  check:
+    needs: init
+    uses: grootan-devops/github-ci-library/.github/workflows/check.yml@1.0.0
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      # TESTING ONLY -- remove before merging.
+      allow-unstable-library-refs: true
+```
+
+> [!NOTE]
+> This library publishes no tags yet, so every repository currently pins `@dev` and would
+> fail the guard the moment it is enabled. Tag the libraries first, repoint consumers, then
+> let it fail closed.
+
 ---
 
 ### Comprehensive Execution Matrix
@@ -724,6 +761,7 @@ flowchart LR
 | Workflow · Job | Description |
 |---|---|
 | `init.yml` · `initialize` | Discovers the application version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **26 outputs.** |
+| `check.yml` · `library-pin` | Fails when a reusable-workflow call pins a branch, a commit SHA or a pre-release instead of a published tag. Runs for every consumer. Set `allow-unstable-library-refs: true` to downgrade it to a warning while testing against a library branch. |
 | `check.yml` · `tag-existence` | Fails when the git tag already exists on a different commit. A tag already on *this* commit is treated as a re-run, not a collision. |
 | `check.yml` · `changelog-existence` | Extracts the `## [x.y.z]` section from `CHANGELOG.md` and renders it as an Adaptive Card fragment. Uploads `release-changelog`. |
 | `check.yml` · `migration-existence` | Extracts the `previous...current` section from `MIGRATION.md`. Skipped for an initial release, or disabled with `check-migration: false` for artifacts that intentionally have no migration contract. Uploads `release-migration`. |
