@@ -18,10 +18,12 @@
 #   PR_NUMBER                 pull request number on a pull_request run (default: empty)
 #   TAG                       resolved release tag (default: empty)
 #   VERSION_SUFFIX            candidate suffix, empty on a release (default: empty)
+#   IMAGE_REGISTRY            image registry host (default: empty)
 #   IMAGE_PUSH_TAG            image tag this run publishes (default: empty)
 #   IMAGE_PUSH_REPOSITORY     image repository this run pushes to (default: empty)
 #   IMAGE_REPOSITORY          production image repository (default: empty)
 #   CHART_PUSH_VERSION        chart version this run publishes (default: empty)
+#   CHART_REGISTRY            chart registry host (default: empty)
 #   CHART_PUSH_REPOSITORY     chart repository this run pushes to (default: empty)
 #   CHART_REPOSITORY          production chart repository (default: empty)
 #   MERGED_PR_NUMBER          pull request this release commit came from (default: empty)
@@ -37,10 +39,12 @@ set -euo pipefail
 : "${PR_NUMBER:=}"
 : "${TAG:=}"
 : "${VERSION_SUFFIX:=}"
+: "${IMAGE_REGISTRY:=}"
 : "${IMAGE_PUSH_TAG:=}"
 : "${IMAGE_PUSH_REPOSITORY:=}"
 : "${IMAGE_REPOSITORY:=}"
 : "${CHART_PUSH_VERSION:=}"
+: "${CHART_REGISTRY:=}"
 : "${CHART_PUSH_REPOSITORY:=}"
 : "${CHART_REPOSITORY:=}"
 : "${MERGED_PR_NUMBER:=}"
@@ -90,10 +94,10 @@ fi
     echo "| Artifact | Pushes to | Production |"
     echo "|---|---|---|"
     if [[ "${WANT_IMAGE}" == "true" ]]; then
-      echo "| Image | \`${IMAGE_PUSH_REPOSITORY}\` | \`${IMAGE_REPOSITORY}\` |"
+      echo "| Image | \`${IMAGE_REGISTRY}/${IMAGE_PUSH_REPOSITORY}\` | \`${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}\` |"
     fi
     if [[ "${WANT_CHART}" == "true" ]]; then
-      echo "| Chart | \`${CHART_PUSH_REPOSITORY}\` | \`${CHART_REPOSITORY}\` |"
+      echo "| Chart | \`${CHART_REGISTRY}/${CHART_PUSH_REPOSITORY}\` | \`${CHART_REGISTRY}/${CHART_REPOSITORY}\` |"
     fi
   fi
 

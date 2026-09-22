@@ -25,7 +25,8 @@
 #   MANIFEST_FILE        Kubernetes manifest path (manifest mode)
 #   NEW_IMAGE_INPUT      explicit image reference (mandatory in manifest mode)
 #   CHART_VERSION        chart version to deploy
-#   REGISTRY_HOST        registry hostname
+#   IMAGE_REGISTRY       container image registry hostname
+#   CHART_REGISTRY       Helm chart registry hostname
 #   CHART_REPOSITORY     base chart repository path
 #   IMAGE_REPOSITORY     base image repository path
 #   DEV_SUFFIX           suffix appended to the repository paths
@@ -45,7 +46,8 @@ set -euo pipefail
 : "${MANIFEST_FILE:=}"
 : "${NEW_IMAGE_INPUT:=}"
 : "${CHART_VERSION:=}"
-: "${REGISTRY_HOST:=}"
+: "${IMAGE_REGISTRY:=}"
+: "${CHART_REGISTRY:=}"
 : "${CHART_REPOSITORY:=}"
 : "${IMAGE_REPOSITORY:=}"
 : "${DEV_SUFFIX:=}"
@@ -154,15 +156,19 @@ TARGET_VERSION="${CHART_VERSION}"
 # are distinguished by their versions.
 IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
 CHART_DEV_SUFFIX="${DEV_SUFFIX}"
-case "${REGISTRY_HOST}" in
+case "${IMAGE_REGISTRY}" in
   docker.io|index.docker.io|registry-1.docker.io)
     IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
+    ;;
+esac
+case "${CHART_REGISTRY}" in
+  docker.io|index.docker.io|registry-1.docker.io)
     CHART_DEV_SUFFIX=""
     ;;
 esac
 
-CHART_REPO_URL="${REGISTRY_HOST}/${CHART_REPOSITORY}${CHART_DEV_SUFFIX}"
-NEW_IMAGE="${NEW_IMAGE_INPUT:-${REGISTRY_HOST}/${IMAGE_REPOSITORY}${IMAGE_DEV_SUFFIX}:${TARGET_VERSION}}"
+CHART_REPO_URL="${CHART_REGISTRY}/${CHART_REPOSITORY}${CHART_DEV_SUFFIX}"
+NEW_IMAGE="${NEW_IMAGE_INPUT:-${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}${IMAGE_DEV_SUFFIX}:${TARGET_VERSION}}"
 
 {
   echo "gitops_branch=${GITOPS_BRANCH}"

@@ -106,6 +106,12 @@ on:
       IMAGE_REGISTRY_PASSWORD:
         required: false
         description: "Registry password or token used to verify the chart and image."
+      CHART_REGISTRY_USERNAME:
+        required: false
+        description: "Chart registry username used to verify the Helm chart."
+      CHART_REGISTRY_PASSWORD:
+        required: false
+        description: "Chart registry password or token used to verify the Helm chart."
       ARGOCD_AUTH_TOKEN:
         required: false
         description: "ArgoCD API token used to sync the application (defaults to secrets.ARGOCD_AUTH_TOKEN)."
@@ -117,9 +123,12 @@ on:
         description: "Token used to check out this CI library. Falls back to GITHUB_TOKEN."
 
 env:
-  REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-  REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-  REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+  IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+  IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+  CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+  CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+  CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
   CHART_NAME: ${{ inputs.chart-name }}
   CHART_VERSION: ${{ inputs.chart-version }}
   CHART_REPOSITORY: ${{ inputs.chart-repository }}
@@ -186,14 +195,14 @@ jobs:
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validate-chart.sh"
 
       - name: Validate Image Exists In Registry
-        if: steps.resolve.outputs.new_image != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != ''
+        if: steps.resolve.outputs.new_image != '' && env.IMAGE_REGISTRY_USERNAME != '' && env.IMAGE_REGISTRY_PASSWORD != ''
         env:
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
         run: |
           set -euo pipefail
-          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
+          crane auth login "${IMAGE_REGISTRY}" --username "${IMAGE_REGISTRY_USERNAME}" --password "${IMAGE_REGISTRY_PASSWORD}"
           TARGET="${{ steps.resolve.outputs.new_image }}"
           if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
             echo "${MANIFEST_OUTPUT}" >&2

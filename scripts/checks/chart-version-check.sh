@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # Guard: the chart version being released must not already be published.
+#
+# Env:
+#   CHART_REGISTRY             OCI registry host
+#   CHART_REGISTRY_USERNAME    registry username
+#   CHART_REGISTRY_PASSWORD    registry password or token
+#   CHART_NAME                 Helm chart name
+#   CHART_REPOSITORY           production chart repository
+#   CHART_VERSION              chart version being guarded
 set -euo pipefail
 
 : "${CHART_NAME:?CHART_NAME is required}"
@@ -22,30 +30,33 @@ if [[ ! "${CHART_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 # Capture helm's words: a bad credential and an unreachable registry both exit 1.
-if ! LOGIN_OUTPUT="$(printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin 2>&1)"; then
-  echo "::error title=Chart::Could not authenticate to ${REGISTRY_HOST}."
+: "${CHART_REGISTRY:?CHART_REGISTRY is required}"
+: "${CHART_REGISTRY_USERNAME:?CHART_REGISTRY_USERNAME is required}"
+: "${CHART_REGISTRY_PASSWORD:?CHART_REGISTRY_PASSWORD is required}"
+if ! LOGIN_OUTPUT="$(printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin 2>&1)"; then
+  echo "::error title=Chart::Could not authenticate to ${CHART_REGISTRY}."
   echo "${LOGIN_OUTPUT}" >&2
   {
     echo "### ⎈ Chart version"
     echo ""
-    echo "❌ Could not log in to \`${REGISTRY_HOST}\` as \`${REGISTRY_USERNAME:-<unset>}\`, so \`${CHART_VERSION}\` cannot be confirmed available. Helm reported:"
+    echo "❌ Could not log in to \`${CHART_REGISTRY}\` as \`${CHART_REGISTRY_USERNAME}\`, so \`${CHART_VERSION}\` cannot be confirmed available. Helm reported:"
     echo ""
     echo '```'
     tail -n 20 <<< "${LOGIN_OUTPUT}"
     echo '```'
     echo ""
-    echo "Check \`secrets.IMAGE_REGISTRY_USERNAME\` / \`secrets.IMAGE_REGISTRY_PASSWORD\` and that the caller passes \`secrets: inherit\`."
+    echo "Check \`secrets.CHART_REGISTRY_USERNAME\` / \`secrets.CHART_REGISTRY_PASSWORD\` and that the caller passes \`secrets: inherit\`."
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
 
-TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}/${CHART_NAME}"
+TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}/${CHART_NAME}"
 if helm show chart "${TARGET}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
   EXISTS="true"
-elif helm show chart "oci://${REGISTRY_HOST}/${CHART_REPOSITORY}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
+elif helm show chart "oci://${CHART_REGISTRY}/${CHART_REPOSITORY}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
   EXISTS="true"
-  TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}"
+  TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}"
 else
   EXISTS="false"
 fi

@@ -7,6 +7,12 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Chart workflows now use the dedicated `CHART_REGISTRY`, `CHART_REPOSITORY`,
+  `CHART_REGISTRY_USERNAME` and `CHART_REGISTRY_PASSWORD` configuration. Image registry
+  configuration is required only when image publishing is enabled.
+
 ## [1.0.0] - 2026-09-19
 
 ### Added

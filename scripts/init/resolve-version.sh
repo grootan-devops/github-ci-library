@@ -20,7 +20,8 @@
 #   IGNORE_CHART_INPUT            auto | true | false (default: empty, treated as auto)
 #   IGNORE_DOCKER_INPUT           auto | true | false (default: empty, treated as auto)
 #   INPUT_TAG                     explicit version override (default: empty, discover instead)
-#   REGISTRY_HOST                 vars.IMAGE_REGISTRY (default: empty)
+#   IMAGE_REGISTRY_HOST           vars.IMAGE_REGISTRY (default: empty)
+#   CHART_REGISTRY_HOST           vars.CHART_REGISTRY (default: empty)
 #   IMAGE_REPOSITORY_INPUT        vars.IMAGE_REPOSITORY (default: empty)
 #   IMAGE_DEV_REPOSITORY_SUFFIX   candidate image repository suffix (default: empty, then /dev)
 #   CHART_REPOSITORY_INPUT        vars.CHART_REPOSITORY (default: empty)
@@ -41,7 +42,8 @@ set -euo pipefail
 : "${IGNORE_CHART_INPUT:=}"
 : "${IGNORE_DOCKER_INPUT:=}"
 : "${INPUT_TAG:=}"
-: "${REGISTRY_HOST:=}"
+: "${IMAGE_REGISTRY_HOST:=}"
+: "${CHART_REGISTRY_HOST:=}"
 : "${IMAGE_REPOSITORY_INPUT:=}"
 : "${IMAGE_DEV_REPOSITORY_SUFFIX:=}"
 : "${CHART_REPOSITORY_INPUT:=}"
@@ -226,7 +228,7 @@ fi
 IMAGE_REPO="${IMAGE_REPOSITORY_INPUT}"
 IMAGE_DEV_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX:-/dev}"
 # Docker Hub has no nested repositories, so `<repo>/dev` is not a valid target.
-case "${REGISTRY_HOST}" in
+case "${IMAGE_REGISTRY_HOST}" in
   docker.io|index.docker.io|registry-1.docker.io)
     NORMALISED_DEV_SUFFIX="${IMAGE_DEV_SUFFIX//\//-}"
     if [[ "${NORMALISED_DEV_SUFFIX}" != "${IMAGE_DEV_SUFFIX}" ]]; then
@@ -243,7 +245,7 @@ CHART_DEV_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX:-/dev}"
 # is therefore no separate chart development repository on Docker Hub. The
 # candidate version suffix already separates candidate artifacts from stable
 # releases in the shared chart repository.
-case "${REGISTRY_HOST}" in
+case "${CHART_REGISTRY_HOST}" in
   docker.io|index.docker.io|registry-1.docker.io)
     if [[ -n "${CHART_DEV_SUFFIX}" ]]; then
       echo "::notice title=Dev chart repository::Docker Hub stores candidate and release Helm charts in the same namespace-root repository; the chart version distinguishes them. Ignoring chart development suffix '${CHART_DEV_SUFFIX}'."
@@ -274,7 +276,11 @@ MAJOR_VERSION="$(grep -Eo '^[0-9]+' <<<"${IMAGE_PUSH_TAG}" || true)"
 MINOR_VERSION="$(grep -Eo '^[0-9]+\.[0-9]+' <<<"${IMAGE_PUSH_TAG}" || true)"
 
 {
-  echo "REGISTRY=${REGISTRY_HOST}"
+  # Keep REGISTRY for callers written before split registries were introduced;
+  # artifact-specific outputs are authoritative when both registries differ.
+  echo "REGISTRY=${IMAGE_REGISTRY_HOST:-${CHART_REGISTRY_HOST}}"
+  echo "IMAGE_REGISTRY=${IMAGE_REGISTRY_HOST}"
+  echo "CHART_REGISTRY=${CHART_REGISTRY_HOST}"
   echo "TAG=${TAG}"
   echo "RELEASE_VERSION=${RELEASE_VERSION}"
   echo "VERSION_SUFFIX=${VERSION_SUFFIX}"

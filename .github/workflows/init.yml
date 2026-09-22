@@ -49,8 +49,14 @@ on:
         description: "Resolved ignore-docker decision"
         value: ${{ jobs.initialize.outputs.IGNORE_DOCKER }}
       registry:
-        description: "Resolved container & chart registry host"
+        description: "Resolved image registry host (legacy output; use image-registry and chart-registry for split registries)"
         value: ${{ jobs.initialize.outputs.REGISTRY }}
+      image-registry:
+        description: "Resolved container image registry host"
+        value: ${{ jobs.initialize.outputs.IMAGE_REGISTRY }}
+      chart-registry:
+        description: "Resolved Helm chart registry host"
+        value: ${{ jobs.initialize.outputs.CHART_REGISTRY }}
       image-tag:
         description: "Base container image tag (application version)"
         value: ${{ jobs.initialize.outputs.IMAGE_TAG }}
@@ -133,9 +139,14 @@ jobs:
       CHART_DIR: ${{ inputs.chart-dir }}
       CHART_FILE: ${{ vars.CHART_FILE || 'Chart.yaml' }}
       DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
-      REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+      IMAGE_REGISTRY_INPUT: ${{ vars.IMAGE_REGISTRY }}
       IMAGE_REPOSITORY_INPUT: ${{ vars.IMAGE_REPOSITORY }}
-      CHART_REPOSITORY_INPUT: ${{ vars.CHART_REPOSITORY || 'helm' }}
+      IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+      IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+      CHART_REGISTRY_INPUT: ${{ vars.CHART_REGISTRY }}
+      CHART_REPOSITORY_INPUT: ${{ vars.CHART_REPOSITORY }}
+      CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+      CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
       IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
       CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
       RELEASE_VERSION_SUFFIX: ${{ vars.RELEASE_VERSION_SUFFIX }}
@@ -155,6 +166,8 @@ jobs:
       IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
       IGNORE_DOCKER: ${{ steps.version.outputs.IGNORE_DOCKER }}
       REGISTRY: ${{ steps.version.outputs.REGISTRY }}
+      IMAGE_REGISTRY: ${{ steps.version.outputs.IMAGE_REGISTRY }}
+      CHART_REGISTRY: ${{ steps.version.outputs.CHART_REGISTRY }}
       IMAGE_TAG: ${{ steps.version.outputs.IMAGE_TAG }}
       IMAGE_PUSH_TAG: ${{ steps.version.outputs.IMAGE_PUSH_TAG }}
       IMAGE_REPOSITORY: ${{ steps.version.outputs.IMAGE_REPOSITORY }}
@@ -197,6 +210,8 @@ jobs:
         id: version
         env:
           REF_PROTECTED: ${{ github.ref_protected || 'false' }}
+          IMAGE_REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          CHART_REGISTRY_HOST: ${{ vars.CHART_REGISTRY }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/resolve-version.sh"
 
       - name: Resolve Upstream Candidate Provenance
@@ -219,10 +234,12 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           TAG: ${{ steps.version.outputs.TAG }}
           VERSION_SUFFIX: ${{ steps.version.outputs.VERSION_SUFFIX }}
+          IMAGE_REGISTRY: ${{ steps.version.outputs.IMAGE_REGISTRY }}
           IMAGE_PUSH_TAG: ${{ steps.version.outputs.IMAGE_PUSH_TAG }}
           IMAGE_PUSH_REPOSITORY: ${{ steps.version.outputs.IMAGE_PUSH_REPOSITORY }}
           IMAGE_DEV_REPOSITORY: ${{ steps.version.outputs.IMAGE_DEV_REPOSITORY }}
           IMAGE_REPOSITORY: ${{ steps.version.outputs.IMAGE_REPOSITORY }}
+          CHART_REGISTRY: ${{ steps.version.outputs.CHART_REGISTRY }}
           CHART_PUSH_VERSION: ${{ steps.version.outputs.CHART_PUSH_VERSION }}
           CHART_PUSH_REPOSITORY: ${{ steps.version.outputs.CHART_PUSH_REPOSITORY }}
           CHART_DEV_REPOSITORY: ${{ steps.version.outputs.CHART_DEV_REPOSITORY }}

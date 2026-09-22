@@ -78,7 +78,7 @@ on:
 env:
   PROJECT_PATH: ${{ inputs.project-path }}
   CHART_DIR: ${{ inputs.chart-dir }}
-  REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+  CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
   CHART_INFO_FILE_NAME: CHART_INFO.md
 
 permissions:
@@ -129,17 +129,17 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ -z "${REGISTRY_USERNAME}" || -z "${REGISTRY_PASSWORD}" ]]; then
-            echo "::error title=Registry::IMAGE_REGISTRY_USERNAME / IMAGE_REGISTRY_PASSWORD are required to resolve chart dependencies. Pass 'secrets: inherit'."
+          if [[ -z "${CHART_REGISTRY}" || -z "${CHART_REGISTRY_USERNAME}" || -z "${CHART_REGISTRY_PASSWORD}" ]]; then
+            echo "::error title=Registry::CHART_REGISTRY, CHART_REGISTRY_USERNAME and CHART_REGISTRY_PASSWORD are required to resolve chart dependencies. Pass 'secrets: inherit'."
             # shellcheck disable=SC2016 # backticks are markdown, not command substitution
             printf '### ⎈ Chart lint\n\n❌ No registry credentials, so the chart dependencies cannot be resolved and the chart was never linted. Pass `secrets: inherit` from the calling workflow.\n\n' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
-          printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
+          printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
 
       - name: Update Chart Dependencies
         id: deps
@@ -264,9 +264,9 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        run: printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
 
       - name: Package Chart
         id: package
@@ -345,9 +345,9 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        run: printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
 
       - name: Push Chart
         env:
@@ -393,9 +393,9 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        run: printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
 
       - name: Promote Candidate Chart To Production
         env:

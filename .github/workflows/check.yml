@@ -142,9 +142,12 @@ jobs:
           ALLOW_UNSTABLE_LIBRARY_REFS: ${{ inputs.allow-unstable-library-refs }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
           RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md

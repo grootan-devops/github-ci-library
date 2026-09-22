@@ -16,10 +16,10 @@
 # Env:
 #   CHART_NAME            chart name
 #   CHART_VERSION         version being pushed; names the .tgz
-#   CHART_REPOSITORY      repository to push to, under REGISTRY_HOST
+#   CHART_REPOSITORY      repository to push to, under CHART_REGISTRY
 #   CHART_DEV_REPOSITORY  candidate repository to mirror into (same as the
 #                         production repository on Docker Hub)
-#   REGISTRY_HOST         OCI registry host
+#   CHART_REGISTRY        OCI registry host
 #   CHART_INFO_FILE_NAME  file the published details are written to
 #                         (default: CHART_INFO.md)
 #   GITHUB_STEP_SUMMARY   GitHub-provided; appended to
@@ -32,7 +32,7 @@ set -euo pipefail
 : "${CHART_VERSION:?CHART_VERSION must be set}"
 : "${CHART_REPOSITORY:?CHART_REPOSITORY must be set}"
 : "${CHART_DEV_REPOSITORY:=}"
-: "${REGISTRY_HOST:=}"
+: "${CHART_REGISTRY:?CHART_REGISTRY must be set}"
 : "${CHART_INFO_FILE_NAME:=CHART_INFO.md}"
 
 PACKAGE="${CHART_NAME}-${CHART_VERSION}.tgz"
@@ -51,7 +51,7 @@ if [[ ! -f "${PACKAGE}" ]]; then
   exit 1
 fi
 
-TARGET="oci://${REGISTRY_HOST}/${CHART_REPOSITORY}"
+TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}"
 echo "Pushing ${PACKAGE} to ${TARGET}..."
 if ! PUSH_OUTPUT="$(helm push "${PACKAGE}" "${TARGET}" 2>&1)"; then
   echo "${PUSH_OUTPUT}" >&2
@@ -74,7 +74,7 @@ echo "${PUSH_OUTPUT}"
 # still resolve it. A convenience: a failed mirror warns, not fails.
 MIRROR_STATE=""
 if [[ -n "${CHART_DEV_REPOSITORY}" && "${CHART_REPOSITORY}" != "${CHART_DEV_REPOSITORY}" ]]; then
-  DEV_TARGET="oci://${REGISTRY_HOST}/${CHART_DEV_REPOSITORY}"
+  DEV_TARGET="oci://${CHART_REGISTRY}/${CHART_DEV_REPOSITORY}"
   echo "Mirroring ${PACKAGE} to the dev channel at ${DEV_TARGET}..."
   if helm push "${PACKAGE}" "${DEV_TARGET}"; then
     echo "✅ Mirrored ${PACKAGE} to ${DEV_TARGET}."

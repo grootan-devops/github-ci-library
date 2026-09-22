@@ -11,26 +11,26 @@
 # Exit codes: 0 the chart resolves, 1 credentials are missing or it does not.
 #
 # Env:
-#   REGISTRY_HOST      registry hostname to log in to
-#   REGISTRY_USERNAME  registry username (mandatory)
-#   REGISTRY_PASSWORD  registry password or token (mandatory)
+#   CHART_REGISTRY        chart registry hostname to log in to
+#   CHART_REGISTRY_USERNAME chart registry username (mandatory)
+#   CHART_REGISTRY_PASSWORD chart registry password or token (mandatory)
 #   CHART_REPO_URL     resolved chart repository, without the oci:// scheme
 #   CHART_NAME         Helm chart name
 #   TARGET_VERSION     chart version that must exist
 set -euo pipefail
 
-: "${REGISTRY_HOST:=}"
-: "${REGISTRY_USERNAME:=}"
-: "${REGISTRY_PASSWORD:=}"
+: "${CHART_REGISTRY:=}"
+: "${CHART_REGISTRY_USERNAME:=}"
+: "${CHART_REGISTRY_PASSWORD:=}"
 : "${CHART_REPO_URL:=}"
 : "${CHART_NAME:=}"
 : "${TARGET_VERSION:=}"
 
-if [[ -z "${REGISTRY_USERNAME}" || -z "${REGISTRY_PASSWORD}" ]]; then
-  echo "::error::REGISTRY_USERNAME / REGISTRY_PASSWORD are required to verify the chart before deploying."
+if [[ -z "${CHART_REGISTRY}" || -z "${CHART_REGISTRY_USERNAME}" || -z "${CHART_REGISTRY_PASSWORD}" ]]; then
+  echo "::error::CHART_REGISTRY / CHART_REGISTRY_USERNAME / CHART_REGISTRY_PASSWORD are required to verify the chart before deploying."
   exit 1
 fi
-printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password-stdin
+printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
 
 TARGET="oci://${CHART_REPO_URL}/${CHART_NAME}"
 VERSION="${TARGET_VERSION}"

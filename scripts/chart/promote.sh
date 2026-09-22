@@ -18,7 +18,7 @@
 #   DEV_REPOSITORY        candidate repository to promote from (same as the
 #                         production repository on Docker Hub; default: none)
 #   PROD_REPOSITORY       production repository to push to
-#   REGISTRY_HOST         OCI registry host
+#   CHART_REGISTRY        OCI registry host
 #   CHART_DIR             working-tree chart directory (default: ./chart)
 #   CHART_INFO_FILE_NAME  file the published details are written to
 #                         (default: CHART_INFO.md)
@@ -33,11 +33,11 @@ set -euo pipefail
 : "${TAG:=}"
 : "${CANDIDATE_VERSION:=}"
 : "${DEV_REPOSITORY:=}"
-: "${REGISTRY_HOST:=}"
+: "${CHART_REGISTRY:?CHART_REGISTRY must be set}"
 : "${CHART_DIR:=./chart}"
 : "${CHART_INFO_FILE_NAME:=CHART_INFO.md}"
 
-DEV_REF="oci://${REGISTRY_HOST}/${DEV_REPOSITORY}/${CHART_NAME}"
+DEV_REF="oci://${CHART_REGISTRY}/${DEV_REPOSITORY}/${CHART_NAME}"
 mkdir -p _promote
 PULLED=0
 
@@ -85,13 +85,13 @@ else
   exit 1
 fi
 
-if ! PUSH_OUTPUT="$(helm push "${CHART_NAME}-${TAG}.tgz" "oci://${REGISTRY_HOST}/${PROD_REPOSITORY}" 2>&1)"; then
+if ! PUSH_OUTPUT="$(helm push "${CHART_NAME}-${TAG}.tgz" "oci://${CHART_REGISTRY}/${PROD_REPOSITORY}" 2>&1)"; then
   echo "${PUSH_OUTPUT}" >&2
   echo "::error title=Chart promote::The production repository refused ${CHART_NAME}-${TAG}.tgz."
   {
     echo "### ⎈ Helm Chart Package Info"
     echo ""
-    echo "❌ \`oci://${REGISTRY_HOST}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged in the dev repository. Helm reported:"
+    echo "❌ \`oci://${CHART_REGISTRY}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged in the dev repository. Helm reported:"
     echo ""
     echo '```'
     tail -n 30 <<< "${PUSH_OUTPUT}"
@@ -106,7 +106,7 @@ echo "${PUSH_OUTPUT}"
   echo "### ⎈ Helm Chart Package Info"
   echo "- **📦 Name:** \`${CHART_NAME}\`"
   echo "- **🏷️ Version:** \`${TAG}\`"
-  echo "- **🌐 Registry:** \`oci://${REGISTRY_HOST}/${PROD_REPOSITORY}\`"
+  echo "- **🌐 Registry:** \`oci://${CHART_REGISTRY}/${PROD_REPOSITORY}\`"
   echo "- **🔗 Promoted from:** \`${PROMOTED_FROM}\`"
 } > "${CHART_INFO_FILE_NAME}"
 cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"

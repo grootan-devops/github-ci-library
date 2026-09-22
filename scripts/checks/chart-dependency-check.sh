@@ -22,7 +22,7 @@ set -euo pipefail
 PROJECT_PATH="${PROJECT_PATH:-.}"
 CHART_DIR="${CHART_DIR:-./chart}"
 CHART_DEV_REPOSITORY_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX:-/dev}"
-REGISTRY_HOST="${REGISTRY_HOST:-}"
+CHART_REGISTRY="${CHART_REGISTRY:-}"
 ALLOW_UNSTABLE_LIBRARY_REFS="${ALLOW_UNSTABLE_LIBRARY_REFS:-false}"
 CHART_FILE="${PROJECT_PATH}/${CHART_DIR}/Chart.yaml"
 
@@ -58,14 +58,14 @@ FAILED=false
 # Keep the dependency guard aligned with init.yml. Docker Hub stores candidate
 # and release charts in one namespace-root repository, so there is no separate
 # development chart path to reject. Other registries retain the `/dev` path.
-case "${REGISTRY_HOST}" in
+case "${CHART_REGISTRY}" in
   docker.io|index.docker.io|registry-1.docker.io)
     CHART_DEV_REPOSITORY_SUFFIX=""
     ;;
 esac
 
 # --- 1. no dependency may resolve to the development repository -------------
-if [[ "${REGISTRY_HOST}" == "docker.io" || "${REGISTRY_HOST}" == "index.docker.io" || "${REGISTRY_HOST}" == "registry-1.docker.io" ]]; then
+if [[ "${CHART_REGISTRY}" == "docker.io" || "${CHART_REGISTRY}" == "index.docker.io" || "${CHART_REGISTRY}" == "registry-1.docker.io" ]]; then
   echo "::notice title=Chart dependency::Docker Hub uses one namespace-root chart repository for candidate and release versions; the development-repository dependency check is not applicable."
 elif [[ -n "${CHART_REPOSITORY:-}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" ]]; then
   export DEV_PATH="${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}"

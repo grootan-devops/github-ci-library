@@ -1384,8 +1384,10 @@ wherever possible.
 
 | Variable | Description |
 | --- | --- |
-| `IMAGE_REGISTRY` | Container and chart registry host, e.g. `registry.domain.local`. |
-| `IMAGE_REPOSITORY` | Image repository path, e.g. `myapp/order-backend`. |
+| `IMAGE_REGISTRY` | Container image registry host, e.g. `registry.domain.local`. Required when Docker or Buildah publishing is enabled. |
+| `IMAGE_REPOSITORY` | Container image repository path, e.g. `myapp/order-backend`. Required when image publishing is enabled. |
+| `CHART_REGISTRY` | Helm chart OCI registry host, e.g. `registry.domain.local`. Required when chart publishing is enabled. |
+| `CHART_REPOSITORY` | Helm chart repository path, e.g. `helm` or a Docker Hub namespace root. Required when chart publishing is enabled. |
 
 > [!IMPORTANT]
 > Build and base image coordinates carry **no library defaults**. A container variable that
@@ -1419,7 +1421,7 @@ wherever possible.
 | --- | --- | --- |
 | `CI_RUNNER` | `ubuntu-26.04` | Runner label for every job. Pinned rather than tracking `ubuntu-latest`, so a platform migration cannot change the build environment under a release. |
 | `CHART_FILE` | `Chart.yaml` | Chart manifest filename. |
-| `CHART_REPOSITORY` | `helm` | Chart repository path in the registry. For Docker Hub, set this to the namespace root (for example `grootantech`), because Helm appends the chart name. |
+| `CHART_REPOSITORY` | — | Chart repository path in `CHART_REGISTRY`. For Docker Hub, set this to the namespace root (for example `grootantech`), because Helm appends the chart name. |
 | `DOCKERFILE` | `Dockerfile` | Dockerfile path for linting and building. |
 | `MASTER_BRANCH_REGEX` | `^(.*/)?master$` | **Additional** protected branches treated as release branches. The repository's own default branch always is, whatever it is called — leave this alone unless you release from a second branch such as `release/master`. |
 | `IMAGE_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate images: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override. |
@@ -1477,7 +1479,8 @@ A single-project repository omits it; it defaults to the repository root.
 
 | Secret | Required | Description |
 | --- | :--: | --- |
-| `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` | ✅ | Pull the build containers; push images and charts. Every job needs these because every job is containerised. |
+| `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` | When image publishing is enabled | Authenticate to `IMAGE_REGISTRY` for image builds, scans and pushes. |
+| `CHART_REGISTRY_USERNAME` / `CHART_REGISTRY_PASSWORD` | When chart publishing is enabled | Authenticate to `CHART_REGISTRY` for chart dependency resolution, checks and OCI pushes. |
 | `CI_LIBRARY_TOKEN` | | Only when this library lives in a repository `GITHUB_TOKEN` cannot read. |
 | `TRIVY_TOKEN` | | Authenticate to a shared Trivy server. |
 | `SONARQUBE_TOKEN` | | SonarQube analysis. |
@@ -1566,9 +1569,13 @@ handled in the workflow: it annotates and summarises but does not fail. Pass
 
 Configure once at the GitHub organisation level to propagate to every repository:
 
-- **Registries** — `vars.IMAGE_REGISTRY`, `secrets.IMAGE_REGISTRY_USERNAME`,
-  `secrets.IMAGE_REGISTRY_PASSWORD`. One registry serves both images and charts; OCI is the
-  protocol for both.
+- **Image registry** — `vars.IMAGE_REGISTRY`, `vars.IMAGE_REPOSITORY`,
+  `secrets.IMAGE_REGISTRY_USERNAME`, and `secrets.IMAGE_REGISTRY_PASSWORD` when a repository
+  publishes container images.
+- **Chart registry** — `vars.CHART_REGISTRY`, `vars.CHART_REPOSITORY`,
+  `secrets.CHART_REGISTRY_USERNAME`, and `secrets.CHART_REGISTRY_PASSWORD` when a repository
+  publishes Helm charts. A repository that publishes both artifact types must configure both
+  sets; chart-only repositories must not need image variables.
 - **Build containers** — `vars.SONAR_SCANNER_IMAGE`. The toolkit build container is pinned
   in the library, not set here.
 - **Base images** — `vars.MICRO_ROOT_BASE_IMAGE`, read by `buildah.yml` only. The other
@@ -1582,16 +1589,17 @@ Configure once at the GitHub organisation level to propagate to every repository
 
 ### Helm chart publishing & authentication
 
-Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
+Charts publish over **OCI** to `oci://${CHART_REGISTRY}/${CHART_REPOSITORY}`.
 
-For Docker Hub, set `IMAGE_REGISTRY=registry-1.docker.io` and `CHART_REPOSITORY` to the
+For Docker Hub, set `CHART_REGISTRY=registry-1.docker.io` and `CHART_REPOSITORY` to the
 Docker Hub namespace root, for example `grootantech`. Helm appends the chart name, so
 `tpl-library` is published at `oci://registry-1.docker.io/grootantech/tpl-library`.
 Candidate and release versions use that same chart repository; candidate version suffixes
 keep them distinct.
 
-- **Auth**: `helm registry login` with `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD`.
-  The same credential covers images and charts.
+- **Auth**: `helm registry login` with `CHART_REGISTRY_USERNAME` /
+  `CHART_REGISTRY_PASSWORD`. Image credentials are independent and are only needed when the
+  repository publishes images.
 - **Dev vs production**: on registries with nested paths, candidates publish to
   `${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}`. On Docker Hub, candidates and releases
   publish to `${CHART_REPOSITORY}` and are distinguished by their chart versions. At release,
@@ -1600,8 +1608,8 @@ keep them distinct.
 - **Consuming a published chart**:
 
   ```bash
-  helm registry login "${IMAGE_REGISTRY}" --username "${USER}" --password-stdin
-  helm pull "oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}/order-backend" --version 1.4.0
+  helm registry login "${CHART_REGISTRY}" --username "${USER}" --password-stdin
+  helm pull "oci://${CHART_REGISTRY}/${CHART_REPOSITORY}/order-backend" --version 1.4.0
   ```
 
 ### Container image publishing & authentication
