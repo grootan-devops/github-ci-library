@@ -1423,7 +1423,7 @@ wherever possible.
 | `DOCKERFILE` | `Dockerfile` | Dockerfile path for linting and building. |
 | `MASTER_BRANCH_REGEX` | `^(.*/)?master$` | **Additional** protected branches treated as release branches. The repository's own default branch always is, whatever it is called — leave this alone unless you release from a second branch such as `release/master`. |
 | `IMAGE_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate images: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override. |
-| `CHART_DEV_REPOSITORY_SUFFIX` | `/dev` | Appended for candidate charts. |
+| `CHART_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate charts: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override. |
 | `RELEASE_VERSION_SUFFIX` | — | Suffix appended to the version, e.g. `backend` → `1.5.0-backend`. |
 | `CHANGELOG_FILE_NAME` | `./CHANGELOG.md` | Changelog path. |
 | `MIGRATION_FILE_NAME` | `./MIGRATION.md` | Migration guide path. |

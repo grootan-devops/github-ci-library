@@ -237,7 +237,20 @@ case "${REGISTRY_HOST}" in
 esac
 IMAGE_DEV_REPO="${IMAGE_REPO}${IMAGE_DEV_SUFFIX}"
 CHART_REPO="${CHART_REPOSITORY_INPUT}"
-CHART_DEV_REPO="${CHART_REPO}${CHART_DEV_REPOSITORY_SUFFIX}"
+CHART_DEV_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX:-/dev}"
+# Docker Hub has no nested repositories for charts either, so normalise the
+# same path-style suffix used by other registries (`/dev`) to a repository
+# suffix (`-dev`) before constructing the candidate chart target.
+case "${REGISTRY_HOST}" in
+  docker.io|index.docker.io|registry-1.docker.io)
+    NORMALISED_CHART_DEV_SUFFIX="${CHART_DEV_SUFFIX//\//-}"
+    if [[ "${NORMALISED_CHART_DEV_SUFFIX}" != "${CHART_DEV_SUFFIX}" ]]; then
+      echo "::notice title=Dev chart repository::Docker Hub does not support nested repositories. Using '${NORMALISED_CHART_DEV_SUFFIX}' instead of '${CHART_DEV_SUFFIX}' for development charts."
+    fi
+    CHART_DEV_SUFFIX="${NORMALISED_CHART_DEV_SUFFIX}"
+    ;;
+esac
+CHART_DEV_REPO="${CHART_REPO}${CHART_DEV_SUFFIX}"
 
 if [[ "${IS_RELEASE}" == "true" ]]; then
   IMAGE_PUSH_REPOSITORY="${IMAGE_REPO}"

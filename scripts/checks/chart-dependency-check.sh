@@ -22,6 +22,7 @@ set -euo pipefail
 PROJECT_PATH="${PROJECT_PATH:-.}"
 CHART_DIR="${CHART_DIR:-./chart}"
 CHART_DEV_REPOSITORY_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX:-/dev}"
+REGISTRY_HOST="${REGISTRY_HOST:-}"
 ALLOW_UNSTABLE_LIBRARY_REFS="${ALLOW_UNSTABLE_LIBRARY_REFS:-false}"
 CHART_FILE="${PROJECT_PATH}/${CHART_DIR}/Chart.yaml"
 
@@ -53,6 +54,14 @@ summarise() {
 }
 
 FAILED=false
+
+# Keep the dependency guard aligned with init.yml: Docker Hub uses flat
+# repository names, while registries that support nested paths use `/dev`.
+case "${REGISTRY_HOST}" in
+  docker.io|index.docker.io|registry-1.docker.io)
+    CHART_DEV_REPOSITORY_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX//\//-}"
+    ;;
+esac
 
 # --- 1. no dependency may resolve to the development repository -------------
 export DEV_PATH="${CHART_REPOSITORY:-}${CHART_DEV_REPOSITORY_SUFFIX}"
