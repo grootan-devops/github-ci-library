@@ -1,6 +1,6 @@
 # Github CI/CD Library
 
-Release `1.0.0` · [Compatibility](https://github.com/grootan-devops/ai-skills/blob/main/COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+Release `1.1.0` · [Compatibility](https://github.com/grootan-devops/ai-skills/blob/main/COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 Reusable GitHub Actions workflows (`workflow_call`)
 
@@ -573,9 +573,8 @@ it enabled is pinned to nothing.
 ```
 
 > [!NOTE]
-> This library publishes no tags yet, so every repository currently pins `@dev` and would
-> fail the guard the moment it is enabled. Tag the libraries first, repoint consumers, then
-> let it fail closed.
+> The stable `1.0.0` tag is published and current consumers pin it. Keep the testing escape
+> hatch limited to short-lived branch validation and remove it before releasing.
 
 ---
 
@@ -1641,11 +1640,9 @@ Every example assumes the organisation variables and secrets above are set, and 
 library with `@1.0.0`.
 
 > [!IMPORTANT]
-> `@1.0.0` throughout these examples is **illustrative**. Replace it with a ref this
-> repository has actually published — `git ls-remote --tags` says which. A caller pinned to
-> a ref that does not exist fails to resolve, and the error names your workflow rather than
-> the missing tag. While tracking an unreleased branch, pin that branch (`@dev`) and accept
-> that it moves.
+> `@1.0.0` throughout these examples is the stable published reference. While tracking an
+> unreleased branch, pin that branch (`@dev`) only for short-lived testing and accept that it
+> moves.
 
 ### 1. Language + Docker Image + Helm Chart
 
