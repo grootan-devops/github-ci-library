@@ -8,15 +8,10 @@ on:
         type: string
         default: ""
         description: "Version reported to SonarQube, from init.yml's tag."
-      project-key:
-        required: false
-        type: string
-        default: ""
-        description: "SonarQube project key. Defaults to vars.SONAR_PROJECT_KEY, then owner_repo."
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this; the key is suffixed with it."
       wait-for-quality-gate:
         required: false
@@ -41,7 +36,7 @@ jobs:
       SONAR_SCANNER_OPTS: -XX:MaxRAMPercentage=90.0 -XX:InitialRAMPercentage=90.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       # Sonar needs full history to attribute issues and measure new code.
@@ -64,15 +59,19 @@ jobs:
         with:
           pattern: "*-test-reports"
           merge-multiple: true
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          path: ${{ inputs.project-path }}
+
+      - name: Resolve Cache Day
+        id: day
+        run: echo "d=$(date -u +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
 
       - name: Cache Sonar Analysis Data
         id: cache
-        uses: actions/cache/restore@v6
+        uses: actions/cache@v6
         with:
           path: .sonar
-          key: sonar-${{ github.repository_id }}
-          restore-keys: sonar-${{ github.repository_id }}
+          key: sonar-${{ github.repository_id }}-${{ steps.day.outputs.d }}
+          restore-keys: sonar-${{ github.repository_id }}-
 
       - name: Validate SonarQube Configuration
         env:
@@ -105,28 +104,11 @@ jobs:
         env:
           SONAR_URL: ${{ vars.SONAR_URL }}
           SONAR_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
-          PROJECT_KEY_INPUT: ${{ inputs.project-key }}
           VAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
           PROJECT_VERSION: ${{ inputs.project-version }}
           SUBPATH: ${{ inputs.project-path }}
           WAIT: ${{ inputs.wait-for-quality-gate }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/sonarqube/analysis.sh"
-
-      - name: Refresh Cache Entry
-        id: refresh
-        if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: sonar-${{ github.repository_id }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/sonarqube/cache-refresh.sh"
-
-      - name: Save Sonar Analysis Cache
-        if: ${{ !cancelled() && steps.refresh.outputs.save == 'true'
-          && github.ref_name == github.event.repository.default_branch }}
-        uses: actions/cache/save@v6
-        with:
-          path: .sonar
-          key: sonar-${{ github.repository_id }}
 
       - name: Publish Quality Summary
         if: always()

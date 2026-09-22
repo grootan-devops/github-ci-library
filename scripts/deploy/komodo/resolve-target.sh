@@ -67,7 +67,7 @@ if [[ -z "${YQ_PATH}" ]]; then
 fi
 
 if [[ -z "${KOMODO_SERVER}" ]]; then
-  MISSING+=("komodo-server (or vars.KOMODO_SERVER)")
+  MISSING+=("komodo-server")
 fi
 
 if [[ -z "${STACK_NAME}" ]]; then
@@ -104,7 +104,21 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
   exit 1
 fi
 
-NEW_IMAGE="${REGISTRY_HOST}/${IMAGE_REPO}${DEV_SUFFIX}:${IMAGE_TAG}"
+
+# Docker Hub has no nested repositories, so `<repo>/dev` is not a valid image
+# target and the push side rewrites the separator. scripts/init/resolve-version.sh
+# and scripts/scan/trivy.sh both do this; without it the deploy path looked for
+# `<repo>/dev` while the image had been pushed and scanned at `<repo>-dev`.
+# Charts are not rewritten: they live at an OCI path where nesting is legal,
+# which is why init normalises the image suffix only.
+IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
+case "${REGISTRY_HOST}" in
+  docker.io|index.docker.io|registry-1.docker.io)
+    IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
+    ;;
+esac
+
+NEW_IMAGE="${REGISTRY_HOST}/${IMAGE_REPO}${IMAGE_DEV_SUFFIX}:${IMAGE_TAG}"
 
 {
   echo "new_image=${NEW_IMAGE}"

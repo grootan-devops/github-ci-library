@@ -7,7 +7,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Path to the Node project root. Monorepo children set this."
       build-command:
         required: false
@@ -36,7 +36,7 @@ on:
         description: "Newline-separated KEY=VALUE pairs exported into build and test."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   TEST_REPORT_DIR: test-report
   npm_config_cache: ${{ github.workspace }}/.npm
 
@@ -54,7 +54,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     outputs:
       cache-key: ${{ steps.key.outputs.key }}
     steps:
@@ -64,7 +64,7 @@ jobs:
       # hashFiles returns "" for a missing package-lock.json, collapsing the key onto the bare `node-` prefix.
       - name: Compute Dependency Cache Key
         id: key
-        run: echo "key=node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
+        run: echo "key=node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path)) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout CI Library
         uses: actions/checkout@v7
@@ -89,12 +89,7 @@ jobs:
           npm ci --include=dev --prefer-offline --no-audit --no-fund 2>&1 | tee "${RUNNER_TEMP}/npm-ci.log"
           exit "${PIPESTATUS[0]}"
 
-      # Cache entries are immutable: saving after a failed install would freeze a
-      # half-populated tree under a valid key until package-lock.json changes.
       - name: Save npm Cache
-        # Default branch only. GitHub scopes every cache entry to the ref that wrote
-        # it, and a run can read only its own ref, its base branch and the default
-        # branch -- so a write from anywhere else is a duplicate nobody else can use.
         if: ${{ success() && steps.cache.outputs.cache-hit != 'true'
           && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
@@ -126,7 +121,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -143,16 +138,7 @@ jobs:
         if: ${{ inputs.build-env != '' }}
         env:
           BUILD_ENV: ${{ inputs.build-env }}
-        run: |
-          set -euo pipefail
-          while IFS='=' read -r KEY VAL; do
-            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
-            KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
-              continue
-            fi
-            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
-          done <<< "${BUILD_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
 
       - name: Restore npm Cache
         uses: actions/cache/restore@v6
@@ -177,7 +163,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: node-dist
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ inputs.build-artifact-path }}/
+          path: ${{ inputs.project-path }}/${{ inputs.build-artifact-path }}/
           if-no-files-found: ignore
           retention-days: 7
           include-hidden-files: true
@@ -206,7 +192,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     env:
       NODE_ENV: test
     steps:
@@ -225,16 +211,7 @@ jobs:
         if: ${{ inputs.build-env != '' }}
         env:
           BUILD_ENV: ${{ inputs.build-env }}
-        run: |
-          set -euo pipefail
-          while IFS='=' read -r KEY VAL; do
-            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
-            KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
-              continue
-            fi
-            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
-          done <<< "${BUILD_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
 
       - name: Restore npm Cache
         uses: actions/cache/restore@v6
@@ -281,8 +258,8 @@ jobs:
         with:
           name: node-test-reports
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/coverage/
+            ${{ inputs.project-path }}/test-report/
+            ${{ inputs.project-path }}/coverage/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -291,7 +268,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CHECK_NAME: "Node Unit Test Results"
-          REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/**/*.xml"
+          REPORT_GLOB: "${{ inputs.project-path }}/test-report/**/*.xml"
           JOB_SUMMARY: "true"
           FAIL_ON_FAILURE: "true"
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

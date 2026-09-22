@@ -35,13 +35,13 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
       chart-dir:
         required: false
         type: string
-        default: ""
-        description: "Directory containing Chart.yaml. Defaults to vars.CHART_DIR, then ./chart."
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
       allow-unstable-library-refs:
         required: false
         type: boolean
@@ -85,7 +85,7 @@ jobs:
       - name: Select Applicable Guards
         id: targets
         env:
-          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          PROJECT_PATH: ${{ inputs.project-path }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
           CHECK_MIGRATION: ${{ inputs.check-migration }}
@@ -111,7 +111,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -133,8 +133,8 @@ jobs:
           TAG: ${{ inputs.tag }}
           RELEASE_VERSION: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
-          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-          CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+          CHART_DIR: ${{ inputs.chart-dir }}
           CHART_NAME: ${{ inputs.chart-name }}
           CHART_VERSION: ${{ inputs.chart-version }}
           CHART_REPOSITORY: ${{ inputs.chart-repository }}
@@ -160,8 +160,8 @@ jobs:
         with:
           name: release-changelog
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_CHANGELOG.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_CHANGELOG_CARD.json
+            ${{ inputs.project-path }}/RELEASE_CHANGELOG.md
+            ${{ inputs.project-path }}/RELEASE_CHANGELOG_CARD.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -170,7 +170,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: release-migration
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_MIGRATION.md
+          path: ${{ inputs.project-path }}/RELEASE_MIGRATION.md
           if-no-files-found: ignore
           retention-days: 7
 

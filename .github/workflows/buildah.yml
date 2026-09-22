@@ -1,12 +1,5 @@
 name: Image / Buildah Build, Push & Promote
 
-# Counterpart of the GitLab buildah Image:Build job, plus the shared push and
-# promote steps. Builds a minimal image from a base image without a Dockerfile.
-#
-# ⚠️ `promote` has no `needs` on the scan — that job lives in the caller's
-# workflow. The caller must run it between build and promote and pass its
-# result through `scan-result`, or a vulnerable image promotes silently.
-
 on:
   workflow_call:
     inputs:
@@ -101,7 +94,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
 
     outputs:
@@ -110,7 +103,7 @@ on:
         value: ${{ jobs.build.outputs.IMAGE_REF_DIGEST }}
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_NAME: dockerimage:internal
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
@@ -134,7 +127,7 @@ jobs:
       options: --privileged
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     outputs:
       IMAGE_REF_DIGEST: ${{ steps.push.outputs.IMAGE_REF_DIGEST }}
 
@@ -205,7 +198,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: image-packages
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/installed_pkgs.txt
+          path: ${{ inputs.project-path }}/installed_pkgs.txt
           if-no-files-found: error
           retention-days: 1
 
@@ -215,8 +208,8 @@ jobs:
         with:
           name: image-info
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/installed_pkgs.txt
+            ${{ inputs.project-path }}/IMAGE_INFO.md
+            ${{ inputs.project-path }}/installed_pkgs.txt
           if-no-files-found: ignore
           retention-days: 7
 
@@ -244,12 +237,8 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
-      # The working-directory default above points into the caller's tree, so
-      # that tree has to exist before the first run step. Without this checkout
-      # a monorepo child setting project-path aborts every step on a missing
-      # directory and the release is never promoted.
       - name: Checkout Code
         uses: actions/checkout@v7
 
@@ -282,7 +271,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: image-info
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
+          path: ${{ inputs.project-path }}/IMAGE_INFO.md
           if-no-files-found: ignore
           retention-days: 7
       - name: Publish Promotion Failure Summary

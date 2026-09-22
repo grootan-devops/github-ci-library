@@ -20,7 +20,14 @@ fi
 if [[ -z "${PREVIOUS_RELEASE_VERSION}" ]]; then
   API_TAGS=""
   if [[ -n "${GH_TOKEN:-}" && -n "${GITHUB_REPOSITORY:-}" ]]; then
-    API_TAGS=$(gh api "repos/${GITHUB_REPOSITORY}/tags?per_page=100" --jq '.[].name // empty' 2>/dev/null || true)
+    # curl, not `gh`: the guard runs inside the toolkit container, which does
+    # not ship the GitHub CLI, so a `gh` call here returned nothing and the
+    # fallback below silently became the only source of tags.
+    API_TAGS=$(curl -sSf \
+      -H "Authorization: Bearer ${GH_TOKEN}" \
+      -H "Accept: application/vnd.github+json" \
+      "${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/tags?per_page=100" \
+      | jq -r '.[].name // empty') || API_TAGS=""
   fi
 
   GIT_TAGS=$(git tag -l 2>/dev/null || true)

@@ -6,7 +6,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
       test-timeout:
         required: false
@@ -20,7 +20,7 @@ on:
         description: "Run terraform destroy when the test job fails or is cancelled."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   TF_LOG_FILE_NAME: tf_test.log
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "0"
@@ -44,7 +44,7 @@ jobs:
       - name: Select Applicable Terraform Jobs
         id: targets
         env:
-          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          PROJECT_PATH: ${{ inputs.project-path }}
         shell: bash
         run: |
           set -euo pipefail
@@ -73,7 +73,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -101,10 +101,10 @@ jobs:
         with:
           name: terraform-test-artifacts
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/tests/tf_test.log
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test_output.tf
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/terraform.tfstate
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/terraform.tfstate.backup
+            ${{ inputs.project-path }}/tests/tf_test.log
+            ${{ inputs.project-path }}/test_output.tf
+            ${{ inputs.project-path }}/terraform.tfstate
+            ${{ inputs.project-path }}/terraform.tfstate.backup
           if-no-files-found: ignore
           retention-days: 7
 
@@ -126,7 +126,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -136,7 +136,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: terraform-test-artifacts
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          path: ${{ inputs.project-path }}
 
       - name: Destroy Test Infrastructure
         id: teardown

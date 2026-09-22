@@ -25,10 +25,9 @@ on:
         type: string
         description: "yq path to the service image in docker-compose.yml (e.g. .services.app.image)"
       komodo-server:
-        required: false
+        required: true
         type: string
-        default: ""
-        description: "Komodo server URL (e.g. https://komodo.example.com). Defaults to vars.KOMODO_SERVER."
+        description: "Komodo server URL, e.g. https://komodo.example.com."
       komodo-stack-name:
         required: true
         type: string
@@ -107,7 +106,7 @@ jobs:
           GITOPS_BRANCH: ${{ inputs.gitops-branch }}
           COMPOSE_FILE: ${{ inputs.gitops-compose-file }}
           YQ_PATH: ${{ inputs.gitops-service-image-yq-path }}
-          KOMODO_SERVER: ${{ inputs.komodo-server || vars.KOMODO_SERVER || '' }}
+          KOMODO_SERVER: ${{ inputs.komodo-server }}
           STACK_NAME: ${{ inputs.komodo-stack-name }}
           KOMODO_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
           KOMODO_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
@@ -184,16 +183,7 @@ jobs:
         if: ${{ inputs.build-env != '' }}
         env:
           BUILD_ENV: ${{ inputs.build-env }}
-        run: |
-          set -euo pipefail
-          while IFS='=' read -r key val; do
-            key="${key#"${key%%[![:space:]]*}"}"
-            key="${key%"${key##*[![:space:]]}"}"
-            if [[ -z "${key}" || "${key}" =~ ^# ]]; then
-              continue
-            fi
-            printf '%s=%s\n' "${key}" "${val}" >> "${GITHUB_ENV}"
-          done <<< "${BUILD_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
 
       - name: Mutate GitOps Compose Configuration
         id: gitops_commit
@@ -212,7 +202,7 @@ jobs:
       - name: Trigger Komodo Stack Deployment
         id: trigger_komodo
         env:
-          KOMODO_SERVER: ${{ inputs.komodo-server || vars.KOMODO_SERVER || '' }}
+          KOMODO_SERVER: ${{ inputs.komodo-server }}
           KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
           KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
           STACK_NAME: ${{ inputs.komodo-stack-name }}
@@ -221,7 +211,7 @@ jobs:
       - name: Poll Komodo Execution Status
         id: poll_komodo
         env:
-          KOMODO_SERVER: ${{ inputs.komodo-server || vars.KOMODO_SERVER || '' }}
+          KOMODO_SERVER: ${{ inputs.komodo-server }}
           KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
           KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
           STACK_NAME: ${{ inputs.komodo-stack-name }}

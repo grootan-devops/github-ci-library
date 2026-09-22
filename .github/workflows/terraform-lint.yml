@@ -6,7 +6,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
       state-name:
         required: true
@@ -19,7 +19,7 @@ on:
         description: "Fail when a generated README.md is out of date."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "0"
 
@@ -45,7 +45,7 @@ jobs:
       - name: Select Applicable Terraform Jobs
         id: targets
         env:
-          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          PROJECT_PATH: ${{ inputs.project-path }}
           CHECK_DOCS: ${{ inputs.check-docs }}
         shell: bash
         run: |
@@ -86,7 +86,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     outputs:
       cache-key: ${{ steps.key.outputs.key }}
     steps:
@@ -95,15 +95,15 @@ jobs:
 
       - name: Compute Provider Cache Key
         id: key
-        run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
+        run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path)) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore Provider Cache
         id: cache
         uses: actions/cache/restore@v6
         with:
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+            ${{ inputs.project-path }}/.terraform
+            ${{ inputs.project-path }}/.terraform.lock.hcl
           key: ${{ steps.key.outputs.key }}
           restore-keys: tf-
 
@@ -143,8 +143,8 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+            ${{ inputs.project-path }}/.terraform
+            ${{ inputs.project-path }}/.terraform.lock.hcl
           key: ${{ steps.key.outputs.key }}
 
   check:
@@ -162,7 +162,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -171,8 +171,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
+            ${{ inputs.project-path }}/.terraform
+            ${{ inputs.project-path }}/.terraform.lock.hcl
           key: ${{ needs.init.outputs.cache-key }}
           restore-keys: tf-
 
@@ -233,7 +233,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7

@@ -15,7 +15,6 @@
 #   SONAR_URL          SonarQube server URL
 #   SONAR_TOKEN        SonarQube authentication token
 #   WAIT               "true" to block on, and fail with, the quality gate
-#   PROJECT_KEY_INPUT  explicit project key (default: empty)
 #   VAR_PROJECT_KEY    repository/organisation default project key (default: empty)
 #   PROJECT_VERSION    version reported to SonarQube (default: empty)
 #   SUBPATH            monorepo child path, slugged onto the key (default: empty)
@@ -25,12 +24,11 @@ set -euo pipefail
 : "${SONAR_TOKEN:?SONAR_TOKEN must be set}"
 : "${WAIT:?WAIT must be set}"
 
-: "${PROJECT_KEY_INPUT:=}"
 : "${VAR_PROJECT_KEY:=}"
 : "${PROJECT_VERSION:=}"
 : "${SUBPATH:=}"
 
-PROJECT_KEY="${PROJECT_KEY_INPUT:-${VAR_PROJECT_KEY:-${GITHUB_REPOSITORY//\//_}}}"
+PROJECT_KEY="${VAR_PROJECT_KEY:-${GITHUB_REPOSITORY//\//_}}"
 if [[ -n "${SUBPATH}" && "${SUBPATH}" != "." ]]; then
   SLUG="$(tr -c 'a-zA-Z0-9_.:-' '-' <<<"${SUBPATH}" | sed 's/-\+/-/g;s/^-//;s/-$//')"
   PROJECT_KEY="${PROJECT_KEY}_${SLUG}"

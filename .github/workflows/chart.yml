@@ -47,13 +47,13 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
       chart-dir:
         required: false
         type: string
-        default: ""
-        description: "Directory containing Chart.yaml. Defaults to vars.CHART_DIR, then ./chart."
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
       check-docs:
         required: false
         type: boolean
@@ -76,8 +76,8 @@ on:
         description: "Publish the candidate chart. Disable for PR verification when the OCI registry is not provisioned."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-  CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
+  CHART_DIR: ${{ inputs.chart-dir }}
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   CHART_INFO_FILE_NAME: CHART_INFO.md
 
@@ -96,7 +96,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -122,7 +122,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -203,7 +203,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -241,7 +241,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chart-unittest-report
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/unittest-report.xml
+          path: ${{ inputs.project-path }}/unittest-report.xml
           if-no-files-found: warn
           retention-days: 7
 
@@ -257,7 +257,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -310,7 +310,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chart-package
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ inputs.chart-name }}-${{ inputs.chart-version }}.tgz
+          path: ${{ inputs.project-path }}/${{ inputs.chart-name }}-${{ inputs.chart-version }}.tgz
           if-no-files-found: error
           retention-days: 7
 
@@ -327,7 +327,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout CI Library
         uses: actions/checkout@v7
@@ -341,7 +341,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: chart-package
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          path: ${{ inputs.project-path }}
 
       - name: Authenticate To Chart Registry
         env:
@@ -362,7 +362,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chart-info
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/CHART_INFO.md
+          path: ${{ inputs.project-path }}/CHART_INFO.md
           if-no-files-found: ignore
           retention-days: 7
 
@@ -378,7 +378,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -411,6 +411,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chart-info
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/CHART_INFO.md
+          path: ${{ inputs.project-path }}/CHART_INFO.md
           if-no-files-found: ignore
           retention-days: 7

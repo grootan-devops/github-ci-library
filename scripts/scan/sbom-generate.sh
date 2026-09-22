@@ -55,9 +55,22 @@ if [[ -f pom.xml ]]; then
   fi
 fi
 
+# Trivy treats a --skip-*-update flag on a cold cache as fatal, so skip only
+# what is actually present. scripts/scan/trivy.sh guards the same two flags the
+# same way; passing them unconditionally here made a warm cache a precondition
+# for generating an SBOM at all.
+TRIVY_ARGS=""
+if [[ -n "${TRIVY_CACHE_DIR:-}" ]] && compgen -G "${TRIVY_CACHE_DIR}/db/*" > /dev/null 2>&1; then
+  TRIVY_ARGS="--skip-db-update"
+fi
+if [[ -n "${TRIVY_CACHE_DIR:-}" ]] && compgen -G "${TRIVY_CACHE_DIR}/java-db/*" > /dev/null 2>&1; then
+  TRIVY_ARGS="${TRIVY_ARGS:+${TRIVY_ARGS} }--skip-java-db-update"
+fi
+
 set +e
+# shellcheck disable=SC2086 # TRIVY_ARGS is a deliberate word-split flag list
 TRIVY_OUTPUT="$(trivy fs --format cyclonedx --output "${SBOM_FILE}" \
-  --skip-version-check --skip-db-update --skip-java-db-update . 2>&1)"
+  --skip-version-check ${TRIVY_ARGS} . 2>&1)"
 TRIVY_RESULT=$?
 set -e
 

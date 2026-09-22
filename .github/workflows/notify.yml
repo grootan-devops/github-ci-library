@@ -48,7 +48,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL: ${{ secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL }}
-          SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL }}
+          SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL || vars.SONAR_URL }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/notify/teams.sh"
 

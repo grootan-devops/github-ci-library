@@ -6,7 +6,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Path to the Python project root. Monorepo children set this."
       linters:
         required: false
@@ -15,7 +15,7 @@ on:
         description: "JSON array of linters to run in parallel."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -54,7 +54,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .uv-cache
-          key: py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) }}
+          key: py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path)) }}
           restore-keys: py-
 
       - name: Sync Dependencies

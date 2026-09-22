@@ -55,11 +55,6 @@ on:
         type: string
         default: ""
         description: "yq path to the application entry inside values.yaml (e.g. .apps.chat)"
-      app-path:
-        required: false
-        type: string
-        default: ""
-        description: "Legacy alias for chart-app-yq-path"
       image-values-file:
         required: false
         type: string
@@ -90,10 +85,9 @@ on:
         type: string
         description: "Space-separated ArgoCD application names"
       argocd-server:
-        required: false
+        required: true
         type: string
-        default: ""
-        description: "ArgoCD API server hostname, without the scheme (defaults to vars.ARGOCD_SERVER)."
+        description: "ArgoCD API server hostname, without the scheme."
       github-environment-name:
         required: false
         type: string
@@ -134,13 +128,13 @@ env:
   GITOPS_REPO: ${{ inputs.gitops-repo }}
   GITOPS_BRANCH: ${{ inputs.gitops-branch }}
   CHART_VALUES_FILE: ${{ inputs.chart-values-file }}
-  CHART_APP_YQ_PATH: ${{ inputs.chart-app-yq-path || inputs.app-path }}
+  CHART_APP_YQ_PATH: ${{ inputs.chart-app-yq-path }}
   IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
   IMAGE_REPO_YQ_PATH: ${{ inputs.image-repo-yq-path }}
   IMAGE_TAG_YQ_PATH: ${{ inputs.image-tag-yq-path }}
   MANIFEST_FILE: ${{ inputs.manifest-file }}
   NEW_IMAGE_INPUT: ${{ inputs.new-image }}
-  ARGOCD_SERVER: ${{ inputs.argocd-server || vars.ARGOCD_SERVER || '' }}
+  ARGOCD_SERVER: ${{ inputs.argocd-server }}
   ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN || '' }}
   ARGOCD_APP_NAME: ${{ inputs.argocd-app-name }}
   DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
@@ -340,7 +334,7 @@ jobs:
     env:
       ARGOCD_OPTS: "--grpc-web"
       ARGOCD_VERSION: ${{ inputs.argocd-version }}
-      ARGOCD_SERVER: ${{ inputs.argocd-server || vars.ARGOCD_SERVER || '' }}
+      ARGOCD_SERVER: ${{ inputs.argocd-server }}
       ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN || '' }}
       SYNC_TIMEOUT: 600
 

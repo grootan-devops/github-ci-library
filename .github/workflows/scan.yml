@@ -45,8 +45,13 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
       fail-on-warnings:
         required: false
         type: boolean
@@ -57,8 +62,8 @@ on:
           which lets warnings be visible without blocking the pipeline.
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-  CHART_DIR: ${{ vars.CHART_DIR || './chart' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
+  CHART_DIR: ${{ inputs.chart-dir }}
   SCAN_TYPE: ${{ inputs.scan-type }}
   CONFIG_TYPE: ${{ inputs.config-type }}
   IMAGE_REF: ${{ inputs.image-ref }}
@@ -91,7 +96,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -124,13 +129,21 @@ jobs:
             printf '### 🛡️ Trivy config scan\n\n❌ `config-type` is required when `scan-type` is `config`, so nothing was scanned. Pass `chart` or `terraform`.\n\n' >> "${GITHUB_STEP_SUMMARY}"
             exit 1
           fi
+          if [[ "${SCAN_TYPE}" == "image" && -z "${IMAGE_REF}" ]]; then
+            if [[ -z "${IMAGE_REPOSITORY}" || -z "${TARGET_VERSION}" ]]; then
+              echo "::error title=Scan::An image scan needs either image-ref, or both image-repository and target-version."
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf '### 🛡️ Trivy image scan\n\n❌ Nothing was scanned. Without a target this builds a reference like `registry/-dev:` and reports a clean result for an image that does not exist. Pass `image-ref`, or both `image-repository` and `target-version`.\n\n' >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+            fi
+          fi
 
       - name: Restore Trivy Database Cache
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: trivy-db
-          restore-keys: trivy-db
+          key: trivy-db-
+          restore-keys: trivy-db-
 
       # Key and prefix match terraform-lint.yml verbatim so both share one entry.
       - name: Restore Terraform Provider Cache
@@ -138,9 +151,9 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
-          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}
+            ${{ inputs.project-path }}/.terraform
+            ${{ inputs.project-path }}/.terraform.lock.hcl
+          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path)) || 'nolock' }}
           restore-keys: tf-
 
       - name: Download SBOM
@@ -148,7 +161,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: ${{ inputs.sbom-artifact }}
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          path: ${{ inputs.project-path }}
 
       - name: Authenticate To Registry
         if: ${{ inputs.scan-type == 'image' }}
@@ -251,14 +264,14 @@ jobs:
         with:
           name: scan-${{ inputs.scan-type }}${{ inputs.config-type && format('-{0}', inputs.config-type) || '' }}-reports
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/*_trivy_scan_report.json
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/*_trivy_scan_report.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/*_trivy_scan_report.junit
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_CVE.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/CHART_CVE.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/TF_CVE.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/LICENSE_CVE.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/SBOM_CVE.md
+            ${{ inputs.project-path }}/*_trivy_scan_report.json
+            ${{ inputs.project-path }}/*_trivy_scan_report.md
+            ${{ inputs.project-path }}/*_trivy_scan_report.junit
+            ${{ inputs.project-path }}/IMAGE_CVE.md
+            ${{ inputs.project-path }}/CHART_CVE.md
+            ${{ inputs.project-path }}/TF_CVE.md
+            ${{ inputs.project-path }}/LICENSE_CVE.md
+            ${{ inputs.project-path }}/SBOM_CVE.md
           if-no-files-found: ignore
           retention-days: 7
 
@@ -280,6 +293,6 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/.terraform.lock.hcl
-          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}
+            ${{ inputs.project-path }}/.terraform
+            ${{ inputs.project-path }}/.terraform.lock.hcl
+          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path)) || 'nolock' }}

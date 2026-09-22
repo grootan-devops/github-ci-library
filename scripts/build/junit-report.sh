@@ -115,8 +115,12 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
       --argjson annotations "${ANNOTATIONS}" \
       '{name: $name, head_sha: $sha, status: "completed", conclusion: $conclusion,
         output: {title: $name, summary: $summary, annotations: $annotations}}' |
-      gh api "repos/${GITHUB_REPOSITORY}/check-runs" --method POST \
-        --header "Accept: application/vnd.github+json" --input - > /dev/null 2>&1; then
+      curl -sSf -X POST \
+        -H "Authorization: Bearer ${GH_TOKEN}" \
+        -H "Accept: application/vnd.github+json" \
+        --data-binary @- \
+        "${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/check-runs" \
+        > /dev/null 2>&1; then
     echo "Published check run '${CHECK_NAME}'."
   else
     # A missing checks:write permission must not fail a job whose tests passed.

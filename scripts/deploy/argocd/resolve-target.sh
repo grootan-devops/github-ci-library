@@ -19,7 +19,6 @@
 #   GITOPS_BRANCH        GitOps branch to commit to (mandatory)
 #   CHART_VALUES_FILE    values.yaml path in the GitOps repo (Helm mode)
 #   CHART_APP_YQ_PATH    yq path to the application entry (Helm mode)
-#   APP_PATH             legacy alias for CHART_APP_YQ_PATH
 #   IMAGE_VALUES_FILE    separate image values.yaml (Helm mode, optional)
 #   IMAGE_REPO_YQ_PATH   yq path to the image repository (with IMAGE_VALUES_FILE)
 #   IMAGE_TAG_YQ_PATH    yq path to the image tag (with IMAGE_VALUES_FILE)
@@ -40,7 +39,6 @@ set -euo pipefail
 : "${GITOPS_BRANCH:=}"
 : "${CHART_VALUES_FILE:=}"
 : "${CHART_APP_YQ_PATH:=}"
-: "${APP_PATH:=}"
 : "${IMAGE_VALUES_FILE:=}"
 : "${IMAGE_REPO_YQ_PATH:=}"
 : "${IMAGE_TAG_YQ_PATH:=}"
@@ -67,7 +65,7 @@ if [[ -z "${ARGOCD_APP_NAME}" ]]; then
   MISSING+=("argocd-app-name")
 fi
 if [[ -z "${ARGOCD_SERVER}" ]]; then
-  MISSING+=("argocd-server (or vars.ARGOCD_SERVER)")
+  MISSING+=("argocd-server")
 fi
 if [[ -z "${ARGOCD_AUTH_TOKEN}" ]]; then
   MISSING+=("ARGOCD_AUTH_TOKEN secret")
@@ -77,6 +75,18 @@ if [[ -z "${GITOPS_REPO}" ]]; then
 fi
 if [[ -z "${GITOPS_BRANCH}" ]]; then
   MISSING+=("gitops-branch")
+fi
+# These three are interpolated straight into a registry reference below. Empty
+# yields `host//dev` or an empty tag, which the registry rejects with a parse
+# error rather than anything that points at the missing input.
+if [[ -z "${CHART_REPOSITORY}" && -z "${NEW_IMAGE_INPUT}" ]]; then
+  MISSING+=("chart-repository")
+fi
+if [[ -z "${IMAGE_REPOSITORY}" && -z "${NEW_IMAGE_INPUT}" ]]; then
+  MISSING+=("image-repository")
+fi
+if [[ -z "${CHART_VERSION}" && -z "${NEW_IMAGE_INPUT}" ]]; then
+  MISSING+=("chart-version")
 fi
 if [[ ${#MISSING[@]} -gt 0 ]]; then
   echo "::error::[HARD FAILURE] Missing mandatory deployment configuration: ${MISSING[*]}"
@@ -92,7 +102,7 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
   exit 1
 fi
 
-RESOLVED_CHART_APP_YQ_PATH="${CHART_APP_YQ_PATH:-${APP_PATH:-}}"
+RESOLVED_CHART_APP_YQ_PATH="${CHART_APP_YQ_PATH}"
 MODE=""
 if [[ -n "${CHART_VALUES_FILE}" || -n "${RESOLVED_CHART_APP_YQ_PATH}" ]]; then
   MODE="helm"
@@ -112,7 +122,7 @@ fi
 
 if [[ "${MODE}" == "helm" ]]; then
   if [[ -z "${RESOLVED_CHART_APP_YQ_PATH}" ]]; then
-    echo "::error::[HARD FAILURE] chart-app-yq-path (or app-path) is mandatory when chart-values-file is specified."
+    echo "::error::[HARD FAILURE] chart-app-yq-path is mandatory when chart-values-file is specified."
     refuse "\`chart-values-file\` is set but \`chart-app-yq-path\` is not, so there is no path in the values file to write the version to."
   fi
   if [[ -n "${IMAGE_VALUES_FILE}" ]]; then
@@ -136,8 +146,22 @@ elif [[ "${MODE}" == "manifest" ]]; then
 fi
 
 TARGET_VERSION="${CHART_VERSION}"
+
+# Docker Hub has no nested repositories, so `<repo>/dev` is not a valid image
+# target and the push side rewrites the separator. scripts/init/resolve-version.sh
+# and scripts/scan/trivy.sh both do this; without it the deploy path looked for
+# `<repo>/dev` while the image had been pushed and scanned at `<repo>-dev`.
+# Charts are not rewritten: they live at an OCI path where nesting is legal,
+# which is why init normalises the image suffix only.
+IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
+case "${REGISTRY_HOST}" in
+  docker.io|index.docker.io|registry-1.docker.io)
+    IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
+    ;;
+esac
+
 CHART_REPO_URL="${REGISTRY_HOST}/${CHART_REPOSITORY}${DEV_SUFFIX}"
-NEW_IMAGE="${NEW_IMAGE_INPUT:-${REGISTRY_HOST}/${IMAGE_REPOSITORY}${DEV_SUFFIX}:${TARGET_VERSION}}"
+NEW_IMAGE="${NEW_IMAGE_INPUT:-${REGISTRY_HOST}/${IMAGE_REPOSITORY}${IMAGE_DEV_SUFFIX}:${TARGET_VERSION}}"
 
 {
   echo "gitops_branch=${GITOPS_BRANCH}"

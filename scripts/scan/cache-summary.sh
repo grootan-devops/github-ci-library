@@ -11,27 +11,32 @@
 # otherwise passing job red.
 #
 # Env:
-#   CACHE_HIT        "true" when the restore step matched the `trivy-db` entry
-#   REFRESHED        "true" when this run replaces the entry (default: empty)
+#   CACHE_HIT        "true" when today's dated entry already existed
+#   CACHE_DAY        the UTC day forming today's key (default: empty)
+#   VULN_DB          trivy-db outcome
 #   JAVA_DB          trivy-java-db outcome; empty when it was not warmed
 #   TRIVY_CACHE_DIR  cache directory to measure (set by the workflow env block)
 set -euo pipefail
 
 : "${CACHE_HIT:=}"
-: "${REFRESHED:=}"
+: "${CACHE_DAY:=}"
+: "${VULN_DB:=}"
 : "${JAVA_DB:=}"
+# Defaulted like its siblings: the step is `if: always()`, and aborting on an
+# unbound variable would replace the diagnostic with no output at all.
+: "${TRIVY_CACHE_DIR:=}"
 
 if [[ "${CACHE_HIT}" == "true" ]]; then
-  RESTORED="restored from the existing \`trivy-db\` entry"
+  RESTORED="restored \`trivy-db-${CACHE_DAY}\` — already warmed today"
+  WRITTEN="no — today's entry already exists"
 else
-  RESTORED="rebuilt — no \`trivy-db\` entry matched, so this run downloaded the databases"
+  RESTORED="seeded from the most recent earlier entry, or built from scratch"
+  WRITTEN="yes — saved as \`trivy-db-${CACHE_DAY}\` when this job ends"
 fi
-if [[ "${REFRESHED}" == "true" ]]; then
-  WRITTEN="yes — this run replaces the \`trivy-db\` entry"
-else
-  WRITTEN="no — already refreshed today, or \`actions: write\` was not granted"
+SIZE=""
+if [[ -n "${TRIVY_CACHE_DIR}" && -d "${TRIVY_CACHE_DIR}" ]]; then
+  SIZE="$(du -sh "${TRIVY_CACHE_DIR}" 2>/dev/null | awk '{print $1}' || true)"
 fi
-SIZE="$(du -sh "${TRIVY_CACHE_DIR}" 2>/dev/null | awk '{print $1}' || true)"
 {
   echo "### 🗄️ Trivy database cache"
   echo ""
@@ -39,6 +44,9 @@ SIZE="$(du -sh "${TRIVY_CACHE_DIR}" 2>/dev/null | awk '{print $1}' || true)"
   echo "|---|---|"
   echo "| **Cache** | ${RESTORED} |"
   echo "| **Written back** | ${WRITTEN} |"
+  if [[ -n "${VULN_DB}" ]]; then
+    echo "| **Vulnerability DB** | ${VULN_DB} |"
+  fi
   # Set only when the Java DB was actually warmed.
   if [[ -n "${JAVA_DB}" ]]; then
     echo "| **Java DB** | ${JAVA_DB} |"

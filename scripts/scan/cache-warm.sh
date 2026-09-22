@@ -18,11 +18,21 @@
 #
 # Env:
 #   ENABLE_JAVA_DB  "true" also downloads trivy-java-db (~900MB)
+#   TRIVY_HOST      shared Trivy server; when set, the vulnerability database
+#                   is not downloaded (default: empty)
 set -euo pipefail
 
 : "${ENABLE_JAVA_DB:?ENABLE_JAVA_DB must be set}"
+: "${TRIVY_HOST:=}"
 
-if trivy image --download-db-only --skip-version-check 2>&1 | tee "${RUNNER_TEMP}/vuln-db.log"; then
+# With a Trivy server configured, `trivy.sh` passes --server for image and SBOM
+# scans and those never consult the local database -- so downloading it here is
+# several hundred megabytes spent on a file nothing reads. The GitLab library
+# warms only the checks bundle and the Java DB for the same reason.
+if [[ -n "${TRIVY_HOST}" ]]; then
+  VULN_DB="skipped — TRIVY_HOST is set, so image and SBOM scans use the server"
+  echo "TRIVY_HOST is set; not downloading trivy-db."
+elif trivy image --download-db-only --skip-version-check 2>&1 | tee "${RUNNER_TEMP}/vuln-db.log"; then
   VULN_DB="downloaded"
 else
   VULN_DB="⚠️ **download failed** — every later scan downloads the database itself"

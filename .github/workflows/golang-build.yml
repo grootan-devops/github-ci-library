@@ -6,7 +6,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Path to the Go module root. Monorepo children set this."
       build-command:
         required: false
@@ -30,7 +30,7 @@ on:
         description: "Newline-separated KEY=VALUE pairs exported into build and test."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   TEST_REPORT_DIR: test-report
   GOPATH: ${{ github.workspace }}/.go-cache
   GOFLAGS: -mod=readonly
@@ -49,7 +49,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     outputs:
       cache-key: ${{ steps.key.outputs.key }}
     steps:
@@ -66,7 +66,7 @@ jobs:
 
       - name: Compute Module Cache Key
         id: key
-        run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
+        run: echo "key=go-${{ hashFiles(format('{0}/go.sum', inputs.project-path)) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore Module Cache
         id: cache
@@ -115,7 +115,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -132,16 +132,7 @@ jobs:
         if: ${{ inputs.build-env != '' }}
         env:
           BUILD_ENV: ${{ inputs.build-env }}
-        run: |
-          set -euo pipefail
-          while IFS='=' read -r KEY VAL; do
-            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
-            KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
-              continue
-            fi
-            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
-          done <<< "${BUILD_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
 
       - name: Restore Module Cache
         uses: actions/cache/restore@v6
@@ -163,7 +154,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: go-binaries
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/bin/
+          path: ${{ inputs.project-path }}/bin/
           if-no-files-found: ignore
           retention-days: 7
           include-hidden-files: true
@@ -194,7 +185,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -211,16 +202,7 @@ jobs:
         if: ${{ inputs.build-env != '' }}
         env:
           BUILD_ENV: ${{ inputs.build-env }}
-        run: |
-          set -euo pipefail
-          while IFS='=' read -r KEY VAL; do
-            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
-            KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
-              continue
-            fi
-            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
-          done <<< "${BUILD_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
 
       - name: Restore Module Cache
         uses: actions/cache/restore@v6
@@ -263,7 +245,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: go-test-reports
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/
+          path: ${{ inputs.project-path }}/test-report/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -272,7 +254,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CHECK_NAME: "Go Unit Test Results"
-          REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/**/*.xml"
+          REPORT_GLOB: "${{ inputs.project-path }}/test-report/**/*.xml"
           JOB_SUMMARY: "true"
           FAIL_ON_FAILURE: "true"
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

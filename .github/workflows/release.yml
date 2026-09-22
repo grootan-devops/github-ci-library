@@ -35,11 +35,11 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md
   RELEASE_CHANGELOG_CARD_FILE_NAME: RELEASE_CHANGELOG_CARD.json
   RELEASE_MIGRATION_FILE_NAME: RELEASE_MIGRATION.md
@@ -54,8 +54,6 @@ permissions:
 jobs:
   collect:
     name: Collect Artifacts
-    # Assets are a convenience; the tag and the notes are the contract. `publish`
-    # keys off this job's result, not its success.
     continue-on-error: true
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
@@ -66,7 +64,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -84,7 +82,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_artifacts
+          path: ${{ inputs.project-path }}/_artifacts
           merge-multiple: true
 
       - name: Download Candidate Run's Artifacts
@@ -94,7 +92,7 @@ jobs:
         with:
           run-id: ${{ inputs.upstream-run-id }}
           github-token: ${{ github.token }}
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_artifacts
+          path: ${{ inputs.project-path }}/_artifacts
           merge-multiple: true
 
       - name: Report Candidate Artifact Restore
@@ -136,9 +134,9 @@ jobs:
         with:
           name: release-payload
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/_release_assets/
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/CONSOLIDATED_RELEASE_CHANGELOG.md
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/RELEASE_CHANGELOG_CARD.json
+            ${{ inputs.project-path }}/_release_assets/
+            ${{ inputs.project-path }}/CONSOLIDATED_RELEASE_CHANGELOG.md
+            ${{ inputs.project-path }}/RELEASE_CHANGELOG_CARD.json
           if-no-files-found: warn
           retention-days: 7
 
@@ -229,7 +227,7 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
           RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL: ${{ secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL }}
-          SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL }}
+          SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL || vars.SONAR_URL }}
           SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
           RELEASE_CHANGELOG_CARD_FILE_NAME: payload/RELEASE_CHANGELOG_CARD.json
           RELEASE_CHANGELOG_FILE_NAME: payload/_release_assets/RELEASE_CHANGELOG.md

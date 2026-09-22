@@ -6,13 +6,13 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
-        description: "Path to the project root. Monorepo children set this; everything else leaves it empty."
+        default: "."
+        description: "Project root, relative to the repository root. Monorepo children set this."
       chart-dir:
         required: false
         type: string
-        default: ""
-        description: "Directory containing Chart.yaml. Defaults to vars.CHART_DIR, then ./chart."
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
       tag:
         required: false
         type: string
@@ -129,8 +129,8 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
 
     env:
-      PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-      CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
+      PROJECT_PATH: ${{ inputs.project-path }}
+      CHART_DIR: ${{ inputs.chart-dir }}
       CHART_FILE: ${{ vars.CHART_FILE || 'Chart.yaml' }}
       DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
       REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
@@ -210,8 +210,6 @@ jobs:
           IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/provenance.sh"
 
-      # The failure paths above write their own summary section; this one needs a
-      # resolved version.
       - name: Publish Initialization Summary
         if: ${{ always() && steps.version.outcome == 'success' }}
         env:

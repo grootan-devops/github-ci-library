@@ -6,7 +6,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
       scan:
         required: false
@@ -20,7 +20,7 @@ on:
         description: "Fail on warning-only findings. Mirrors GitLab's allow_failure on exit code 2."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   SBOM_FILE: sbom.cdx.json
   TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
 
@@ -38,7 +38,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -56,15 +56,15 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: trivy-db
-          restore-keys: trivy-db
+          key: trivy-db-
+          restore-keys: trivy-db-
 
       - name: Restore Maven Repository
-        if: ${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) != '' }}
+        if: ${{ hashFiles(format('{0}/pom.xml', inputs.project-path)) != '' }}
         uses: actions/cache/restore@v6
         with:
           path: .m2
-          key: m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path || vars.PROJECT_PATH || '.')) }}
+          key: m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path)) }}
           restore-keys: m2-
 
       - name: Generate CycloneDX SBOM
@@ -76,7 +76,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: sbom
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/sbom.cdx.json
+          path: ${{ inputs.project-path }}/sbom.cdx.json
           if-no-files-found: error
           retention-days: 7
 
@@ -112,7 +112,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     env:
       SCAN_TYPE: sbom
       TRIVY_SCAN_REPORT_NAME: sbom_trivy_scan_report
@@ -137,14 +137,14 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: sbom
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+          path: ${{ inputs.project-path }}
 
       - name: Restore Trivy Database Cache
         uses: actions/cache/restore@v6
         with:
           path: .trivycache
-          key: trivy-db
-          restore-keys: trivy-db
+          key: trivy-db-
+          restore-keys: trivy-db-
 
       - name: Scan SBOM
         env:
@@ -175,7 +175,7 @@ jobs:
         with:
           name: scan-sbom-reports
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/sbom_trivy_scan_report.*
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/SBOM_CVE.md
+            ${{ inputs.project-path }}/sbom_trivy_scan_report.*
+            ${{ inputs.project-path }}/SBOM_CVE.md
           if-no-files-found: ignore
           retention-days: 7

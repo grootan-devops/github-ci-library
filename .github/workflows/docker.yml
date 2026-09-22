@@ -59,7 +59,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
       test:
         required: false
@@ -91,7 +91,7 @@ on:
         value: ${{ jobs.build.outputs.IMAGE_DIGEST }}
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
   REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
@@ -110,7 +110,7 @@ jobs:
       packages: write
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     outputs:
       IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
       IMAGE_REF_DIGEST: ${{ steps.ref.outputs.IMAGE_REF_DIGEST }}
@@ -217,10 +217,6 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
-          # `github.ref_name` is `<n>/merge` on a pull request, and a Docker tag admits
-          # only [A-Za-z0-9_.-]. Interpolated raw, the registry cache exporter rejects the
-          # whole reference with "invalid reference format" and the build fails -- on every
-          # pull request, which is where the cache matters most.
           sanitise() { printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '-' | cut -c1-100; }
           {
             echo "ref=$(sanitise "${REF_NAME}")"
@@ -231,8 +227,8 @@ jobs:
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6
         with:
-          context: ${{ inputs.build-context || inputs.project-path || vars.PROJECT_PATH || '.' }}
-          file: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ vars.DOCKERFILE || 'Dockerfile' }}
+          context: ${{ inputs.build-context || inputs.project-path }}
+          file: ${{ inputs.project-path }}/${{ vars.DOCKERFILE || 'Dockerfile' }}
           target: ${{ inputs.target }}
           push: true
           tags: ${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:${{ inputs.image-tag }}
@@ -276,7 +272,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: image-info
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/IMAGE_INFO.md
+          path: ${{ inputs.project-path }}/IMAGE_INFO.md
           if-no-files-found: ignore
           retention-days: 7
 
@@ -285,8 +281,8 @@ jobs:
         env:
           REPO: ${{ inputs.image-repository }}
           TAG: ${{ inputs.image-tag }}
-          BUILD_CONTEXT: ${{ inputs.build-context || inputs.project-path || vars.PROJECT_PATH || '.' }}
-          BUILD_FILE: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/${{ vars.DOCKERFILE || 'Dockerfile' }}
+          BUILD_CONTEXT: ${{ inputs.build-context || inputs.project-path }}
+          BUILD_FILE: ${{ inputs.project-path }}/${{ vars.DOCKERFILE || 'Dockerfile' }}
           BUILD_TARGET: ${{ inputs.target }}
           BUILD_ARGS: ${{ steps.args.outputs.args }}
           PUSH_OUTCOME: ${{ steps.push.outcome }}
@@ -302,7 +298,7 @@ jobs:
       contents: read
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -392,12 +388,6 @@ jobs:
       packages: write
     container:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
-    # Deliberately no `defaults.run.working-directory` and no caller checkout,
-    # unlike `build` and `test`: nothing here reads the caller's tree, this job
-    # only talks to the registry. Pointing it at `project-path` killed every
-    # `run:` step with "working directory does not exist" for a monorepo child,
-    # because only `.ci-library` is ever checked out here -- so the release
-    # failed on an opaque runner error instead of the scan guard's diagnostic.
     steps:
       - name: Checkout CI Library
         uses: actions/checkout@v7
@@ -428,10 +418,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: image-info
-          # promote-image.sh writes ${IMAGE_INFO_FILE_NAME} into the job's cwd,
-          # which is the workspace root now that the job no longer cd's into
-          # `project-path`. The build job uploads from `project-path/`, but the
-          # two jobs are mutually exclusive on `is-release`.
           path: IMAGE_INFO.md
           if-no-files-found: ignore
           retention-days: 7

@@ -104,7 +104,6 @@ jobs:
     needs: init
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -232,19 +231,14 @@ Each workflow needs exactly this, and nothing else:
 | `docker`, `buildah`, `chart` | `contents: read`, `packages: write` |
 | `scan` | `contents: read`, `checks: write` |
 | `<lang>-build` | `contents: read`, `checks: write` |
-| `trivy-cache` | `contents: read`, `actions: write` |
+| `trivy-cache` | `contents: read` |
 | `lint`, `<lang>-lint`, `check`, `sbom`, `sonarqube`, `secret-scanning`, `notify`, `terraform-*`, `deploy-*` | `contents: read` |
 
 `contents: write` creates the git tag and GitHub Release. `packages: write` covers image and
-chart pushes. `actions: read` lets `init` and `release` reach the upstream candidate run;
-`actions: write` lets `trivy-cache` replace the immutable `trivy-db` entry. `checks: write`
-publishes test and scan results as Checks.
-
-`actions: read` is not enough for any caller of `trivy-cache.yml`. GitHub cache entries are
-immutable, so the stable `trivy-db` key has to be deleted before it can be rewritten, and the
-warm job declares `actions: write` for it. A reusable workflow cannot request a permission its
-caller did not grant, so a caller that stops at `actions: read` fails at startup before any
-job begins.
+chart pushes. `actions: read` lets `init` and `release` reach the upstream candidate run.
+`checks: write` publishes test and scan results as Checks. The cache workflows use dated
+`actions/cache` keys and require only `contents: read`; they no longer delete or rewrite a
+stable cache entry through the Actions API.
 
 ### Warming the Trivy cache from the default branch
 
@@ -253,13 +247,11 @@ with `scan-type: image`, or `sbom.yml`. **A repository that does not scan should
 and needs no cache-warm workflow at all.** A CI image that never leaves the build farm is a
 fair reason not to scan; so is a repository that ships no image.
 
-If you do scan, one more workflow is needed, and its absence is silent. Every
-`actions/cache/save` in this library runs only on the default branch, because GitHub scopes
-a cache entry to the ref that wrote it — a run reads its own ref, its base branch and the
-default branch, so a write from anywhere else is a copy nobody else can use. Pull requests
-therefore *restore* the cache but never write one. If nothing runs on the default branch to
-write it, the entry never exists and every run re-downloads the ~115MB vulnerability
-database.
+If you do scan, one more workflow is needed, and its absence is silent. The cache uses a
+UTC-dated key and automatically saves a new entry when the key is missing. GitHub scopes a
+cache entry to the ref that wrote it, so the scheduled/default-branch run is the one that
+creates a cache available to later pull requests. Without it, every run re-downloads the
+vulnerability database.
 
 A scheduled workflow closes that, because a schedule executes on the default branch:
 
@@ -284,7 +276,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
     with:
@@ -463,7 +454,7 @@ repeat them.
 | `secret-scanning.yml` | `Git:Secret:Scan` | `needs: init` | `Common:Init` |
 | `sonarqube.yml` | `Sonarqube` | `needs: [init, build]` | `Common:Init`, `Project:Build`, `Project:Unit:Test` |
 | `terraform-lint.yml` | `Terraform:Init`, `Terraform:Validate`, `Terraform:Lint`, `Terraform:Check:README` | `needs: init` | `Common:Init`; `Terraform:Init` → `Validate` / `Lint` is *internal* |
-| `terraform-test.yml` | `Terraform:Scan` | `needs: [init, terraform-lint, trivy-cache]` | `Terraform:Validate` **(required)**, `Trivy:Cache:Warm` |
+| `terraform-test.yml` | `Terraform:Test` | `needs: [init, terraform-lint]` | `Terraform:Validate` **(required)**. It runs `terraform test`; the Terraform config scan lives in `scan.yml` with `scan-type: config`, `config-type: terraform`, and that is the job needing `trivy-cache`. |
 | `check.yml` · six guards → `verdict` | `Tag:Tag Existence`, `Changelog:Check Existence`, `Migration:Check Existence`, `Chart:Check Existence`, `Chart:Check:Dependency`, `Image:Check Existence` | **`needs: init` — and nothing else** | `.check-job-common` → `Common:Init`. See the warning below. |
 | `deploy-komodo-gitops.yml` · `validate` → `komodo-deploy` | `Deploy:Komodo:Validate:Image:<env>`, `Deploy:Komodo:<env>` | `needs: init`; add `image` when the same run pushed it | `Common:Init`, `Image:Push`; the `Validate:Image` edge is now *internal* |
 | `deploy-argocd-gitops.yml` · `validate` → `gitops-commit` → `sync` | `Deploy:ArgoCD:Validate:Chart/Image:<env>`, `Deploy:ArgoCD:<env>` | `needs: init`; add `image` / `chart` when the same run published them | `Common:Init`, `Image:Push`, `Chart:Push`; the `Validate:*` edges are *internal* |
@@ -734,7 +725,7 @@ flowchart LR
 
 | Workflow · Job | Description |
 | --- | --- |
-| `init.yml` · `initialize` | Discovers the application version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **26 outputs.** |
+| `init.yml` · `initialize` | Discovers the application version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **27 outputs.** |
 | `check.yml` · `library-pin` | Fails when a reusable-workflow call pins a branch, a commit SHA or a pre-release instead of a published tag. Runs by default; set `check-library-pinning: false` temporarily while testing against a library branch, or use `allow-unstable-library-refs: true` to downgrade it to a warning. |
 | `check.yml` · `tag-existence` | Fails when the git tag already exists on a different commit. A tag already on *this* commit is treated as a re-run, not a collision. |
 | `check.yml` · `changelog-existence` | Extracts the `## [x.y.z]` section from `CHANGELOG.md` and renders it as an Adaptive Card fragment. Uploads `release-changelog`. |
@@ -889,21 +880,23 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
      directories **before** the `USER` directive.
    - Standard non-privileged listening port: `EXPOSE 8080`.
 3. **Automatic build-arg base images.**
-   `docker.yml` resolves and injects the following build arguments automatically. A
-   Dockerfile pins nothing itself — bumping a base image is a change to one organisation
-   variable.
+   `docker.yml` resolves and injects the following build arguments automatically, so a
+   Dockerfile pins nothing itself.
 
-   | Tech stack | Injected build arg | Organisation variable | Description |
-   | --- | --- | --- | --- |
-   | **Java** | `JAVA_25_MICRO_BASE_IMAGE` | `vars.JAVA_25_MICRO_BASE_IMAGE` | Minimal hardened Java 25 JRE runtime |
-   | **Golang** | `MICRO_ROOT_BASE_IMAGE` | `vars.MICRO_ROOT_BASE_IMAGE` | Distroless minimal root container for static binaries |
-   | **Python** | `PYTHON_312_MICRO_BASE_IMAGE` | `vars.PYTHON_312_MICRO_BASE_IMAGE` | Minimal Python 3.12 micro runtime |
-   | **Node.js backend** | `NODE_JS_24_MICRO_BASE_IMAGE` | `vars.NODE_JS_24_MICRO_BASE_IMAGE` | Minimal Node.js 24 micro runtime |
-   | **Node.js frontend** | `NGINX_MICRO_BASE_IMAGE` | `vars.NGINX_MICRO_BASE_IMAGE` | Non-root Nginx static SPA server |
-   | **Multi-stage builder** | `TOOLKIT_BUILD_IMAGE` | `vars.TOOLKIT_BUILD_IMAGE` | The one build container, for a builder stage only. Every toolchain is baked into it. |
-   | **All** | `VERSION` | — | `init.yml`'s `image-push-tag` |
+   | Tech stack | Injected build arg | Description |
+   | --- | --- | --- |
+   | **Java** | `JAVA_25_MICRO_BASE_IMAGE` | Minimal hardened Java 25 JRE runtime |
+   | **Golang** | `MICRO_ROOT_BASE_IMAGE` | Distroless minimal root container for static binaries |
+   | **Python** | `PYTHON_312_MICRO_BASE_IMAGE` | Minimal Python 3.12 micro runtime |
+   | **Node.js backend** | `NODE_JS_24_MICRO_BASE_IMAGE` | Minimal Node.js 24 micro runtime |
+   | **Node.js frontend** | `NGINX_MICRO_BASE_IMAGE` | Non-root Nginx static SPA server |
+   | **Multi-stage builder** | `TOOLKIT_BUILD_IMAGE` | The one build container, for a builder stage only. Every toolchain is baked into it. |
+   | **All** | `VERSION` | `init.yml`'s `image-push-tag` |
 
-   Each is passed as `${{ vars.IMAGE_REGISTRY }}/<value>`.
+   Each is passed as `${{ vars.IMAGE_REGISTRY }}/<value>`, where `<value>` is **pinned in
+   `docker.yml`**, not read from an organisation variable. Bumping a base image is a change
+   to the library and a new release — which is what lets a pipeline be reproduced from its
+   tag alone.
 
    > [!NOTE]
    > GitLab additionally injects `CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX`. GitHub has no
@@ -1295,11 +1288,15 @@ repository, and triggers a Komodo stack redeploy.
 | Input | Required | Description |
 | --- | :--: | --- |
 | `environment` | ✅ | Target environment |
-| `stack-name` | ✅ | Komodo stack to redeploy |
+| `komodo-stack-name` | ✅ | Komodo stack to redeploy |
 | `gitops-repo` | ✅ | GitOps repository holding the compose file |
-| `compose-file` | ✅ | Path to the compose file within it |
+| `gitops-branch` | ✅ | Branch in that repository to commit to |
+| `gitops-service-image-yq-path` | ✅ | `yq` path to the service's image field in the compose file |
 | `image-repository`, `image-tag` | ✅ | Image to deploy |
-| `komodo-server` | | Defaults to `vars.KOMODO_SERVER` |
+| `gitops-compose-file` | | Compose file path (default `docker-compose.yml`) |
+| `komodo-server` | ✅ | Komodo API endpoint |
+| `dev-repository-suffix` | | Appended to the image repository (default `/dev`; normalised to `-dev` on Docker Hub) |
+| `build-env` | | Extra `KEY=VALUE` lines exported before the deploy |
 
 #### ArgoCD (`deploy-argocd-gitops.yml`)
 
@@ -1310,10 +1307,17 @@ mode** (patch an image reference), then syncs and waits for `Healthy`.
 | --- | :--: | --- |
 | `environment` | ✅ | Target environment |
 | `gitops-repo` | ✅ | GitOps repository |
-| `app-path` | ✅ | Path to the application within it |
-| `chart-name` / `chart-version` | | Helm mode |
+| `gitops-branch` | ✅ | Branch in that repository to commit to |
+| `argocd-app-name` | ✅ | ArgoCD application to sync |
+| `chart-name` / `chart-version` / `chart-repository` | | Helm mode |
+| `chart-values-file` / `chart-app-yq-path` | | Helm mode: which file, and the `yq` path within it |
 | `manifest-file` / `new-image` | | Manifest mode |
-| `argocd-server` | | Defaults to `vars.ARGOCD_SERVER` |
+| `image-values-file` / `image-repo-yq-path` / `image-tag-yq-path` | | Image-values mode |
+| `image-repository` | | Image to deploy, when `new-image` is not given |
+| `argocd-server` | ✅ | ArgoCD API endpoint |
+| `argocd-version` | | ArgoCD CLI to download (default `v3.2.6`) |
+| `dev-repository-suffix` | | Appended to the repository paths (default `/dev`; normalised to `-dev` on Docker Hub) |
+| `github-environment-name` / `github-environment-url` | | Deployment environment to record against |
 
 ---
 
@@ -1382,7 +1386,6 @@ wherever possible.
 | --- | --- |
 | `IMAGE_REGISTRY` | Container and chart registry host, e.g. `registry.domain.local`. |
 | `IMAGE_REPOSITORY` | Image repository path, e.g. `myapp/order-backend`. |
-| `TOOLKIT_BUILD_IMAGE` | Default build container, e.g. `devops/build-containers/bt-container:3.2.1`. |
 
 > [!IMPORTANT]
 > Build and base image coordinates carry **no library defaults**. A container variable that
@@ -1394,22 +1397,27 @@ wherever possible.
 
 | Variable | Used by | Description |
 | --- | --- | --- |
-| `TOOLKIT_BUILD_IMAGE` | every `*-build`, `*-lint`, `buildah`, `terraform-*` | The one build container. Go, JDK + Maven, Python, Node, buildah and the linters are all baked into it; there is no per-language build image. |
 | `SONAR_SCANNER_IMAGE` | `sonarqube` | SonarSource scanner container |
-| `BUILDKIT_IMAGE` | `docker` | Buildx driver image |
-| `MICRO_ROOT_BASE_IMAGE` | `docker`, `buildah` | Golang / scratch base, injected as a build arg |
-| `PYTHON_312_MICRO_BASE_IMAGE` | `docker` | Python runtime base |
-| `NODE_JS_24_MICRO_BASE_IMAGE` | `docker` | Node runtime base |
-| `NGINX_MICRO_BASE_IMAGE` | `docker` | Nginx SPA base |
-| `JAVA_25_MICRO_BASE_IMAGE` | `docker` | JRE runtime base |
+| `MICRO_ROOT_BASE_IMAGE` | `buildah` | Golang / scratch base, injected as a build arg |
+
+> [!IMPORTANT]
+> **The build container and the Docker base images are pinned in the library, not
+> configurable.** Every `container:` block names
+> `registry-1.docker.io/grootantech/toolkit:1.0.0` literally, and `docker.yml` hardcodes the
+> `micro-root`, `nginx`, `python-3-12`, `node-24` and `java-25` bases and the BuildKit
+> driver. Setting `TOOLKIT_BUILD_IMAGE`, `BUILDKIT_IMAGE` or any `*_MICRO_BASE_IMAGE`
+> organisation variable has **no effect** — those rows were removed from this table because
+> they described an intent, not the code. Changing any of these means editing the library and
+> cutting a release, which is what makes a pipeline reproducible from its tag alone.
+>
+> `MICRO_ROOT_BASE_IMAGE` is the one exception, and only for `buildah.yml`; `docker.yml`
+> hardcodes it like the rest.
 
 ### Behavioural variables
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `CI_RUNNER` | `ubuntu-26.04` | Runner label for every job. Pinned rather than tracking `ubuntu-latest`, so a platform migration cannot change the build environment under a release. |
-| `PROJECT_PATH` | `.` | Root directory of the application inside the repository. |
-| `CHART_DIR` | `./chart` | Path to the Helm chart folder. |
 | `CHART_FILE` | `Chart.yaml` | Chart manifest filename. |
 | `CHART_REPOSITORY` | `helm` | Chart repository path in the registry. |
 | `DOCKERFILE` | `Dockerfile` | Dockerfile path for linting and building. |
@@ -1421,6 +1429,36 @@ wherever possible.
 | `MIGRATION_FILE_NAME` | `./MIGRATION.md` | Migration guide path. |
 | `UPSTREAM_WORKFLOW` | `pr.yml` | Workflow file whose successful run produced the candidate artifacts. |
 | `HADOLINT_IGNORE` | — | Comma-separated extra hadolint rules to ignore. |
+
+**Monorepo children** are the reason `project-path` exists. Pass it to every workflow that
+touches the child, and each resolves its own paths, caches and artifacts beneath it:
+
+```yaml
+  build:
+    uses: grootan-devops/github-ci-library/.github/workflows/node-build.yml@1.0.0
+    secrets: inherit
+    with:
+      project-path: services/admin-ui
+
+  image:
+    needs: [init, build]
+    uses: grootan-devops/github-ci-library/.github/workflows/docker.yml@1.0.0
+    secrets: inherit
+    with:
+      project-path: services/admin-ui
+      image-tag: ${{ needs.init.outputs.image-push-tag }}
+      image-repository: ${{ needs.init.outputs.image-push-repository }}
+```
+
+A single-project repository omits it; it defaults to the repository root.
+
+> [!NOTE]
+> **A repository's own layout is an input, not a variable.** `project-path`, `chart-dir` and
+> the linter globs are passed per call with a real default in the workflow that declares
+> them — there is no `vars.PROJECT_PATH` or `vars.CHART_DIR` to set. A variable here is
+> something the whole organisation shares; anything describing one repository's file layout
+> belongs in the `with:` block. The trade is deliberate: a repository whose chart is not at
+> `./chart` repeats `chart-dir:` in each caller workflow that touches it.
 
 ### Security & quality variables
 
@@ -1531,12 +1569,15 @@ Configure once at the GitHub organisation level to propagate to every repository
 - **Registries** — `vars.IMAGE_REGISTRY`, `secrets.IMAGE_REGISTRY_USERNAME`,
   `secrets.IMAGE_REGISTRY_PASSWORD`. One registry serves both images and charts; OCI is the
   protocol for both.
-- **Build containers** — `vars.TOOLKIT_BUILD_IMAGE`, `vars.SONAR_SCANNER_IMAGE`.
-- **Base images** — the `*_MICRO_BASE_IMAGE` set, injected into image builds as build args.
+- **Build containers** — `vars.SONAR_SCANNER_IMAGE`. The toolkit build container is pinned
+  in the library, not set here.
+- **Base images** — `vars.MICRO_ROOT_BASE_IMAGE`, read by `buildah.yml` only. The other
+  `*_MICRO_BASE_IMAGE` values are pinned in `docker.yml`.
 - **Security & quality** — `vars.SONAR_URL`, `vars.SONAR_EXTERNAL_URL`,
   `secrets.SONARQUBE_TOKEN`, `vars.TRIVY_HOST`, `secrets.TRIVY_TOKEN`.
-- **Deployment** — `vars.ARGOCD_SERVER`, `secrets.ARGOCD_AUTH_TOKEN`, `vars.KOMODO_SERVER`,
-  `secrets.KOMODO_API_KEY`, `secrets.KOMODO_API_SECRET`, `secrets.GITOPS_TOKEN`.
+- **Deployment credentials** — `secrets.ARGOCD_AUTH_TOKEN`, `secrets.KOMODO_API_KEY`,
+  `secrets.KOMODO_API_SECRET`, `secrets.GITOPS_TOKEN`. Deployment endpoints are caller
+  inputs (`argocd-server` / `komodo-server`), not organisation variables.
 - **Notifications** — `secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL`.
 
 ### Helm chart publishing & authentication
@@ -1662,7 +1703,6 @@ jobs:
     needs: init
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -1928,7 +1968,6 @@ jobs:
     needs: init
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -2045,7 +2084,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -2253,7 +2291,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -2381,7 +2418,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -2576,7 +2612,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -2709,7 +2744,6 @@ jobs:
     needs: init
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -2912,7 +2946,6 @@ jobs:
     needs: init
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -3025,7 +3058,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -3198,7 +3230,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -3301,7 +3332,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -3336,7 +3366,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -3420,8 +3449,8 @@ jobs:
 
 > [!TIP]
 > Every job that scans `needs` the `trivy-cache` job. Without that edge each scan
-> re-downloads roughly 1GB of vulnerability database, and `actions: write` on the caller
-> is what lets the warm job save the cache entry back.
+> re-downloads roughly 1GB of vulnerability database. The warm job saves dated cache entries
+> automatically and needs only `contents: read`.
 
 ---
 
@@ -3468,7 +3497,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -3702,7 +3730,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -3796,7 +3823,6 @@ jobs:
   trivy-cache:
     permissions:
       contents: read
-      actions: write
     uses: grootan-devops/github-ci-library/.github/workflows/trivy-cache.yml@1.0.0
     secrets: inherit
 
@@ -4002,14 +4028,14 @@ Consuming projects are expected to follow the same standard the library applies 
 
 ### The library's own pipeline
 
-`pr.yml` (pull request) and `release-trigger.yml` (push to the default branch) are this library's
-counterpart of `ci-templates/.gitlab-ci.yml`. They run the library against itself:
+`self-pr.yml` (pull request) and `self-release.yml` (push to the default branch) are this
+library's counterpart of `ci-templates/.gitlab-ci.yml`. They run the library against itself:
 
 | Phase | Jobs |
 | --- | --- |
-| Lint | `actionlint`, `shellcheck`, plus `lint.yml` for YAML, changelog and migration guide |
-| Check | `check.yml` — git tag availability, changelog section, migration section |
-| Release | `release-trigger.yml` → reusable `release.yml` — tags the repository, publishes the GitHub Release with the extracted notes, posts the Teams card |
+| Lint | `self-lint.yml` — actionlint, shellcheck and repository self-checks; `lint.yml` covers YAML, changelog and migration guide |
+| Check | `self-check.yml` / `self-version.yml` — git tag availability, changelog section and migration section |
+| Release | `self-release.yml` → reusable `release.yml` — tags the repository, publishes the GitHub Release with the extracted notes, posts the Teams card |
 
 The released version is the contents of `VERSION`. Bump it in the pull request that ships
 the change, the same way `RELEASE_VERSION` is bumped in the GitLab library's own

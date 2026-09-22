@@ -6,13 +6,13 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Project root. Monorepo children set this."
       chart-dir:
         required: false
         type: string
-        default: ""
-        description: "Directory containing Chart.yaml. Defaults to vars.CHART_DIR, then ./chart."
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
       lint-yaml-files:
         required: false
         type: string
@@ -25,8 +25,8 @@ on:
         description: "Space-separated markdown globs. Empty lints every tracked markdown file."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-  CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
+  CHART_DIR: ${{ inputs.chart-dir }}
   DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
   HADOLINT_IGNORE: ${{ vars.HADOLINT_IGNORE }}
   CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
@@ -51,8 +51,8 @@ jobs:
       - name: Select Present Targets
         id: targets
         env:
-          PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
-          CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+          CHART_DIR: ${{ inputs.chart-dir }}
           DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
@@ -90,7 +90,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -110,7 +110,7 @@ jobs:
           SUBJECT: ${{ matrix.subject }}
           INPUT_YAML_FILES: ${{ inputs.lint-yaml-files }}
           INPUT_MD_FILES: ${{ inputs.lint-md-files }}
-          CHART_DIR: ${{ inputs.chart-dir || vars.CHART_DIR || './chart' }}
+          CHART_DIR: ${{ inputs.chart-dir }}
           DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}

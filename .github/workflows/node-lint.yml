@@ -6,11 +6,11 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Path to the Node project root. Monorepo children set this."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   npm_config_cache: ${{ github.workspace }}/.npm
   BIOME_REPORT: biome-report.txt
 
@@ -28,7 +28,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
 
     steps:
       - name: Checkout Code
@@ -49,7 +49,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .npm
-          key: node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path || vars.PROJECT_PATH || '.')) }}
+          key: node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path)) }}
           restore-keys: node-
 
       - name: Run Biome
@@ -72,6 +72,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: node-biome-report
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/biome-report.txt
+          path: ${{ inputs.project-path }}/biome-report.txt
           if-no-files-found: ignore
           retention-days: 7

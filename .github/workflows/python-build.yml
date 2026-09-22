@@ -6,7 +6,7 @@ on:
       project-path:
         required: false
         type: string
-        default: ""
+        default: "."
         description: "Path to the Python project root. Monorepo children set this."
       build-command:
         required: false
@@ -30,7 +30,7 @@ on:
         description: "Newline-separated KEY=VALUE pairs exported into build and test."
 
 env:
-  PROJECT_PATH: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+  PROJECT_PATH: ${{ inputs.project-path }}
   TEST_REPORT_DIR: test-report
   UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
   UV_VENV_RELOCATABLE: "1"
@@ -49,7 +49,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     outputs:
       cache-key: ${{ steps.key.outputs.key }}
     steps:
@@ -59,7 +59,7 @@ jobs:
       # hashFiles returns "" for a missing uv.lock, collapsing the key onto the bare `py-` prefix.
       - name: Compute Dependency Cache Key
         id: key
-        run: echo "key=py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path || vars.PROJECT_PATH || '.')) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
+        run: echo "key=py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path)) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout CI Library
         uses: actions/checkout@v7
@@ -118,7 +118,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -135,16 +135,7 @@ jobs:
         if: ${{ inputs.build-env != '' }}
         env:
           BUILD_ENV: ${{ inputs.build-env }}
-        run: |
-          set -euo pipefail
-          while IFS='=' read -r KEY VAL; do
-            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
-            KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
-              continue
-            fi
-            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
-          done <<< "${BUILD_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
 
       - name: Restore uv Cache
         uses: actions/cache/restore@v6
@@ -169,7 +160,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: python-dist
-          path: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/dist/
+          path: ${{ inputs.project-path }}/dist/
           retention-days: 7
           include-hidden-files: true
 
@@ -197,7 +188,7 @@ jobs:
       image: registry-1.docker.io/grootantech/toolkit:1.0.0
     defaults:
       run:
-        working-directory: ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}
+        working-directory: ${{ inputs.project-path }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -214,16 +205,7 @@ jobs:
         if: ${{ inputs.build-env != '' }}
         env:
           BUILD_ENV: ${{ inputs.build-env }}
-        run: |
-          set -euo pipefail
-          while IFS='=' read -r KEY VAL; do
-            KEY="${KEY#"${KEY%%[![:space:]]*}"}"
-            KEY="${KEY%"${KEY##*[![:space:]]}"}"
-            if [[ -z "${KEY}" || "${KEY}" =~ ^# ]]; then
-              continue
-            fi
-            printf '%s=%s\n' "${KEY}" "${VAL}" >> "${GITHUB_ENV}"
-          done <<< "${BUILD_ENV}"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
 
       - name: Restore uv Cache
         uses: actions/cache/restore@v6
@@ -270,9 +252,9 @@ jobs:
         with:
           name: python-test-reports
           path: |
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/coverage/
-            ${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/coverage.xml
+            ${{ inputs.project-path }}/test-report/
+            ${{ inputs.project-path }}/coverage/
+            ${{ inputs.project-path }}/coverage.xml
           if-no-files-found: ignore
           retention-days: 7
 
@@ -281,7 +263,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CHECK_NAME: "Python Unit Test Results"
-          REPORT_GLOB: "${{ inputs.project-path || vars.PROJECT_PATH || '.' }}/test-report/**/*.xml"
+          REPORT_GLOB: "${{ inputs.project-path }}/test-report/**/*.xml"
           JOB_SUMMARY: "true"
           FAIL_ON_FAILURE: "true"
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"
