@@ -38,7 +38,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Candidate repository to promote from, from init.yml."
+        description: "Candidate repository to promote from, from init.yml; equal to the production repository on Docker Hub."
       helm-values:
         required: false
         type: string

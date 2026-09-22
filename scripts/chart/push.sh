@@ -7,15 +7,18 @@
 # gets an empty directory and a confusing helm error. Listing what actually
 # arrived turns that into a one-glance diagnosis.
 #
-# A stable push is also mirrored into the dev channel so consumers pinned
-# there still resolve the version. That mirror is a convenience: it warns on
-# failure rather than failing the job, because the chart is already published.
+# When the caller provides a distinct development repository, a stable push is
+# also mirrored there so consumers pinned to that channel still resolve the
+# version. Docker Hub intentionally provides the same repository for both
+# channels, so the mirror branch is skipped and the version suffix is the
+# only candidate/release distinction.
 #
 # Env:
 #   CHART_NAME            chart name
 #   CHART_VERSION         version being pushed; names the .tgz
 #   CHART_REPOSITORY      repository to push to, under REGISTRY_HOST
-#   CHART_DEV_REPOSITORY  candidate repository to mirror into (default: none)
+#   CHART_DEV_REPOSITORY  candidate repository to mirror into (same as the
+#                         production repository on Docker Hub)
 #   REGISTRY_HOST         OCI registry host
 #   CHART_INFO_FILE_NAME  file the published details are written to
 #                         (default: CHART_INFO.md)

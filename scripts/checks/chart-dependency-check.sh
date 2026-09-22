@@ -55,17 +55,20 @@ summarise() {
 
 FAILED=false
 
-# Keep the dependency guard aligned with init.yml: Docker Hub uses flat
-# repository names, while registries that support nested paths use `/dev`.
+# Keep the dependency guard aligned with init.yml. Docker Hub stores candidate
+# and release charts in one namespace-root repository, so there is no separate
+# development chart path to reject. Other registries retain the `/dev` path.
 case "${REGISTRY_HOST}" in
   docker.io|index.docker.io|registry-1.docker.io)
-    CHART_DEV_REPOSITORY_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX//\//-}"
+    CHART_DEV_REPOSITORY_SUFFIX=""
     ;;
 esac
 
 # --- 1. no dependency may resolve to the development repository -------------
-export DEV_PATH="${CHART_REPOSITORY:-}${CHART_DEV_REPOSITORY_SUFFIX}"
-if [[ "${DEV_PATH}" != "${CHART_DEV_REPOSITORY_SUFFIX}" ]]; then
+if [[ "${REGISTRY_HOST}" == "docker.io" || "${REGISTRY_HOST}" == "index.docker.io" || "${REGISTRY_HOST}" == "registry-1.docker.io" ]]; then
+  echo "::notice title=Chart dependency::Docker Hub uses one namespace-root chart repository for candidate and release versions; the development-repository dependency check is not applicable."
+elif [[ -n "${CHART_REPOSITORY:-}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" ]]; then
+  export DEV_PATH="${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}"
   DEV_OFFENDERS="$(yq -r '
     .dependencies[]?
     | select((.repository // "") | test(strenv(DEV_PATH)))
@@ -78,7 +81,7 @@ if [[ "${DEV_PATH}" != "${CHART_DEV_REPOSITORY_SUFFIX}" ]]; then
       "${DEV_OFFENDERS}" "Depend on published stable releases instead."
   fi
 else
-  echo "::notice title=Chart dependency::CHART_REPOSITORY is unset, so the development-repository check is skipped."
+  echo "::notice title=Chart dependency::CHART_REPOSITORY or CHART_DEV_REPOSITORY_SUFFIX is unset, so the development-repository check is skipped."
 fi
 
 # --- 2. every dependency pins an exact version ------------------------------

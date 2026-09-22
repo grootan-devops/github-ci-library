@@ -725,13 +725,13 @@ flowchart LR
 
 | Workflow · Job | Description |
 | --- | --- |
-| `init.yml` · `initialize` | Discovers the application version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories; and on a release resolves the merged pull request and its successful run. **27 outputs.** |
+| `init.yml` · `initialize` | Discovers the application version from `VERSION`, `package.json`, `pyproject.toml`, `pom.xml` or `Chart.yaml`; computes the candidate suffix; resolves dev/production repositories (one shared namespace-root chart repository on Docker Hub); and on a release resolves the merged pull request and its successful run. **27 outputs.** |
 | `check.yml` · `library-pin` | Fails when a reusable-workflow call pins a branch, a commit SHA or a pre-release instead of a published tag. Runs by default; set `check-library-pinning: false` temporarily while testing against a library branch, or use `allow-unstable-library-refs: true` to downgrade it to a warning. |
 | `check.yml` · `tag-existence` | Fails when the git tag already exists on a different commit. A tag already on *this* commit is treated as a re-run, not a collision. |
 | `check.yml` · `changelog-existence` | Extracts the `## [x.y.z]` section from `CHANGELOG.md` and renders it as an Adaptive Card fragment. Uploads `release-changelog`. |
 | `check.yml` · `migration-existence` | Extracts the `previous...current` section from `MIGRATION.md`. Skipped for an initial release, or disabled with `check-migration: false` for artifacts that intentionally have no migration contract. Uploads `release-migration`. |
 | `check.yml` · `chart-existence` | Fails when the chart version is already published. Candidate versions skip the collision check. |
-| `check.yml` · `chart-dependency` | Fails when a chart dependency resolves to a development repository. |
+| `check.yml` · `chart-dependency` | Fails when a chart dependency resolves to a development repository. Docker Hub uses one namespace-root chart repository, so its candidate/release path check is skipped. |
 | `check.yml` · `image-existence` | Fails when the image tag is already published. |
 | `check.yml` · `verdict` | Consolidates every guard into one table and one required status check. |
 
@@ -750,7 +750,7 @@ flowchart LR
 | `image-tag` / `image-push-tag` | `1.4.0` / `1.4.0-42.891` | `docker`, `buildah` |
 | `image-repository` / `image-dev-repository` / `image-push-repository` | `contoso/order-backend[-dev]` on Docker Hub | `docker`, `check`, promote |
 | `chart-name` / `chart-version` / `chart-app-version` / `chart-push-version` | `order-backend` / `1.4.0` / `1.4.0-42.891` | `chart` |
-| `chart-repository` / `chart-dev-repository` / `chart-push-repository` | `helm[/dev]` | `chart`, `check` |
+| `chart-repository` / `chart-dev-repository` / `chart-push-repository` | `helm[/dev]` on registries with nested paths; the same namespace root on Docker Hub | `chart`, `check` |
 | `ignore-chart` / `ignore-docker` | `false` | conditional job gating |
 | `upstream-run-id` / `merged-pr-number` | `18234567` / `891` | `release` artifact restore |
 | `candidate-image-tag` / `candidate-chart-version` | `1.4.0-42.891` | exact promotion source |
@@ -1178,8 +1178,8 @@ flowchart LR
 | `chart.yml` · `lint` | `helm lint --strict`, with optional inline value overrides. |
 | `chart.yml` · `unittest` | **Optional, opt-in** (`run-unittest: true`, default `false`). Renders the mock consumer chart at `mock-chart` (default `test`) with `helm unittest --strict` and uploads `chart-unittest-report`. For repositories that *ship* a chart others depend on; requires the `unittest` Helm plugin in the job image. |
 | `chart.yml` · `build` | `helm package --version --app-version`. Uploads `chart-package`. |
-| `chart.yml` · `push` | `helm push` to the OCI repository when `publish-candidate: true` (default). Set it to `false` for PR verification when the candidate OCI repository is not provisioned; release promotion remains separate. Writes `CHART_INFO.md` when it runs. |
-| `chart.yml` · `promote` | Release-mode only. Pulls the exact candidate, repackages at the release tag, pushes to production. |
+| `chart.yml` · `push` | `helm push` to the OCI repository when `publish-candidate: true` (default). Set it to `false` for PR verification when the candidate OCI repository is not provisioned; release promotion remains separate. Writes `CHART_INFO.md` when it runs. On Docker Hub, candidate and release versions use the same namespace-root repository. |
+| `chart.yml` · `promote` | Release-mode only. Pulls the exact candidate, repackages at the release tag, and pushes to production. On Docker Hub, the source and destination repository are intentionally the same. |
 | `scan.yml` (`scan-type: config`, `config-type: chart`) | Renders templates, then runs a Trivy misconfiguration scan. |
 | `check.yml` · `chart-existence` / `chart-dependency` | Version collision and development-dependency guards. |
 
@@ -1316,7 +1316,7 @@ mode** (patch an image reference), then syncs and waits for `Healthy`.
 | `image-repository` | | Image to deploy, when `new-image` is not given |
 | `argocd-server` | ✅ | ArgoCD API endpoint |
 | `argocd-version` | | ArgoCD CLI to download (default `v3.2.6`) |
-| `dev-repository-suffix` | | Appended to the repository paths (default `/dev`; normalised to `-dev` on Docker Hub) |
+| `dev-repository-suffix` | | Appended to the repository paths (default `/dev`); Docker Hub uses one chart namespace-root repository and ignores this suffix for Helm charts |
 | `github-environment-name` / `github-environment-url` | | Deployment environment to record against |
 
 ---
@@ -1419,11 +1419,11 @@ wherever possible.
 | --- | --- | --- |
 | `CI_RUNNER` | `ubuntu-26.04` | Runner label for every job. Pinned rather than tracking `ubuntu-latest`, so a platform migration cannot change the build environment under a release. |
 | `CHART_FILE` | `Chart.yaml` | Chart manifest filename. |
-| `CHART_REPOSITORY` | `helm` | Chart repository path in the registry. |
+| `CHART_REPOSITORY` | `helm` | Chart repository path in the registry. For Docker Hub, set this to the namespace root (for example `grootantech`), because Helm appends the chart name. |
 | `DOCKERFILE` | `Dockerfile` | Dockerfile path for linting and building. |
 | `MASTER_BRANCH_REGEX` | `^(.*/)?master$` | **Additional** protected branches treated as release branches. The repository's own default branch always is, whatever it is called — leave this alone unless you release from a second branch such as `release/master`. |
 | `IMAGE_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate images: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override. |
-| `CHART_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate charts: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override. |
+| `CHART_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate charts as `/dev` on registries with nested paths. Docker Hub ignores this suffix and uses the same namespace-root repository for candidate and release versions. |
 | `RELEASE_VERSION_SUFFIX` | — | Suffix appended to the version, e.g. `backend` → `1.5.0-backend`. |
 | `CHANGELOG_FILE_NAME` | `./CHANGELOG.md` | Changelog path. |
 | `MIGRATION_FILE_NAME` | `./MIGRATION.md` | Migration guide path. |
@@ -1584,16 +1584,24 @@ Configure once at the GitHub organisation level to propagate to every repository
 
 Charts publish over **OCI** to `oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}`.
 
+For Docker Hub, set `IMAGE_REGISTRY=registry-1.docker.io` and `CHART_REPOSITORY` to the
+Docker Hub namespace root, for example `grootantech`. Helm appends the chart name, so
+`tpl-library` is published at `oci://registry-1.docker.io/grootantech/tpl-library`.
+Candidate and release versions use that same chart repository; candidate version suffixes
+keep them distinct.
+
 - **Auth**: `helm registry login` with `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD`.
   The same credential covers images and charts.
-- **Dev vs production**: candidates publish to `${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}`.
-  At release, `chart.yml` · `promote` pulls the exact candidate, repackages it at the release
-  version and pushes to the production repository.
+- **Dev vs production**: on registries with nested paths, candidates publish to
+  `${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}`. On Docker Hub, candidates and releases
+  publish to `${CHART_REPOSITORY}` and are distinguished by their chart versions. At release,
+  `chart.yml` · `promote` pulls the exact candidate, repackages it at the release version and
+  pushes it to the production repository.
 - **Consuming a published chart**:
 
   ```bash
   helm registry login "${IMAGE_REGISTRY}" --username "${USER}" --password-stdin
-  helm pull "oci://${IMAGE_REGISTRY}/helm/order-backend" --version 1.4.0
+  helm pull "oci://${IMAGE_REGISTRY}/${CHART_REPOSITORY}/order-backend" --version 1.4.0
   ```
 
 ### Container image publishing & authentication

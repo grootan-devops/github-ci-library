@@ -148,19 +148,20 @@ fi
 TARGET_VERSION="${CHART_VERSION}"
 
 # Docker Hub has no nested repositories, so `<repo>/dev` is not a valid image
-# target and the push side rewrites the separator. scripts/init/resolve-version.sh
-# and scripts/scan/trivy.sh both do this; without it the deploy path looked for
-# `<repo>/dev` while the image had been pushed and scanned at `<repo>-dev`.
-# Charts are not rewritten: they live at an OCI path where nesting is legal,
-# which is why init normalises the image suffix only.
+# target and the push side rewrites the separator. Charts have an additional
+# Docker Hub constraint: Helm appends the chart name to the OCI target, so
+# candidate and release charts must use the same namespace-root repository and
+# are distinguished by their versions.
 IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
+CHART_DEV_SUFFIX="${DEV_SUFFIX}"
 case "${REGISTRY_HOST}" in
   docker.io|index.docker.io|registry-1.docker.io)
     IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
+    CHART_DEV_SUFFIX=""
     ;;
 esac
 
-CHART_REPO_URL="${REGISTRY_HOST}/${CHART_REPOSITORY}${DEV_SUFFIX}"
+CHART_REPO_URL="${REGISTRY_HOST}/${CHART_REPOSITORY}${CHART_DEV_SUFFIX}"
 NEW_IMAGE="${NEW_IMAGE_INPUT:-${REGISTRY_HOST}/${IMAGE_REPOSITORY}${IMAGE_DEV_SUFFIX}:${TARGET_VERSION}}"
 
 {

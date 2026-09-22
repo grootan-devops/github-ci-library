@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Promote the scanned candidate chart to the production repository.
+# Promote the scanned candidate chart to the production repository. On Docker
+# Hub the candidate and production repositories are intentionally identical;
+# only the candidate/release chart versions differ.
 #
 # A release must publish the exact bytes that were scanned, not a fresh build
 # of whatever the working tree happens to hold. So the candidate is pulled
-# back out of the dev repository -- by exact version when the caller knows it,
+# back out of the candidate repository -- by exact version when the caller knows it,
 # otherwise the newest candidate matching the tag -- and re-packaged at the
 # release tag. Packaging from the working tree is a last resort and warns
 # loudly, because those bytes never went through the scan.
@@ -13,7 +15,8 @@
 #   TAG                   production tag to promote to (default: none)
 #   CANDIDATE_VERSION     exact candidate version to promote (default: newest
 #                         candidate matching ^${TAG}-0)
-#   DEV_REPOSITORY        candidate repository to promote from (default: none)
+#   DEV_REPOSITORY        candidate repository to promote from (same as the
+#                         production repository on Docker Hub; default: none)
 #   PROD_REPOSITORY       production repository to push to
 #   REGISTRY_HOST         OCI registry host
 #   CHART_DIR             working-tree chart directory (default: ./chart)

@@ -26,7 +26,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Base Helm chart repository path. Charts are always read from <chart-repository>/dev."
+        description: "Base Helm chart repository path. Charts use the development suffix on registries that support it; Docker Hub uses the same namespace-root repository for candidate and release versions."
       image-repository:
         required: false
         type: string

@@ -82,10 +82,10 @@ on:
         description: "Production Helm chart repository (also the duplicate-check target)"
         value: ${{ jobs.initialize.outputs.CHART_REPOSITORY }}
       chart-dev-repository:
-        description: "Candidate Helm chart repository"
+        description: "Candidate Helm chart repository; equal to the production repository on Docker Hub"
         value: ${{ jobs.initialize.outputs.CHART_DEV_REPOSITORY }}
       chart-push-repository:
-        description: "Chart repository this run pushes to (dev or production)"
+        description: "Chart repository this run pushes to (same repository for candidate and release versions on Docker Hub)"
         value: ${{ jobs.initialize.outputs.CHART_PUSH_REPOSITORY }}
       chart-dir:
         description: "Resolved chart directory"

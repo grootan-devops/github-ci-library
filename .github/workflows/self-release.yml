@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - ".github/**"
+      - ".github/self-*.yml"
 
 concurrency:
   group: "release-${{ github.ref }}"
