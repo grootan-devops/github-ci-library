@@ -187,11 +187,11 @@ jobs:
           EXTRA_BUILD_ARGS: ${{ inputs.build-args }}
           VERSION: ${{ inputs.image-tag }}
           REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-          MICRO_ROOT_BASE_IMAGE: registry-1.docker.io/grootantech/micro-root:verify-v1
-          NGINX_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-nginx:verify-v1
-          PYTHON_312_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-python-3-12:verify-v1
-          NODE_JS_24_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-node-24:verify-v1
-          JAVA_25_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-java-25:verify-v1
+          MICRO_ROOT_BASE_IMAGE: registry-1.docker.io/grootantech/micro-root:1.0.0
+          NGINX_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-nginx:1.0.0
+          PYTHON_312_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-python-3-12:1.0.0
+          NODE_JS_24_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-node-24:1.0.0
+          JAVA_25_MICRO_BASE_IMAGE: registry-1.docker.io/grootantech/micro-java-25:1.0.0
           TOOLKIT_BUILD_IMAGE: registry-1.docker.io/grootantech/toolkit:1.0.0
         run: |
           set -euo pipefail
