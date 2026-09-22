@@ -1,0 +1,78 @@
+name: Trivy / Warm Database Cache
+
+on:
+  workflow_call:
+    inputs:
+      enable-java-db:
+        required: false
+        type: boolean
+        default: false
+        description: >-
+          Download trivy-java-db as well. Required by any later image or SBOM scan of a
+          Java artifact, which passes --skip-java-db-update and fails on a cold cache.
+          It is roughly 900MB, so set false for a repository that ships no JVM artifact.
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    name: Warm Cache
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Resolve Cache Day
+        id: day
+        run: echo "d=$(date -u +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Or Create The Trivy Database Cache
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .trivycache
+          key: trivy-db-${{ steps.day.outputs.d }}
+          restore-keys: trivy-db-
+
+      - name: Warm Vulnerability, Policy & Java Databases
+        id: warm
+        env:
+          ENABLE_JAVA_DB: ${{ inputs.enable-java-db }}
+          TRIVY_HOST: ${{ vars.TRIVY_HOST }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/cache-warm.sh"
+
+      - name: Publish Cache Summary
+        if: always()
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_DAY: ${{ steps.day.outputs.d }}
+          VULN_DB: ${{ steps.warm.outputs.vuln_db }}
+          JAVA_DB: ${{ steps.warm.outputs.java_db }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/cache-summary.sh"

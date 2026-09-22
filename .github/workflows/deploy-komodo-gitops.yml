@@ -1,0 +1,254 @@
+name: Deploy / GitOps Komodo Synchronization
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: "Target environment (dev, staging, prod)"
+      gitops-repo:
+        required: true
+        type: string
+        description: "GitOps repository name (e.g. <org>/<repo>-gitops-compose)"
+      gitops-branch:
+        required: true
+        type: string
+        description: "GitOps branch to update"
+      gitops-compose-file:
+        required: false
+        type: string
+        default: "docker-compose.yml"
+        description: "Path to docker-compose.yml file inside the GitOps repository"
+      gitops-service-image-yq-path:
+        required: true
+        type: string
+        description: "yq path to the service image in docker-compose.yml (e.g. .services.app.image)"
+      komodo-server:
+        required: true
+        type: string
+        description: "Komodo server URL, e.g. https://komodo.example.com."
+      komodo-stack-name:
+        required: true
+        type: string
+        description: "Komodo stack name to redeploy"
+      image-tag:
+        required: true
+        type: string
+        description: "Container image tag to deploy"
+      dev-repository-suffix:
+        required: false
+        type: string
+        default: "/dev"
+        description: "Appended verbatim to a repository path for development artifacts, e.g. \"/dev\" gives <repository>/dev. Set to \"\" to publish candidates and releases to the same repository."
+      image-repository:
+        required: true
+        type: string
+        description: "Base container image repository. Images are always read from <image-repository>/dev."
+      build-env:
+        required: false
+        default: ""
+        type: string
+        description: "Newline-separated KEY=VALUE pairs of environment variables to export"
+
+    secrets:
+      IMAGE_REGISTRY_USERNAME:
+        required: true
+        description: "Registry username used to verify the image."
+      IMAGE_REGISTRY_PASSWORD:
+        required: true
+        description: "Registry password or token used to verify the image."
+      KOMODO_API_KEY:
+        required: false
+        description: "Komodo API key used to trigger the stack redeploy (defaults to secrets.KOMODO_API_KEY)."
+      KOMODO_API_SECRET:
+        required: false
+        description: "Komodo API secret used to trigger the stack redeploy (defaults to secrets.KOMODO_API_SECRET)."
+      GITOPS_TOKEN:
+        required: false
+        description: "Token for the GitOps repository. Falls back to GITHUB_TOKEN."
+      CI_LIBRARY_TOKEN:
+        required: false
+        description: "Token used to check out this CI library. Falls back to GITHUB_TOKEN."
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Deployment Prerequisites
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    outputs:
+      new-image: ${{ steps.resolve.outputs.new_image }}
+
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Resolve Deployment Target
+        id: resolve
+        env:
+          GITOPS_REPO: ${{ inputs.gitops-repo }}
+          GITOPS_BRANCH: ${{ inputs.gitops-branch }}
+          COMPOSE_FILE: ${{ inputs.gitops-compose-file }}
+          YQ_PATH: ${{ inputs.gitops-service-image-yq-path }}
+          KOMODO_SERVER: ${{ inputs.komodo-server }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          KOMODO_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
+          KOMODO_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_REPO: ${{ inputs.image-repository }}
+          DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/resolve-target.sh"
+
+      - name: Validate Image Exists In Registry
+        env:
+          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          TARGET: ${{ steps.resolve.outputs.new_image }}
+        run: |
+          set -euo pipefail
+          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
+          if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
+            echo "${MANIFEST_OUTPUT}" >&2
+            echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed: \`${TARGET}\` does not resolve, so the compose file would point at an image the stack cannot pull. crane reported:"
+              echo ""
+              echo '```'
+              tail -n 20 <<< "${MANIFEST_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "Image ${TARGET} verified."
+
+      # Failing paths write their own section; this one only reports success.
+      - name: Publish Validation Summary
+        if: ${{ success() }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          TARGET: ${{ steps.resolve.outputs.new_image }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+          printf '### 🔎 Deployment prerequisites\n\n✅ `%s` verified in the registry — ready to deploy to **%s**.\n\n' \
+            "${TARGET}" "${ENVIRONMENT}" >> "${GITHUB_STEP_SUMMARY}"
+
+  komodo-deploy:
+    name: Sync Komodo Stack
+    needs: validate
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Export Custom Environment Variables
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
+
+      - name: Mutate GitOps Compose Configuration
+        id: gitops_commit
+        env:
+          GITOPS_REPO: ${{ inputs.gitops-repo }}
+          GITOPS_BRANCH: ${{ inputs.gitops-branch }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          COMPOSE_FILE: ${{ inputs.gitops-compose-file }}
+          YQ_PATH: ${{ inputs.gitops-service-image-yq-path }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN || github.token }}
+          # Reuse the reference validate proved resolvable; recomputing can drift.
+          NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/commit.sh"
+
+      - name: Trigger Komodo Stack Deployment
+        id: trigger_komodo
+        env:
+          KOMODO_SERVER: ${{ inputs.komodo-server }}
+          KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
+          KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/trigger.sh"
+
+      - name: Poll Komodo Execution Status
+        id: poll_komodo
+        env:
+          KOMODO_SERVER: ${{ inputs.komodo-server }}
+          KOMODO_API_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
+          KOMODO_API_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          EXEC_ID: ${{ steps.trigger_komodo.outputs.execution_id }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/poll-status.sh"
+
+      - name: Publish Komodo Deployment Summary
+        if: always()
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          STACK_NAME: ${{ inputs.komodo-stack-name }}
+          GITOPS_REPO: ${{ inputs.gitops-repo }}
+          PREVIOUS_IMAGE: ${{ steps.gitops_commit.outputs.previous_image }}
+          # validate's reference survives a failed GitOps step; env.NEW_IMAGE_REF would not.
+          DEPLOYED_IMAGE: ${{ needs.validate.outputs.new-image }}
+          COMMIT_SHA: ${{ steps.gitops_commit.outputs.commit_sha }}
+          EXEC_ID: ${{ steps.trigger_komodo.outputs.execution_id }}
+          VERDICT: ${{ steps.poll_komodo.outputs.status || job.status }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## 🦎 Komodo GitOps Deployment Summary"
+            echo ""
+            echo "| Property | Value |"
+            echo "| :--- | :--- |"
+            echo "| **Environment** | \`${ENVIRONMENT}\` |"
+            echo "| **Stack Name** | \`${STACK_NAME}\` |"
+            if [[ -n "${PREVIOUS_IMAGE}" ]]; then
+              echo "| **Previous Image** | \`${PREVIOUS_IMAGE}\` |"
+            fi
+            echo "| **Deployed Image** | \`${DEPLOYED_IMAGE}\` |"
+            echo "| **GitOps Repository** | \`${GITOPS_REPO}\` |"
+            if [[ -n "${COMMIT_SHA}" ]]; then
+              echo "| **GitOps Commit** | \`${COMMIT_SHA}\` |"
+            fi
+            if [[ -n "${EXEC_ID}" ]]; then
+              echo "| **Komodo Execution ID** | \`${EXEC_ID}\` |"
+            fi
+            echo "| **Deployment Verdict** | **${VERDICT}** |"
+          } >> "${GITHUB_STEP_SUMMARY}"

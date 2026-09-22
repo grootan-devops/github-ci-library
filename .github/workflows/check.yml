@@ -1,0 +1,201 @@
+name: Check / Release Prerequisites
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: "Release tag being guarded, from init.yml's `tag` output."
+      chart-name:
+        required: false
+        type: string
+        default: ""
+        description: "Chart name, from init.yml. Empty disables the chart guards."
+      chart-version:
+        required: false
+        type: string
+        default: ""
+        description: "Chart version to guard, from init.yml."
+      chart-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Production chart repository, from init.yml."
+      image-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Image tag to guard, from init.yml. Empty disables the image guard."
+      image-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Production image repository, from init.yml."
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
+      allow-unstable-library-refs:
+        required: false
+        type: boolean
+        default: false
+        description: "TESTING ONLY. Warn instead of failing when a library ref is not a stable tag."
+      check-migration:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the MIGRATION.md release guard. Disable for artifacts with no migration contract."
+      check-library-pinning:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the reusable-workflow library pinning guard. Disable temporarily while libraries are on a development branch."
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Discover
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      include: ${{ steps.targets.outputs.include }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Select Applicable Guards
+        id: targets
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
+          CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+          MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+          CHECK_MIGRATION: ${{ inputs.check-migration }}
+          CHECK_LIBRARY_PINNING: ${{ inputs.check-library-pinning }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+        shell: bash
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/select-guards.sh"
+
+  guard:
+    name: "${{ matrix.name }}"
+    needs: discover
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.include) }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Run Guard
+        env:
+          SCRIPT: ${{ matrix.script }}
+          SUBJECT: ${{ matrix.subject }}
+          TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ inputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+          PROJECT_PATH: ${{ inputs.project-path }}
+          CHART_DIR: ${{ inputs.chart-dir }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          CHART_VERSION: ${{ inputs.chart-version }}
+          CHART_REPOSITORY: ${{ inputs.chart-repository }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
+          ALLOW_UNSTABLE_LIBRARY_REFS: ${{ inputs.allow-unstable-library-refs }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+          CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+          MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+          RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md
+          RELEASE_CHANGELOG_CARD_FILE_NAME: RELEASE_CHANGELOG_CARD.json
+          RELEASE_MIGRATION_FILE_NAME: RELEASE_MIGRATION.md
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/${SCRIPT}"
+
+      - name: Upload Release Notes
+        if: ${{ !cancelled() && matrix.subject == 'changelog' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-changelog
+          path: |
+            ${{ inputs.project-path }}/RELEASE_CHANGELOG.md
+            ${{ inputs.project-path }}/RELEASE_CHANGELOG_CARD.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload Migration Notes
+        if: ${{ !cancelled() && matrix.subject == 'migration' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-migration
+          path: ${{ inputs.project-path }}/RELEASE_MIGRATION.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  verdict:
+    name: Verdict
+    if: always()
+    needs: [discover, guard]
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Consolidate Guard Results
+        env:
+          RESULT: ${{ needs.guard.result }}
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/checks/consolidate-results.sh"

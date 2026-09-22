@@ -1,0 +1,269 @@
+name: Python / Dependency, Build & Test
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Path to the Python project root. Monorepo children set this."
+      build-command:
+        required: false
+        type: string
+        default: "uv build --offline"
+        description: "Package build command."
+      test-command:
+        required: false
+        type: string
+        default: "uv run pytest --junitxml=test-report/junit.xml --cov --cov-report=xml"
+        description: "Unit test command. Must write JUnit XML into test-report/."
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the unit test job. Set false for a project with no test suite."
+      build-env:
+        required: false
+        type: string
+        default: ""
+        description: "Newline-separated KEY=VALUE pairs exported into build and test."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  TEST_REPORT_DIR: test-report
+  UV_CACHE_DIR: ${{ github.workspace }}/.uv-cache
+  UV_VENV_RELOCATABLE: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  dependency:
+    name: Dependency Download
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      # hashFiles returns "" for a missing uv.lock, collapsing the key onto the bare `py-` prefix.
+      - name: Compute Dependency Cache Key
+        id: key
+        run: echo "key=py-${{ hashFiles(format('{0}/uv.lock', inputs.project-path)) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Restore uv Cache
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .uv-cache
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: py-
+
+      - name: Resolve Dependencies
+        id: resolve
+        run: |
+          set -uo pipefail
+          uv sync --frozen --no-install-project --no-install-workspace 2>&1 | tee "${RUNNER_TEMP}/uv-sync.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Save uv Cache
+        if: ${{ success() && steps.cache.outputs.cache-hit != 'true'
+          && github.ref_name == github.event.repository.default_branch }}
+        uses: actions/cache/save@v6
+        with:
+          path: .uv-cache
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Publish Dependency Summary
+        if: always()
+        env:
+          STACK_LABEL: "🐍 Python dependencies"
+          OUTCOME: ${{ steps.resolve.outcome }}
+          CACHE_KEY: ${{ steps.key.outputs.key }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          SUCCESS_MESSAGE: "Environment resolved."
+          RESOLVE_COMMAND: "uv sync --frozen"
+          TOOL_LABEL: "uv"
+          LOG_FILE: "uv-sync.log"
+          REMEDY: '`--frozen` refuses to update `uv.lock`, so a drifted lock file has to be regenerated with `uv lock` and committed.'
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/dependency-summary.sh"
+
+  build:
+    name: Build
+    needs: dependency
+    if: ${{ inputs.build-command != '' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Export Build Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
+
+      - name: Restore uv Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .uv-cache
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: py-
+
+      - name: Sync Dependencies
+        run: uv sync --frozen --no-install-project --no-install-workspace
+
+      - name: Build Package
+        id: compile
+        run: |
+          set -uo pipefail
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
+          { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload Distribution
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-dist
+          path: ${{ inputs.project-path }}/dist/
+          retention-days: 7
+          include-hidden-files: true
+
+      - name: Publish Build Summary
+        if: always()
+        env:
+          STACK_LABEL: "Python"
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
+          ARTIFACT_NAME: "python-dist"
+          ARTIFACT_DIR: "dist"
+          ARTIFACT_GLOB: "dist/*"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/summary.sh"
+
+  test:
+    name: Unit Test
+    if: ${{ inputs.run-tests }}
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Export Test Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
+
+      - name: Restore uv Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .uv-cache
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: py-
+
+      - name: Sync Dependencies
+        run: uv sync --frozen --no-install-project --no-install-workspace
+
+      - name: Run Unit Tests
+        id: unit
+        run: |
+          set -uo pipefail
+          mkdir -p "${TEST_REPORT_DIR}" coverage
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
+          { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
+          exit "${PIPESTATUS[0]}"
+
+      # junit-report.sh has nothing to show when the runner never wrote a JUnit file.
+      - name: Explain Test Runner Failure
+        if: ${{ failure() && steps.unit.outcome == 'failure' }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🧪 Python test command"
+            echo ""
+            echo "❌ \`${TEST_COMMAND}\` exited non-zero. It reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${RUNNER_TEMP}/test.log" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
+            echo ""
+            echo "Per-case results, where the run got far enough to produce any, are in the table below and in the \`python-test-reports\` artifact."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Test & Coverage Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-test-reports
+          path: |
+            ${{ inputs.project-path }}/test-report/
+            ${{ inputs.project-path }}/coverage/
+            ${{ inputs.project-path }}/coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_NAME: "Python Unit Test Results"
+          REPORT_GLOB: "${{ inputs.project-path }}/test-report/**/*.xml"
+          JOB_SUMMARY: "true"
+          FAIL_ON_FAILURE: "true"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

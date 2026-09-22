@@ -1,0 +1,8 @@
+# GitHub exposes these identity properties for jobs defined by reusable workflows.
+# They let the workflow check out its own repository at the exact called commit.
+# The installed actionlint schema does not yet include them.
+paths:
+  ".github/workflows/**.yml":
+    ignore:
+      - 'property "workflow_repository" is not defined'
+      - 'property "workflow_sha" is not defined'

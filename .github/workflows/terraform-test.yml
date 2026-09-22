@@ -1,0 +1,174 @@
+name: Terraform / Module Test
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+      test-timeout:
+        required: false
+        type: string
+        default: "1h"
+        description: "go test timeout for the module test suite."
+      destroy-on-failure:
+        required: false
+        type: boolean
+        default: true
+        description: "Run terraform destroy when the test job fails or is cancelled."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  TF_LOG_FILE_NAME: tf_test.log
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Detect Terraform Root Module
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      root: ${{ steps.targets.outputs.root }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Select Applicable Terraform Jobs
+        id: targets
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${PROJECT_PATH}"
+
+          ROOT='[]'
+          if [[ -f main.tf ]]; then
+            ROOT='[{"module":"root"}]'
+          else
+            echo "::warning title=Terraform::No main.tf in ${PROJECT_PATH} — the module test does not apply."
+          fi
+
+          echo "root=${ROOT}" >> "${GITHUB_OUTPUT}"
+
+  test:
+    name: Module Test
+    needs: discover
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.root) }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Run Module Test Suite
+        env:
+          TF_TEST_TIMEOUT: ${{ inputs.test-timeout }}
+        run: |
+          set -euo pipefail
+          cd tests
+          go test -v -timeout "${TF_TEST_TIMEOUT}" 2>&1 | tee "${TF_LOG_FILE_NAME}"
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: terraform-test-artifacts
+          path: |
+            ${{ inputs.project-path }}/tests/tf_test.log
+            ${{ inputs.project-path }}/test_output.tf
+            ${{ inputs.project-path }}/terraform.tfstate
+            ${{ inputs.project-path }}/terraform.tfstate.backup
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform/test-summary.sh"
+
+  destroy:
+    name: Test Teardown
+    needs: test
+    if: ${{ inputs.destroy-on-failure && (failure() || cancelled()) && needs.test.result != 'skipped' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Download Test State
+        uses: actions/download-artifact@v8
+        with:
+          name: terraform-test-artifacts
+          path: ${{ inputs.project-path }}
+
+      - name: Destroy Test Infrastructure
+        id: teardown
+        run: |
+          set -uo pipefail
+          {
+            terraform init -input=false -no-color &&
+            terraform destroy -auto-approve -input=false -no-color
+          } 2>&1 | tee "${RUNNER_TEMP}/tf-destroy.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish Teardown Summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.teardown.outcome }}
+        run: |
+          set -euo pipefail
+          LOG="${RUNNER_TEMP}/tf-destroy.log"
+          DESTROYED="$(grep -aE 'Destroy complete!' "${LOG}" 2>/dev/null | tail -n 1 || true)"
+          {
+            echo "### 🧹 Terraform test teardown"
+            echo ""
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ ${DESTROYED:-Test infrastructure destroyed.}"
+            else
+              echo "❌ **Teardown did not complete — infrastructure may still be running and billing.** Terraform reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${LOG}" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+              echo ""
+              echo "The state file is in the \`terraform-test-artifacts\` artifact; destroy from it by hand."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

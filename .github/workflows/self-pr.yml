@@ -1,0 +1,54 @@
+name: CI · PR Verification
+run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    uses: ./.github/workflows/init.yml
+    secrets: inherit
+    with:
+      ignore-docker: ${{ 'true' }}
+      ignore-chart: ${{ 'true' }}
+
+  lint:
+    uses: ./.github/workflows/self-lint.yml
+    secrets: inherit
+
+  docs:
+    name: Config & Docs
+    uses: ./.github/workflows/lint.yml
+    secrets: inherit
+    with:
+      lint-yaml-files: ".github/workflows/*.yml .yamllint.yml"
+      lint-md-files: "**/*.md"
+
+  secret-scan:
+    uses: ./.github/workflows/secret-scanning.yml
+    secrets: inherit
+    with:
+      full-history: false
+
+  check:
+    needs: init
+    uses: ./.github/workflows/check.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.init.outputs.tag }}
+      check-library-pinning: false

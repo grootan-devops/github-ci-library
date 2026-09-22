@@ -1,0 +1,70 @@
+name: Go / Lint
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Path to the Go module root. Monorepo children set this."
+      linters:
+        required: false
+        type: string
+        default: '["fmt","vet","golangci-lint","gosec"]'
+        description: "JSON array of checks to run in parallel."
+      golangci-timeout:
+        required: false
+        type: string
+        default: "60m"
+        description: "golangci-lint run timeout."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  GOPATH: ${{ github.workspace }}/.go-cache
+  GOFLAGS: -mod=readonly
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: ${{ matrix.linter }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        linter: ${{ fromJSON(inputs.linters) }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Restore Module Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .go-cache
+          key: go-${{ hashFiles(format('{0}/go.sum', inputs.project-path)) }}
+          restore-keys: go-
+
+      - name: Run ${{ matrix.linter }}
+        env:
+          LINTER: ${{ matrix.linter }}
+          GOLANGCI_TIMEOUT: ${{ inputs.golangci-timeout }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/golang.sh"

@@ -1,0 +1,130 @@
+name: Quality / SonarQube
+
+on:
+  workflow_call:
+    inputs:
+      project-version:
+        required: false
+        type: string
+        default: ""
+        description: "Version reported to SonarQube, from init.yml's tag."
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this; the key is suffixed with it."
+      wait-for-quality-gate:
+        required: false
+        type: boolean
+        default: true
+        description: "Fail the job when the quality gate fails."
+
+permissions:
+  contents: read
+
+jobs:
+  sonarqube:
+    name: SonarQube
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    container:
+      image: ${{ vars.IMAGE_REGISTRY }}/${{ vars.SONAR_SCANNER_IMAGE }}
+    env:
+      SONAR_USER_HOME: ${{ github.workspace }}/.sonar
+      SONAR_SCANNER_OPTS: -XX:MaxRAMPercentage=90.0 -XX:InitialRAMPercentage=90.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      # Sonar needs full history to attribute issues and measure new code.
+      - name: Checkout Full History
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download Test & Coverage Reports
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: "*-test-reports"
+          merge-multiple: true
+          path: ${{ inputs.project-path }}
+
+      - name: Resolve Cache Day
+        id: day
+        run: echo "d=$(date -u +%Y-%m-%d)" >> "${GITHUB_OUTPUT}"
+
+      - name: Cache Sonar Analysis Data
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .sonar
+          key: sonar-${{ github.repository_id }}-${{ steps.day.outputs.d }}
+          restore-keys: sonar-${{ github.repository_id }}-
+
+      - name: Validate SonarQube Configuration
+        env:
+          SONAR_URL: ${{ vars.SONAR_URL }}
+          SONARQUBE_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
+        run: |
+          set -euo pipefail
+          MISSING=()
+          if [[ -z "${SONAR_URL}" ]]; then
+            MISSING+=("vars.SONAR_URL")
+          fi
+          if [[ -z "${SONARQUBE_TOKEN}" ]]; then
+            MISSING+=("secrets.SONARQUBE_TOKEN")
+          fi
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo "::error title=SonarQube::Missing configuration: ${MISSING[*]}"
+            {
+              echo "### 🔍 SonarQube"
+              echo ""
+              echo "❌ No analysis was run. These are not set on this repository or organisation:"
+              echo ""
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf -- '- `%s`\n' "${MISSING[@]}"
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+
+      - name: Run Analysis & Quality Gate
+        env:
+          SONAR_URL: ${{ vars.SONAR_URL }}
+          SONAR_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
+          VAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          PROJECT_VERSION: ${{ inputs.project-version }}
+          SUBPATH: ${{ inputs.project-path }}
+          WAIT: ${{ inputs.wait-for-quality-gate }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/sonarqube/analysis.sh"
+
+      - name: Publish Quality Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+          DASHBOARD: ${{ vars.SONAR_EXTERNAL_URL || vars.SONAR_URL }}
+        run: |
+          set -euo pipefail
+          SUMMARY_SCRIPT="${GITHUB_WORKSPACE}/.ci-library/scripts/sonarqube/summary.sh"
+          if [[ -f "${SUMMARY_SCRIPT}" ]]; then
+            bash "${SUMMARY_SCRIPT}"
+          else
+            {
+              echo "### 🔍 SonarQube"
+              echo ""
+              echo "❌ Status: ${OUTCOME}. The CI library checkout is unavailable, so no analysis detail could be collected."
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi

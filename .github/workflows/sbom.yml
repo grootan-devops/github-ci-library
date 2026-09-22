@@ -1,0 +1,181 @@
+name: SBOM / Generate & Scan
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+      scan:
+        required: false
+        type: boolean
+        default: true
+        description: "Scan the generated SBOM for vulnerabilities."
+      fail-on-warnings:
+        required: false
+        type: boolean
+        default: false
+        description: "Fail on warning-only findings. Mirrors GitLab's allow_failure on exit code 2."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  SBOM_FILE: sbom.cdx.json
+  TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Restore Trivy Database Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .trivycache
+          key: trivy-db-
+          restore-keys: trivy-db-
+
+      - name: Restore Maven Repository
+        if: ${{ hashFiles(format('{0}/pom.xml', inputs.project-path)) != '' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path)) }}
+          restore-keys: m2-
+
+      - name: Generate CycloneDX SBOM
+        id: generate
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/sbom-generate.sh"
+
+      - name: Upload SBOM
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: ${{ inputs.project-path }}/sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Publish SBOM Summary
+        if: ${{ always() && steps.generate.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📄 SBOM"
+            echo ""
+            if [[ -f "${SBOM_FILE}" ]]; then
+              COMPONENTS="$(jq '.components | length' "${SBOM_FILE}" 2>/dev/null || echo '?')"
+              echo "✅ Generated \`${SBOM_FILE}\` — ${COMPONENTS} components, $(du -h "${SBOM_FILE}" | cut -f1)."
+              if [[ "${COMPONENTS}" == "0" ]]; then
+                echo ""
+                echo "⚠️ Zero components. Trivy found no lock file or manifest it recognises, so the SBOM scan below will pass vacuously."
+              fi
+            else
+              echo "❌ Trivy exited cleanly but wrote no \`${SBOM_FILE}\`, so the SBOM scan has nothing to check."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  scan:
+    name: Scan
+    if: ${{ inputs.scan }}
+    needs: generate
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    env:
+      SCAN_TYPE: sbom
+      TRIVY_SCAN_REPORT_NAME: sbom_trivy_scan_report
+      TRIVY_HOST: ${{ vars.TRIVY_HOST }}
+      TRIVY_TIMEOUT: ${{ vars.TRIVY_TIMEOUT || '60m' }}
+      TRIVY_IGNORE_CONFIG_FILE: ${{ vars.TRIVY_IGNORE_CONFIG_FILE || 'ignored-cves.yml' }}
+      SKIP_CVE_SCAN: ${{ vars.SKIP_CVE_SCAN || 'false' }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download SBOM
+        uses: actions/download-artifact@v8
+        with:
+          name: sbom
+          path: ${{ inputs.project-path }}
+
+      - name: Restore Trivy Database Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .trivycache
+          key: trivy-db-
+          restore-keys: trivy-db-
+
+      - name: Scan SBOM
+        env:
+          TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
+          TRIVY_JUNIT_TEMPLATE_FILE: ${{ github.workspace }}/.ci-library/templates/trivy-junit.tpl
+          FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+        run: |
+          set -uo pipefail
+          RESULT=0
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/trivy.sh" || RESULT=$?
+          case "${RESULT}" in
+            0) echo "Scan clean." ;;
+            2)
+              if [[ "${FAIL_ON_WARNINGS}" == "true" ]]; then
+                echo "::error title=SBOM scan::Warnings present and fail-on-warnings is enabled."
+                # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+                printf '\n> The scan itself passed with warnings. `fail-on-warnings` is enabled for this job, so the warnings above fail it.\n\n' >> "${GITHUB_STEP_SUMMARY}"
+                exit 1
+              fi
+              echo "::warning title=SBOM scan::Completed with warnings only. See the job summary."
+              ;;
+            *) exit "${RESULT}" ;;
+          esac
+
+      - name: Upload Scan Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scan-sbom-reports
+          path: |
+            ${{ inputs.project-path }}/sbom_trivy_scan_report.*
+            ${{ inputs.project-path }}/SBOM_CVE.md
+          if-no-files-found: ignore
+          retention-days: 7

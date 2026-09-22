@@ -1,0 +1,298 @@
+name: Scan / Trivy Security, Config, SBOM & License
+
+on:
+  workflow_call:
+    inputs:
+      scan-type:
+        required: true
+        type: string
+        description: "image | config | license | sbom"
+      config-type:
+        required: false
+        type: string
+        default: ""
+        description: "chart | terraform. Required when scan-type is config."
+      image-ref:
+        required: false
+        type: string
+        default: ""
+        description: "Exact image reference to scan, ideally repo@sha256:... Preferred over tag lookup."
+      image-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Production image repository, from init.yml. Used when no image-ref is given."
+      target-version:
+        required: false
+        type: string
+        default: ""
+        description: "Tag or version to resolve when image-ref is not given."
+      scan-path:
+        required: false
+        type: string
+        default: ""
+        description: "Directory to scan for config scans. Defaults to the chart directory."
+      sbom-artifact:
+        required: false
+        type: string
+        default: ""
+        description: "Artifact holding the CycloneDX SBOM to scan."
+      helm-values:
+        required: false
+        type: string
+        default: ""
+        description: "Inline YAML overriding chart values while rendering for a config scan."
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
+      fail-on-warnings:
+        required: false
+        type: boolean
+        default: false
+        description: >-
+          Fail the job on warning-only findings (unfixable vulnerabilities,
+          justified suppressions). Mirrors GitLab's allow_failure on exit code 2,
+          which lets warnings be visible without blocking the pipeline.
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  CHART_DIR: ${{ inputs.chart-dir }}
+  SCAN_TYPE: ${{ inputs.scan-type }}
+  CONFIG_TYPE: ${{ inputs.config-type }}
+  IMAGE_REF: ${{ inputs.image-ref }}
+  IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+  TARGET_VERSION: ${{ inputs.target-version }}
+  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+  IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+  SKIP_CVE_SCAN: ${{ vars.SKIP_CVE_SCAN || 'false' }}
+  TRIVY_TIMEOUT: ${{ vars.TRIVY_TIMEOUT || '60m' }}
+  TRIVY_IGNORE_CONFIG_FILE: ${{ vars.TRIVY_IGNORE_CONFIG_FILE || 'ignored-cves.yml' }}
+  TRIVY_IGNORED_LICENSE_CLASSIFICATIONS: ${{ vars.TRIVY_IGNORED_LICENSE_CLASSIFICATIONS || 'notice,permissive,unencumbered' }}
+  # These KSV checks are set by the platform at deploy time, not by the chart.
+  TRIVY_IGNORE_CVES: ${{ vars.TRIVY_IGNORE_CVES || 'KSV-0011 KSV-0014 KSV-0015 KSV-0016 KSV-0018 KSV-0110 KSV-0113 KSV-0125' }}
+  TRIVY_CACHE_DIR: ${{ github.workspace }}/.trivycache
+  TRIVY_HOST: ${{ vars.TRIVY_HOST }}
+  SBOM_FILE: sbom.cdx.json
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: ${{ inputs.scan-type }}${{ inputs.config-type && format(' ({0})', inputs.config-type) || '' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      checks: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Validate Scan Request
+        run: |
+          set -euo pipefail
+          case "${SCAN_TYPE}" in
+            image|config|license|sbom) ;;
+            *)
+              echo "::error title=Scan::Invalid scan-type '${SCAN_TYPE}'. Expected image, config, license or sbom."
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf '### 🛡️ Trivy scan\n\n❌ `%s` is not a scan type, so nothing was scanned. Pass `scan-type` as one of: `image`, `config`, `license`, `sbom`.\n\n' \
+                "${SCAN_TYPE}" >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+              ;;
+          esac
+          if [[ "${SCAN_TYPE}" == "config" && -z "${CONFIG_TYPE}" ]]; then
+            echo "::error title=Scan::config-type is required when scan-type is 'config'. Expected chart or terraform."
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            printf '### 🛡️ Trivy config scan\n\n❌ `config-type` is required when `scan-type` is `config`, so nothing was scanned. Pass `chart` or `terraform`.\n\n' >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          if [[ "${SCAN_TYPE}" == "image" && -z "${IMAGE_REF}" ]]; then
+            if [[ -z "${IMAGE_REPOSITORY}" || -z "${TARGET_VERSION}" ]]; then
+              echo "::error title=Scan::An image scan needs either image-ref, or both image-repository and target-version."
+              # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+              printf '### 🛡️ Trivy image scan\n\n❌ Nothing was scanned. Without a target this builds a reference like `registry/-dev:` and reports a clean result for an image that does not exist. Pass `image-ref`, or both `image-repository` and `target-version`.\n\n' >> "${GITHUB_STEP_SUMMARY}"
+              exit 1
+            fi
+          fi
+
+      - name: Restore Trivy Database Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .trivycache
+          key: trivy-db-
+          restore-keys: trivy-db-
+
+      # Key and prefix match terraform-lint.yml verbatim so both share one entry.
+      - name: Restore Terraform Provider Cache
+        if: ${{ inputs.scan-type == 'config' && inputs.config-type == 'terraform' }}
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ${{ inputs.project-path }}/.terraform
+            ${{ inputs.project-path }}/.terraform.lock.hcl
+          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path)) || 'nolock' }}
+          restore-keys: tf-
+
+      - name: Download SBOM
+        if: ${{ inputs.sbom-artifact != '' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.sbom-artifact }}
+          path: ${{ inputs.project-path }}
+
+      - name: Authenticate To Registry
+        if: ${{ inputs.scan-type == 'image' }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.docker
+          AUTH="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_PASSWORD}" | base64 -w0)"
+
+          # Docker Hub is reached under several hostnames; write every key so the
+          # credential is found whichever one the client resolved.
+          case "${IMAGE_REGISTRY}" in
+            docker.io|index.docker.io|registry-1.docker.io)
+              jq -n --arg auth "${AUTH}" '{auths: {
+                "https://index.docker.io/v1/": {auth: $auth},
+                "registry-1.docker.io": {auth: $auth},
+                "index.docker.io": {auth: $auth},
+                "docker.io": {auth: $auth}
+              }}' > ~/.docker/config.json
+              ;;
+            *)
+              jq -n --arg reg "${IMAGE_REGISTRY}" --arg auth "${AUTH}" \
+                '{auths: {($reg): {auth: $auth}}}' > ~/.docker/config.json
+              ;;
+          esac
+
+      - name: Render Chart For Config Scan
+        if: ${{ inputs.scan-type == 'config' && inputs.config-type == 'chart' }}
+        env:
+          HELM_TEST_VALUES: ${{ inputs.helm-values }}
+          SCAN_PATH_INPUT: ${{ inputs.scan-path }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SCAN_PATH="${SCAN_PATH_INPUT:-${CHART_DIR}}"
+
+          if [[ -n "${IMAGE_REGISTRY}" ]]; then
+            printf '%s' "${REGISTRY_PASSWORD}" | helm registry login "${IMAGE_REGISTRY}" --username "${REGISTRY_USERNAME}" --password-stdin
+          fi
+          helm dependency update "${SCAN_PATH}/"
+
+          if [[ -z "${HELM_TEST_VALUES}" ]]; then
+            helm template debug "${SCAN_PATH}" -f "${SCAN_PATH}/values.yaml" > /dev/null
+          else
+            OVERRIDE="${PWD}/_scan_override.yaml"
+            printf '%s' "${HELM_TEST_VALUES}" > "${OVERRIDE}"
+            helm template debug "${SCAN_PATH}" -f "${SCAN_PATH}/values.yaml" -f "${OVERRIDE}" > /dev/null
+            echo "TRIVY_HELM_VALUES_FILE=${OVERRIDE}" >> "${GITHUB_ENV}"
+          fi
+          echo "IAC_SCAN_PATH=${SCAN_PATH}" >> "${GITHUB_ENV}"
+
+      - name: Resolve Scan Path & Report Name
+        env:
+          SCAN_PATH_INPUT: ${{ inputs.scan-path }}
+        run: |
+          set -euo pipefail
+          case "${SCAN_TYPE}" in
+            image)   PREFIX="image" ;;
+            sbom)    PREFIX="sbom" ;;
+            license) PREFIX="license" ;;
+            config)  PREFIX="${CONFIG_TYPE}" ;;
+          esac
+          echo "TRIVY_SCAN_REPORT_NAME=${PREFIX}_trivy_scan_report" >> "${GITHUB_ENV}"
+
+          if [[ "${SCAN_TYPE}" == "config" && "${CONFIG_TYPE}" == "terraform" ]]; then
+            echo "IAC_SCAN_PATH=${SCAN_PATH_INPUT:-.}" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Run Trivy Scan
+        id: scan
+        env:
+          TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
+          TRIVY_JUNIT_TEMPLATE_FILE: ${{ github.workspace }}/.ci-library/templates/trivy-junit.tpl
+          FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+        run: |
+          set -uo pipefail
+          RESULT=0
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/scan/trivy.sh" || RESULT=$?
+
+          case "${RESULT}" in
+            0) echo "Scan clean." ;;
+            2)
+              if [[ "${FAIL_ON_WARNINGS}" == "true" ]]; then
+                echo "::error title=Scan::Warnings present and fail-on-warnings is enabled."
+                # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+                printf '\n> The scan itself passed with warnings. `fail-on-warnings` is enabled for this job, so the warnings above fail it.\n\n' >> "${GITHUB_STEP_SUMMARY}"
+                exit 1
+              fi
+              echo "::warning title=Scan::Completed with warnings only. See the job summary."
+              ;;
+            *) exit "${RESULT}" ;;
+          esac
+
+      - name: Upload Scan Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: scan-${{ inputs.scan-type }}${{ inputs.config-type && format('-{0}', inputs.config-type) || '' }}-reports
+          path: |
+            ${{ inputs.project-path }}/*_trivy_scan_report.json
+            ${{ inputs.project-path }}/*_trivy_scan_report.md
+            ${{ inputs.project-path }}/*_trivy_scan_report.junit
+            ${{ inputs.project-path }}/IMAGE_CVE.md
+            ${{ inputs.project-path }}/CHART_CVE.md
+            ${{ inputs.project-path }}/TF_CVE.md
+            ${{ inputs.project-path }}/LICENSE_CVE.md
+            ${{ inputs.project-path }}/SBOM_CVE.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Findings As Checks
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_NAME: "Trivy ${{ inputs.scan-type }} findings"
+          REPORT_GLOB: "*_trivy_scan_report.junit"
+          # A CVE is a warning here; the scan step decides whether it passes.
+          JOB_SUMMARY: "false"
+          FAIL_ON_FAILURE: "false"
+          ANNOTATION_LEVEL: "warning"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"
+
+      - name: Save Terraform Provider Cache
+        if: ${{ !cancelled() && inputs.scan-type == 'config' && inputs.config-type == 'terraform'
+          && github.ref_name == github.event.repository.default_branch }}
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ inputs.project-path }}/.terraform
+            ${{ inputs.project-path }}/.terraform.lock.hcl
+          key: tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path)) || 'nolock' }}

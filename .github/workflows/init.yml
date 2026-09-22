@@ -1,0 +1,252 @@
+name: Init / Environment & Version Discovery
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root, relative to the repository root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
+      tag:
+        required: false
+        type: string
+        default: ""
+        description: "Explicit release version override. Normally discovered from the project manifest."
+      ignore-chart:
+        required: false
+        type: string
+        default: "auto"
+        description: "auto | true | false. auto detects whether <chart-dir>/Chart.yaml exists."
+      ignore-docker:
+        required: false
+        type: string
+        default: "auto"
+        description: "auto | true | false. auto detects whether the Dockerfile exists."
+
+    outputs:
+      tag:
+        description: "Resolved release version tag"
+        value: ${{ jobs.initialize.outputs.TAG }}
+      release-version:
+        description: "Discovered application version, before any release suffix"
+        value: ${{ jobs.initialize.outputs.RELEASE_VERSION }}
+      is-release:
+        description: "true when this run publishes production artifacts"
+        value: ${{ jobs.initialize.outputs.IS_RELEASE }}
+      version-suffix:
+        description: "Candidate suffix applied to this run's artifacts ('' on a release)"
+        value: ${{ jobs.initialize.outputs.VERSION_SUFFIX }}
+      ignore-chart:
+        description: "Resolved ignore-chart decision"
+        value: ${{ jobs.initialize.outputs.IGNORE_CHART }}
+      ignore-docker:
+        description: "Resolved ignore-docker decision"
+        value: ${{ jobs.initialize.outputs.IGNORE_DOCKER }}
+      registry:
+        description: "Resolved image registry host (legacy output; use image-registry and chart-registry for split registries)"
+        value: ${{ jobs.initialize.outputs.REGISTRY }}
+      image-registry:
+        description: "Resolved container image registry host"
+        value: ${{ jobs.initialize.outputs.IMAGE_REGISTRY }}
+      chart-registry:
+        description: "Resolved Helm chart registry host"
+        value: ${{ jobs.initialize.outputs.CHART_REGISTRY }}
+      image-tag:
+        description: "Base container image tag (application version)"
+        value: ${{ jobs.initialize.outputs.IMAGE_TAG }}
+      image-push-tag:
+        description: "Image tag this run publishes, candidate suffix included"
+        value: ${{ jobs.initialize.outputs.IMAGE_PUSH_TAG }}
+      image-repository:
+        description: "Production container image repository (also the duplicate-check target)"
+        value: ${{ jobs.initialize.outputs.IMAGE_REPOSITORY }}
+      image-dev-repository:
+        description: "Candidate container image repository"
+        value: ${{ jobs.initialize.outputs.IMAGE_DEV_REPOSITORY }}
+      image-push-repository:
+        description: "Repository this run pushes to (dev or production)"
+        value: ${{ jobs.initialize.outputs.IMAGE_PUSH_REPOSITORY }}
+      chart-name:
+        description: "Helm chart name"
+        value: ${{ jobs.initialize.outputs.CHART_NAME }}
+      chart-version:
+        description: "Base Helm chart version"
+        value: ${{ jobs.initialize.outputs.CHART_VERSION }}
+      chart-app-version:
+        description: "Helm chart appVersion to publish"
+        value: ${{ jobs.initialize.outputs.CHART_APP_VERSION }}
+      chart-push-version:
+        description: "Chart version this run publishes, candidate suffix included"
+        value: ${{ jobs.initialize.outputs.CHART_PUSH_VERSION }}
+      chart-repository:
+        description: "Production Helm chart repository (also the duplicate-check target)"
+        value: ${{ jobs.initialize.outputs.CHART_REPOSITORY }}
+      chart-dev-repository:
+        description: "Candidate Helm chart repository; equal to the production repository on Docker Hub"
+        value: ${{ jobs.initialize.outputs.CHART_DEV_REPOSITORY }}
+      chart-push-repository:
+        description: "Chart repository this run pushes to (same repository for candidate and release versions on Docker Hub)"
+        value: ${{ jobs.initialize.outputs.CHART_PUSH_REPOSITORY }}
+      chart-dir:
+        description: "Resolved chart directory"
+        value: ${{ jobs.initialize.outputs.CHART_DIR }}
+      project-path:
+        description: "Resolved project root"
+        value: ${{ jobs.initialize.outputs.PROJECT_PATH }}
+      major-version:
+        description: "Major component of the release tag"
+        value: ${{ jobs.initialize.outputs.MAJOR_VERSION }}
+      minor-version:
+        description: "Major.minor component of the release tag"
+        value: ${{ jobs.initialize.outputs.MINOR_VERSION }}
+      upstream-run-id:
+        description: "Workflow run that built the merged pull request's candidate artifacts"
+        value: ${{ jobs.initialize.outputs.UPSTREAM_RUN_ID }}
+      merged-pr-number:
+        description: "Pull request whose merge produced this release commit"
+        value: ${{ jobs.initialize.outputs.MERGED_PR_NUMBER }}
+      candidate-image-tag:
+        description: "Exact dev container image tag published by the candidate build"
+        value: ${{ jobs.initialize.outputs.CANDIDATE_IMAGE_TAG }}
+      candidate-chart-version:
+        description: "Exact dev Helm chart version published by the candidate build"
+        value: ${{ jobs.initialize.outputs.CANDIDATE_CHART_VERSION }}
+
+permissions:
+  contents: read
+
+jobs:
+  initialize:
+    name: Environment Context
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+
+    env:
+      PROJECT_PATH: ${{ inputs.project-path }}
+      CHART_DIR: ${{ inputs.chart-dir }}
+      CHART_FILE: ${{ vars.CHART_FILE || 'Chart.yaml' }}
+      DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+      IMAGE_REGISTRY_INPUT: ${{ vars.IMAGE_REGISTRY }}
+      IMAGE_REPOSITORY_INPUT: ${{ vars.IMAGE_REPOSITORY }}
+      IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+      IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+      CHART_REGISTRY_INPUT: ${{ vars.CHART_REGISTRY }}
+      CHART_REPOSITORY_INPUT: ${{ vars.CHART_REPOSITORY }}
+      CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+      CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+      IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+      CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
+      RELEASE_VERSION_SUFFIX: ${{ vars.RELEASE_VERSION_SUFFIX }}
+      MASTER_BRANCH_REGEX: ${{ vars.MASTER_BRANCH_REGEX || '^(.*/)?master$' }}
+      UPSTREAM_WORKFLOW: ${{ vars.UPSTREAM_WORKFLOW || 'pr.yml' }}
+      IGNORE_CHART_INPUT: ${{ inputs.ignore-chart }}
+      IGNORE_DOCKER_INPUT: ${{ inputs.ignore-docker }}
+      INPUT_TAG: ${{ inputs.tag }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+
+    outputs:
+      TAG: ${{ steps.version.outputs.TAG }}
+      RELEASE_VERSION: ${{ steps.version.outputs.RELEASE_VERSION }}
+      IS_RELEASE: ${{ steps.version.outputs.IS_RELEASE }}
+      VERSION_SUFFIX: ${{ steps.version.outputs.VERSION_SUFFIX }}
+      IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
+      IGNORE_DOCKER: ${{ steps.version.outputs.IGNORE_DOCKER }}
+      REGISTRY: ${{ steps.version.outputs.REGISTRY }}
+      IMAGE_REGISTRY: ${{ steps.version.outputs.IMAGE_REGISTRY }}
+      CHART_REGISTRY: ${{ steps.version.outputs.CHART_REGISTRY }}
+      IMAGE_TAG: ${{ steps.version.outputs.IMAGE_TAG }}
+      IMAGE_PUSH_TAG: ${{ steps.version.outputs.IMAGE_PUSH_TAG }}
+      IMAGE_REPOSITORY: ${{ steps.version.outputs.IMAGE_REPOSITORY }}
+      IMAGE_DEV_REPOSITORY: ${{ steps.version.outputs.IMAGE_DEV_REPOSITORY }}
+      IMAGE_PUSH_REPOSITORY: ${{ steps.version.outputs.IMAGE_PUSH_REPOSITORY }}
+      CHART_NAME: ${{ steps.version.outputs.CHART_NAME }}
+      CHART_VERSION: ${{ steps.version.outputs.CHART_VERSION }}
+      CHART_APP_VERSION: ${{ steps.version.outputs.CHART_APP_VERSION }}
+      CHART_PUSH_VERSION: ${{ steps.version.outputs.CHART_PUSH_VERSION }}
+      CHART_REPOSITORY: ${{ steps.version.outputs.CHART_REPOSITORY }}
+      CHART_DEV_REPOSITORY: ${{ steps.version.outputs.CHART_DEV_REPOSITORY }}
+      CHART_PUSH_REPOSITORY: ${{ steps.version.outputs.CHART_PUSH_REPOSITORY }}
+      CHART_DIR: ${{ steps.version.outputs.CHART_DIR }}
+      PROJECT_PATH: ${{ steps.version.outputs.PROJECT_PATH }}
+      MAJOR_VERSION: ${{ steps.version.outputs.MAJOR_VERSION }}
+      MINOR_VERSION: ${{ steps.version.outputs.MINOR_VERSION }}
+      UPSTREAM_RUN_ID: ${{ steps.provenance.outputs.UPSTREAM_RUN_ID }}
+      MERGED_PR_NUMBER: ${{ steps.provenance.outputs.MERGED_PR_NUMBER }}
+      CANDIDATE_IMAGE_TAG: ${{ steps.provenance.outputs.CANDIDATE_IMAGE_TAG }}
+      CANDIDATE_CHART_VERSION: ${{ steps.provenance.outputs.CANDIDATE_CHART_VERSION }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Validate Organisation Configuration
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/validate-config.sh"
+
+      - name: Resolve Version & Registry Targets
+        id: version
+        env:
+          REF_PROTECTED: ${{ github.ref_protected || 'false' }}
+          IMAGE_REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          CHART_REGISTRY_HOST: ${{ vars.CHART_REGISTRY }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/resolve-version.sh"
+
+      - name: Resolve Upstream Candidate Provenance
+        id: provenance
+        if: ${{ steps.version.outputs.IS_RELEASE == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_IMAGE_TAG: ${{ steps.version.outputs.IMAGE_TAG }}
+          BASE_CHART_VERSION: ${{ steps.version.outputs.CHART_VERSION }}
+          IGNORE_DOCKER: ${{ steps.version.outputs.IGNORE_DOCKER }}
+          IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/provenance.sh"
+
+      - name: Publish Initialization Summary
+        if: ${{ always() && steps.version.outcome == 'success' }}
+        env:
+          IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
+          IGNORE_DOCKER: ${{ steps.version.outputs.IGNORE_DOCKER }}
+          IS_RELEASE: ${{ steps.version.outputs.IS_RELEASE }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          TAG: ${{ steps.version.outputs.TAG }}
+          VERSION_SUFFIX: ${{ steps.version.outputs.VERSION_SUFFIX }}
+          IMAGE_REGISTRY: ${{ steps.version.outputs.IMAGE_REGISTRY }}
+          IMAGE_PUSH_TAG: ${{ steps.version.outputs.IMAGE_PUSH_TAG }}
+          IMAGE_PUSH_REPOSITORY: ${{ steps.version.outputs.IMAGE_PUSH_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY: ${{ steps.version.outputs.IMAGE_DEV_REPOSITORY }}
+          IMAGE_REPOSITORY: ${{ steps.version.outputs.IMAGE_REPOSITORY }}
+          CHART_REGISTRY: ${{ steps.version.outputs.CHART_REGISTRY }}
+          CHART_PUSH_VERSION: ${{ steps.version.outputs.CHART_PUSH_VERSION }}
+          CHART_PUSH_REPOSITORY: ${{ steps.version.outputs.CHART_PUSH_REPOSITORY }}
+          CHART_DEV_REPOSITORY: ${{ steps.version.outputs.CHART_DEV_REPOSITORY }}
+          CHART_REPOSITORY: ${{ steps.version.outputs.CHART_REPOSITORY }}
+          MERGED_PR_NUMBER: ${{ steps.provenance.outputs.MERGED_PR_NUMBER }}
+          UPSTREAM_HEAD_SHA: ${{ steps.provenance.outputs.UPSTREAM_HEAD_SHA }}
+          UPSTREAM_RUN_ID: ${{ steps.provenance.outputs.UPSTREAM_RUN_ID }}
+          CANDIDATE_IMAGE_TAG: ${{ steps.provenance.outputs.CANDIDATE_IMAGE_TAG }}
+          CANDIDATE_CHART_VERSION: ${{ steps.provenance.outputs.CANDIDATE_CHART_VERSION }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/summary.sh"

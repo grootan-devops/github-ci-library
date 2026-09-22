@@ -1,0 +1,416 @@
+name: Chart / Lint, Package, Push & Promote
+
+on:
+  workflow_call:
+    inputs:
+      chart-name:
+        required: true
+        type: string
+        description: "Chart name, from init.yml."
+      chart-version:
+        required: true
+        type: string
+        description: "Version to package, from init.yml's chart-push-version."
+      chart-app-version:
+        required: true
+        type: string
+        description: "appVersion to stamp, from init.yml."
+      chart-repository:
+        required: true
+        type: string
+        description: "Repository to push to, from init.yml's chart-push-repository."
+      is-release:
+        required: false
+        type: boolean
+        default: false
+        description: "true on a production release: promote the scanned candidate instead of pushing a new package."
+      release-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Production tag to promote to, from init.yml's tag."
+      candidate-version:
+        required: false
+        type: string
+        default: ""
+        description: "Exact candidate version to promote, from init.yml."
+      chart-dev-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Candidate repository to promote from, from init.yml; equal to the production repository on Docker Hub."
+      helm-values:
+        required: false
+        type: string
+        default: ""
+        description: "Inline YAML overriding chart values while linting."
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
+      check-docs:
+        required: false
+        type: boolean
+        default: true
+        description: "Fail when chart/README.md is out of date with values.yaml."
+      run-unittest:
+        required: false
+        type: boolean
+        default: false
+        description: "Run helm-unittest against a mock consumer chart. For repositories that ship a chart others depend on; off by default."
+      mock-chart:
+        required: false
+        type: string
+        default: "test"
+        description: "Mock consumer chart directory, relative to the chart directory, used by run-unittest."
+      publish-candidate:
+        required: false
+        type: boolean
+        default: true
+        description: "Publish the candidate chart. Disable for PR verification when the OCI registry is not provisioned."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  CHART_DIR: ${{ inputs.chart-dir }}
+  CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+  CHART_INFO_FILE_NAME: CHART_INFO.md
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    name: Documentation
+    if: ${{ inputs.check-docs }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Verify Generated Chart Documentation
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/docs-check.sh"
+
+  lint:
+    name: Lint
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Authenticate To Chart Registry
+        env:
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${CHART_REGISTRY}" || -z "${CHART_REGISTRY_USERNAME}" || -z "${CHART_REGISTRY_PASSWORD}" ]]; then
+            echo "::error title=Registry::CHART_REGISTRY, CHART_REGISTRY_USERNAME and CHART_REGISTRY_PASSWORD are required to resolve chart dependencies. Pass 'secrets: inherit'."
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            printf '### ⎈ Chart lint\n\n❌ No registry credentials, so the chart dependencies cannot be resolved and the chart was never linted. Pass `secrets: inherit` from the calling workflow.\n\n' >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+
+      - name: Update Chart Dependencies
+        id: deps
+        run: |
+          set -uo pipefail
+          helm dependency update "${CHART_DIR}/" 2>&1 | tee "${RUNNER_TEMP}/helm-dep.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Lint Chart
+        id: helmlint
+        env:
+          HELM_TEST_VALUES: ${{ inputs.helm-values }}
+        run: |
+          set -uo pipefail
+          if [[ -z "${HELM_TEST_VALUES}" ]]; then
+            helm lint --strict -f "${CHART_DIR}/values.yaml" "${CHART_DIR}/" 2>&1 | tee "${RUNNER_TEMP}/helm-lint.log"
+          else
+            printf '%s' "${HELM_TEST_VALUES}" > "${CHART_DIR}/override.yaml"
+            helm lint --strict -f "${CHART_DIR}/values.yaml" -f "${CHART_DIR}/override.yaml" "${CHART_DIR}/" 2>&1 | tee "${RUNNER_TEMP}/helm-lint.log"
+          fi
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish Lint Summary
+        if: always()
+        env:
+          DEPS_OUTCOME: ${{ steps.deps.outcome }}
+          LINT_OUTCOME: ${{ steps.helmlint.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${DEPS_OUTCOME}" == "success" && "${LINT_OUTCOME}" == "success" ]]; then
+            exit 0
+          fi
+          TALLY="$(grep -E 'chart\(s\) linted' "${RUNNER_TEMP}/helm-lint.log" 2>/dev/null | tail -n 1 || true)"
+          {
+            echo "### ⎈ Chart lint"
+            echo ""
+            if [[ "${DEPS_OUTCOME}" != "success" ]]; then
+              echo "❌ \`helm dependency update\` failed, so the chart was never linted. Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 30 "${RUNNER_TEMP}/helm-dep.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            else
+              echo "❌ \`helm lint --strict\` failed.${TALLY:+ ${TALLY}} Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/helm-lint.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  unittest:
+    name: Unit Test
+    if: ${{ inputs.run-unittest }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Update Mock Chart Dependencies
+        run: helm dependency update "${CHART_DIR}/${{ inputs.mock-chart }}"
+
+      - name: Run helm-unittest
+        id: unittest
+        run: |
+          set -uo pipefail
+          helm unittest --strict \
+            --output-type JUnit \
+            --output-file unittest-report.xml \
+            "${CHART_DIR}/${{ inputs.mock-chart }}" 2>&1 | tee "${RUNNER_TEMP}/helm-unittest.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish Unit Test Summary
+        if: always()
+        env:
+          MOCK_CHART: ${{ inputs.mock-chart }}
+          OUTCOME: ${{ steps.unittest.outcome }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/unittest-summary.sh"
+
+      - name: Upload Unit Test Report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chart-unittest-report
+          path: ${{ inputs.project-path }}/unittest-report.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  build:
+    name: Package
+    if: ${{ !inputs.is-release }}
+    needs: lint
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Authenticate To Chart Registry
+        env:
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+
+      - name: Package Chart
+        id: package
+        env:
+          CHART_VERSION: ${{ inputs.chart-version }}
+          CHART_APP_VERSION: ${{ inputs.chart-app-version }}
+        run: |
+          set -uo pipefail
+          {
+            helm dependency update "${CHART_DIR}/" &&
+            helm package "${CHART_DIR}/" --version "${CHART_VERSION}" --app-version "${CHART_APP_VERSION}"
+          } 2>&1 | tee "${RUNNER_TEMP}/helm-package.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish Package Summary
+        if: always()
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+          CHART_VERSION: ${{ inputs.chart-version }}
+          CHART_APP_VERSION: ${{ inputs.chart-app-version }}
+          OUTCOME: ${{ steps.package.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### ⎈ Chart package"
+            echo ""
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ Packaged \`${CHART_NAME}-${CHART_VERSION}.tgz\` (appVersion \`${CHART_APP_VERSION}\`)."
+            else
+              echo "❌ \`helm package\` did not produce \`${CHART_NAME}-${CHART_VERSION}.tgz\`. Helm reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${RUNNER_TEMP}/helm-package.log" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Chart Package
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: chart-package
+          path: ${{ inputs.project-path }}/${{ inputs.chart-name }}-${{ inputs.chart-version }}.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  push:
+    name: Push
+    needs: build
+    if: ${{ inputs.publish-candidate && !cancelled() && !inputs.is-release && needs.build.result == 'success' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download Chart Package
+        uses: actions/download-artifact@v8
+        with:
+          name: chart-package
+          path: ${{ inputs.project-path }}
+
+      - name: Authenticate To Chart Registry
+        env:
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+
+      - name: Push Chart
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+          CHART_VERSION: ${{ inputs.chart-version }}
+          CHART_REPOSITORY: ${{ inputs.chart-repository }}
+          CHART_DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/push.sh"
+
+      - name: Upload Chart Info
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: chart-info
+          path: ${{ inputs.project-path }}/CHART_INFO.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+  promote:
+    name: Promote
+    if: ${{ inputs.is-release }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Authenticate To Chart Registry
+        env:
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+
+      - name: Promote Candidate Chart To Production
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+          TAG: ${{ inputs.release-tag }}
+          CANDIDATE_VERSION: ${{ inputs.candidate-version }}
+          DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
+          PROD_REPOSITORY: ${{ inputs.chart-repository }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/promote.sh"
+
+      - name: Upload Chart Info
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: chart-info
+          path: ${{ inputs.project-path }}/CHART_INFO.md
+          if-no-files-found: ignore
+          retention-days: 7

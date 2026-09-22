@@ -1,0 +1,32 @@
+name: Version · Library
+run-name: "Version · ${{ github.event_name }} · ${{ github.sha }}"
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      tag:
+        description: "Semantic version read from VERSION"
+        value: ${{ jobs.version.outputs.tag }}
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Resolve
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    outputs:
+      tag: ${{ steps.read.outputs.TAG }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Read VERSION
+        id: read
+        run: scripts/self/version.sh

@@ -1,0 +1,243 @@
+name: Release / Publish & Notify
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+        description: "Release tag, from init.yml."
+      upstream-run-id:
+        required: false
+        type: string
+        default: ""
+        description: "Run that built the candidate, from init.yml. Its artifacts become the release assets."
+      additional-artifacts:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated extra files or directories to attach. Directories are tarred."
+      draft:
+        required: false
+        type: boolean
+        default: false
+        description: "Create the release as a draft."
+      prerelease:
+        required: false
+        type: boolean
+        default: false
+        description: "Mark the release as a prerelease."
+      notify:
+        required: false
+        type: boolean
+        default: true
+        description: "Send the Microsoft Teams Adaptive Card notification."
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md
+  RELEASE_CHANGELOG_CARD_FILE_NAME: RELEASE_CHANGELOG_CARD.json
+  RELEASE_MIGRATION_FILE_NAME: RELEASE_MIGRATION.md
+  CONSOLIDATED_README_FILE_NAME: CONSOLIDATED_README.md
+  CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME: CONSOLIDATED_RELEASE_CHANGELOG.md
+  TRIVY_SCAN_REPORT_FILE_NAME: trivy_scan_report.tar.gz
+  TEST_REPORT_DIR: test-report
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    name: Collect Artifacts
+    continue-on-error: true
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download This Run's Artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ inputs.project-path }}/_artifacts
+          merge-multiple: true
+
+      - name: Download Candidate Run's Artifacts
+        if: ${{ inputs.upstream-run-id != '' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ inputs.upstream-run-id }}
+          github-token: ${{ github.token }}
+          path: ${{ inputs.project-path }}/_artifacts
+          merge-multiple: true
+
+      - name: Report Candidate Artifact Restore
+        if: ${{ inputs.upstream-run-id != '' }}
+        env:
+          UPSTREAM_RUN_ID: ${{ inputs.upstream-run-id }}
+        run: |
+          set -euo pipefail
+          COUNT="$(find _artifacts -type f 2>/dev/null | wc -l | tr -d ' ')"
+          if [[ "${COUNT}" -gt 0 ]]; then
+            echo "✅ Restored ${COUNT} files from candidate run ${UPSTREAM_RUN_ID}."
+          else
+            echo "::warning title=Release::Candidate run ${UPSTREAM_RUN_ID} yielded no artifacts, so the release will carry only this run's. Check that the run succeeded and its artifacts have not expired."
+          fi
+
+      - name: Consolidate Release Notes & Assets
+        env:
+          TAG: ${{ inputs.tag }}
+          ADDITIONAL_RELEASE_ARTIFACT: ${{ inputs.additional-artifacts }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/release/consolidate-assets.sh"
+
+      - name: Publish Collection Summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "### 📥 Release payload"
+            echo ""
+            if [[ -d _release_assets ]] && compgen -G "_release_assets/*" > /dev/null; then
+              echo "Staged $(find _release_assets -type f | wc -l | tr -d ' ') asset(s)."
+            else
+              echo "⚠️ No assets were staged, so the release will carry notes only. The scan reports and chart packages come from the candidate run — check that \`upstream-run-id\` resolved."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Release Payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-payload
+          path: |
+            ${{ inputs.project-path }}/_release_assets/
+            ${{ inputs.project-path }}/CONSOLIDATED_RELEASE_CHANGELOG.md
+            ${{ inputs.project-path }}/RELEASE_CHANGELOG_CARD.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: collect
+    if: ${{ !cancelled() && inputs.tag != '' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download Release Payload
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: release-payload
+          path: payload
+
+      - name: Publish GitHub Release
+        id: gh_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          DRAFT: ${{ inputs.draft }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/release/publish.sh"
+
+      - name: Publish Release Summary
+        if: ${{ always() && steps.gh_release.outcome == 'success' }}
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## 🚀 Release ${TAG}"
+            echo ""
+            echo "[View the release](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
+            echo ""
+            if compgen -G "payload/_release_assets/*" > /dev/null; then
+              echo "| Asset | Size |"
+              echo "|---|---|"
+              for F in payload/_release_assets/*; do
+                if [[ -f "${F}" ]]; then
+                  echo "| \`$(basename "${F}")\` | $(du -h "${F}" | cut -f1) |"
+                fi
+              done
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  notify:
+    name: Notify Teams
+    if: ${{ inputs.notify }}
+    needs: publish
+    # A Teams outage must not turn an already-published release red.
+    continue-on-error: true
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Download Release Payload
+        uses: actions/download-artifact@v8
+        with:
+          name: release-payload
+          path: payload
+
+      - name: Send Teams Adaptive Card
+        env:
+          TAG: ${{ inputs.tag }}
+          RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL: ${{ secrets.RELEASE_MESSAGE_TEAMS_WORKFLOWS_URL }}
+          SONAR_EXTERNAL_URL: ${{ vars.SONAR_EXTERNAL_URL || vars.SONAR_URL }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          RELEASE_CHANGELOG_CARD_FILE_NAME: payload/RELEASE_CHANGELOG_CARD.json
+          RELEASE_CHANGELOG_FILE_NAME: payload/_release_assets/RELEASE_CHANGELOG.md
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/notify/teams.sh"
+
+      - name: Upload Notification Payload
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: teams-notification
+          path: message.json
+          if-no-files-found: ignore
+          retention-days: 7

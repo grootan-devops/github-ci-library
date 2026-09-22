@@ -1,0 +1,77 @@
+name: Node / Lint
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Path to the Node project root. Monorepo children set this."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  npm_config_cache: ${{ github.workspace }}/.npm
+  BIOME_REPORT: biome-report.txt
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: biome
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Verify Biome Configuration
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/node-biome-config.sh"
+
+      - name: Restore npm Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .npm
+          key: node-${{ hashFiles(format('{0}/package-lock.json', inputs.project-path)) }}
+          restore-keys: node-
+
+      - name: Run Biome
+        id: biome
+        run: |
+          set -uo pipefail
+          BIOME_EXIT=0
+          biome check --max-diagnostics=none > "${BIOME_REPORT}" 2>&1 || BIOME_EXIT=$?
+          cat "${BIOME_REPORT}"
+          exit ${BIOME_EXIT}
+
+      - name: Publish Lint Summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.biome.outcome }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/node-summary.sh"
+
+      - name: Upload Biome Report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: node-biome-report
+          path: ${{ inputs.project-path }}/biome-report.txt
+          if-no-files-found: ignore
+          retention-days: 7

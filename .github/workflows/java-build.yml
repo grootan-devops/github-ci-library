@@ -1,0 +1,264 @@
+name: Java / Dependency, Build & Test
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Path to the Maven project root. Monorepo children set this."
+      build-command:
+        required: false
+        type: string
+        default: "mvn -B -o package -DskipTests"
+        description: "Build command. Offline by default — dependencies come from the shared cache."
+      test-command:
+        required: false
+        type: string
+        default: "mvn -B -o test"
+        description: "Unit test command. Surefire writes JUnit XML itself."
+      test-report-glob:
+        required: false
+        type: string
+        default: "target/surefire-reports/*.xml"
+        description: "JUnit XML produced by the test command, relative to project-path."
+      run-tests:
+        required: false
+        type: boolean
+        default: true
+        description: "Run the unit test job."
+      build-env:
+        required: false
+        type: string
+        default: ""
+        description: "Newline-separated KEY=VALUE pairs exported into build and test."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  MAVEN_OPTS: -Djava.awt.headless=true -Dmaven.repo.local=${{ github.workspace }}/.m2/repository
+
+permissions:
+  contents: read
+
+jobs:
+  dependency:
+    name: Dependency Download
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      # hashFiles returns "" for a missing pom.xml, collapsing the key onto the bare `m2-` prefix.
+      - name: Compute Dependency Cache Key
+        id: key
+        run: echo "key=m2-${{ hashFiles(format('{0}/pom.xml', inputs.project-path)) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Restore Maven Repository
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: m2-
+
+      - name: Resolve Dependencies
+        id: resolve
+        run: |
+          set -uo pipefail
+          mvn -B dependency:go-offline -q 2>&1 | tee "${RUNNER_TEMP}/mvn-resolve.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Save Maven Repository
+        if: ${{ success() && steps.cache.outputs.cache-hit != 'true'
+          && github.ref_name == github.event.repository.default_branch }}
+        uses: actions/cache/save@v6
+        with:
+          path: .m2
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Publish Dependency Summary
+        if: always()
+        env:
+          STACK_LABEL: "☕ Java dependencies"
+          OUTCOME: ${{ steps.resolve.outcome }}
+          CACHE_KEY: ${{ steps.key.outputs.key }}
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          SUCCESS_MESSAGE: "Repository resolved offline."
+          RESOLVE_COMMAND: "mvn dependency:go-offline"
+          TOOL_LABEL: "Maven"
+          LOG_FILE: "mvn-resolve.log"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/dependency-summary.sh"
+
+  build:
+    name: Build
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Export Build Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
+
+      - name: Restore Maven Repository
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: m2-
+
+      - name: Build
+        id: compile
+        run: |
+          set -uo pipefail
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
+          { ${{ inputs.build-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/build.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload Artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: java-artifacts
+          path: |
+            ${{ inputs.project-path }}/target/*.jar
+            ${{ inputs.project-path }}/target/*.war
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Build Summary
+        if: always()
+        env:
+          STACK_LABEL: "Java"
+          TOOL_LABEL: "Maven"
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          COMPILE_OUTCOME: ${{ steps.compile.outcome }}
+          ARTIFACT_NAME: "java-artifacts"
+          ARTIFACT_DIR: "target"
+          ARTIFACT_GLOB: "target/*.jar target/*.war"
+          EMPTY_PHRASE: "no JAR or WAR"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/summary.sh"
+
+  test:
+    name: Unit Test
+    if: ${{ inputs.run-tests }}
+    needs: dependency
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      checks: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Export Test Environment
+        if: ${{ inputs.build-env != '' }}
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/export-env.sh"
+
+      - name: Restore Maven Repository
+        uses: actions/cache/restore@v6
+        with:
+          path: .m2
+          key: ${{ needs.dependency.outputs.cache-key }}
+          restore-keys: m2-
+
+      - name: Run Unit Tests
+        id: unit
+        run: |
+          set -uo pipefail
+          # Braces, not a bare pipe: a command ending in its own redirect would leave tee empty.
+          { ${{ inputs.test-command }} ; } 2>&1 | tee "${RUNNER_TEMP}/test.log"
+          exit "${PIPESTATUS[0]}"
+
+      # junit-report.sh has nothing to show when Surefire never wrote a report.
+      - name: Explain Test Runner Failure
+        if: ${{ failure() && steps.unit.outcome == 'failure' }}
+        env:
+          TEST_COMMAND: ${{ inputs.test-command }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🧪 Java test command"
+            echo ""
+            echo "❌ \`${TEST_COMMAND}\` exited non-zero. Maven reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${RUNNER_TEMP}/test.log" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
+            echo ""
+            echo "Per-case results, where Surefire got far enough to write any, are in the table below and in the \`java-test-reports\` artifact."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload Test Reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: java-test-reports
+          path: ${{ inputs.project-path }}/target/surefire-reports/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECK_NAME: "Java Unit Test Results"
+          REPORT_GLOB: "${{ inputs.project-path }}/${{ inputs.test-report-glob }}"
+          JOB_SUMMARY: "true"
+          FAIL_ON_FAILURE: "true"
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/build/junit-report.sh"

@@ -1,0 +1,136 @@
+name: Lint / Config & Documentation
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+      chart-dir:
+        required: false
+        type: string
+        default: "./chart"
+        description: "Directory containing Chart.yaml, relative to the repository root."
+      lint-yaml-files:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated YAML globs. Empty lints every tracked YAML file."
+      lint-md-files:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated markdown globs. Empty lints every tracked markdown file."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  CHART_DIR: ${{ inputs.chart-dir }}
+  DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+  HADOLINT_IGNORE: ${{ vars.HADOLINT_IGNORE }}
+  CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+  MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Detect Lint Targets
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      include: ${{ steps.targets.outputs.include }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Select Present Targets
+        id: targets
+        env:
+          PROJECT_PATH: ${{ inputs.project-path }}
+          CHART_DIR: ${{ inputs.chart-dir }}
+          DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+          CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+          MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${PROJECT_PATH}"
+          TARGETS='[{"name":"YAML","script":"lint/yaml.sh","subject":"yaml"}]'
+          if [[ -f "${DOCKERFILE}" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Dockerfile","script":"docker/lint.sh","subject":"dockerfile"}]' <<< "${TARGETS}")"
+          fi
+          if [[ -f "${CHART_DIR}/values.yaml" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Chart Values","script":"lint/yaml.sh","subject":"chart-values"}]' <<< "${TARGETS}")"
+          fi
+          if [[ -f "${CHANGELOG_FILE_NAME}" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Changelog","script":"lint/markdown.sh","subject":"changelog"}]' <<< "${TARGETS}")"
+          fi
+          if [[ -f "${MIGRATION_FILE_NAME}" ]]; then
+            TARGETS="$(jq -c '. + [{"name":"Migration Guide","script":"lint/markdown.sh","subject":"migration"}]' <<< "${TARGETS}")"
+          fi
+          echo "include=${TARGETS}" >> "${GITHUB_OUTPUT}"
+
+  lint:
+    name: ${{ matrix.name }}
+    needs: discover
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.discover.outputs.include) }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Resolve Lint Target
+        id: target
+        env:
+          SUBJECT: ${{ matrix.subject }}
+          INPUT_YAML_FILES: ${{ inputs.lint-yaml-files }}
+          INPUT_MD_FILES: ${{ inputs.lint-md-files }}
+          CHART_DIR: ${{ inputs.chart-dir }}
+          DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+          CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
+          MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/lint/resolve-target.sh"
+
+      - name: Run ${{ matrix.name }} Linter
+        id: lint
+        if: ${{ steps.target.outputs.skip != 'true' }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/${{ matrix.script }}"
+
+      - name: Publish Lint Summary
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          if [[ "${OUTCOME}" == "failure" && "${LINT_OUTCOME}" != "failure" ]]; then
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            printf '### 🧹 Lint: %s\n\n❌ The job failed before %s could run (the linter step was `%s`). The failing step in the log is the checkout or the target resolution, not the linter.\n\n' \
+              "${NAME}" "${NAME}" "${LINT_OUTCOME}" >> "${GITHUB_STEP_SUMMARY}"
+          fi

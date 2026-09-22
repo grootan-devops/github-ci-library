@@ -1,0 +1,402 @@
+name: Deploy / GitOps ArgoCD Synchronization
+
+on:
+  workflow_call:
+    inputs:
+      argocd-version:
+        required: false
+        type: string
+        default: "v3.2.6"
+        description: "ArgoCD CLI version to download."
+      environment:
+        required: true
+        type: string
+        description: "Target environment (e.g. dev, staging, production)."
+      chart-name:
+        required: false
+        type: string
+        default: ""
+        description: "Helm chart name, matching .name in Chart.yaml."
+      chart-version:
+        required: false
+        type: string
+        default: ""
+        description: "Helm chart version to act on."
+      chart-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Base Helm chart repository path. Charts use the development suffix on registries that support it; Docker Hub uses the same namespace-root repository for candidate and release versions."
+      image-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Base container image repository path. Images are always read from <image-repository>/dev."
+      dev-repository-suffix:
+        required: false
+        type: string
+        default: "/dev"
+        description: "Appended verbatim to a repository path for development artifacts, e.g. \"/dev\" gives <repository>/dev. Set to \"\" to publish candidates and releases to the same repository."
+      gitops-repo:
+        required: true
+        type: string
+        description: "GitOps repository holding the environment values (e.g. <org>/<repo>-gitops)"
+      gitops-branch:
+        required: true
+        type: string
+        description: "GitOps branch to commit to."
+      chart-values-file:
+        required: false
+        type: string
+        default: ""
+        description: "Relative path to values.yaml in GitOps repository (for Helm deployment)"
+      chart-app-yq-path:
+        required: false
+        type: string
+        default: ""
+        description: "yq path to the application entry inside values.yaml (e.g. .apps.chat)"
+      image-values-file:
+        required: false
+        type: string
+        default: ""
+        description: "Optional separate image values.yaml path"
+      image-repo-yq-path:
+        required: false
+        type: string
+        default: ""
+        description: "Optional yq path to update image repository"
+      image-tag-yq-path:
+        required: false
+        type: string
+        default: ""
+        description: "Optional yq path to update image tag"
+      manifest-file:
+        required: false
+        type: string
+        default: ""
+        description: "Path to Kubernetes YAML manifest file (for Manifest deployment)"
+      new-image:
+        required: false
+        type: string
+        default: ""
+        description: "Explicit new image string to set in Kubernetes manifest (required for Manifest deployment)"
+      argocd-app-name:
+        required: true
+        type: string
+        description: "Space-separated ArgoCD application names"
+      argocd-server:
+        required: true
+        type: string
+        description: "ArgoCD API server hostname, without the scheme."
+      github-environment-name:
+        required: false
+        type: string
+        default: ""
+        description: "Name of the GitHub Deployment environment (e.g. 'production', 'staging', 'dev'). When set, registers a GitHub Deployment."
+      github-environment-url:
+        required: false
+        type: string
+        default: ""
+        description: "Live URL of the deployed application (e.g. 'https://myapp.example.com')."
+
+    secrets:
+      IMAGE_REGISTRY_USERNAME:
+        required: false
+        description: "Registry username used to verify the chart and image."
+      IMAGE_REGISTRY_PASSWORD:
+        required: false
+        description: "Registry password or token used to verify the chart and image."
+      CHART_REGISTRY_USERNAME:
+        required: false
+        description: "Chart registry username used to verify the Helm chart."
+      CHART_REGISTRY_PASSWORD:
+        required: false
+        description: "Chart registry password or token used to verify the Helm chart."
+      ARGOCD_AUTH_TOKEN:
+        required: false
+        description: "ArgoCD API token used to sync the application (defaults to secrets.ARGOCD_AUTH_TOKEN)."
+      GITOPS_TOKEN:
+        required: false
+        description: "Token for the GitOps repository. Falls back to GITHUB_TOKEN."
+      CI_LIBRARY_TOKEN:
+        required: false
+        description: "Token used to check out this CI library. Falls back to GITHUB_TOKEN."
+
+env:
+  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+  IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+  IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+  CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+  CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+  CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+  CHART_NAME: ${{ inputs.chart-name }}
+  CHART_VERSION: ${{ inputs.chart-version }}
+  CHART_REPOSITORY: ${{ inputs.chart-repository }}
+  IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+  ENVIRONMENT: ${{ inputs.environment }}
+  GITOPS_REPO: ${{ inputs.gitops-repo }}
+  GITOPS_BRANCH: ${{ inputs.gitops-branch }}
+  CHART_VALUES_FILE: ${{ inputs.chart-values-file }}
+  CHART_APP_YQ_PATH: ${{ inputs.chart-app-yq-path }}
+  IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
+  IMAGE_REPO_YQ_PATH: ${{ inputs.image-repo-yq-path }}
+  IMAGE_TAG_YQ_PATH: ${{ inputs.image-tag-yq-path }}
+  MANIFEST_FILE: ${{ inputs.manifest-file }}
+  NEW_IMAGE_INPUT: ${{ inputs.new-image }}
+  ARGOCD_SERVER: ${{ inputs.argocd-server }}
+  ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN || '' }}
+  ARGOCD_APP_NAME: ${{ inputs.argocd-app-name }}
+  DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Deployment Prerequisites
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    outputs:
+      gitops-branch: ${{ steps.resolve.outputs.gitops_branch }}
+      target-version: ${{ steps.resolve.outputs.target_version }}
+      chart-repo-url: ${{ steps.resolve.outputs.chart_repo_url }}
+      new-image: ${{ steps.resolve.outputs.new_image }}
+      mode: ${{ steps.resolve.outputs.mode }}
+      chart-values-file: ${{ steps.resolve.outputs.chart_values_file }}
+      chart-app-yq-path: ${{ steps.resolve.outputs.chart_app_yq_path }}
+      manifest-file: ${{ steps.resolve.outputs.manifest_file }}
+
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Resolve Deployment Target
+        id: resolve
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/resolve-target.sh"
+
+      - name: Validate Chart Exists In Registry
+        if: ${{ steps.resolve.outputs.mode == 'helm' && inputs.chart-name != '' && inputs.chart-version != '' }}
+        env:
+          CHART_REPO_URL: ${{ steps.resolve.outputs.chart_repo_url }}
+          TARGET_VERSION: ${{ steps.resolve.outputs.target_version }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validate-chart.sh"
+
+      - name: Validate Image Exists In Registry
+        if: steps.resolve.outputs.new_image != '' && env.IMAGE_REGISTRY_USERNAME != '' && env.IMAGE_REGISTRY_PASSWORD != ''
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          crane auth login "${IMAGE_REGISTRY}" --username "${IMAGE_REGISTRY_USERNAME}" --password "${IMAGE_REGISTRY_PASSWORD}"
+          TARGET="${{ steps.resolve.outputs.new_image }}"
+          if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
+            echo "${MANIFEST_OUTPUT}" >&2
+            echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."
+            {
+              echo "### 🔎 Deployment prerequisites"
+              echo ""
+              echo "❌ Nothing was deployed: \`${TARGET}\` does not resolve, so the GitOps commit would point at an image that cannot be pulled. crane reported:"
+              echo ""
+              echo '```'
+              tail -n 20 <<< "${MANIFEST_OUTPUT}"
+              echo '```'
+              echo ""
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
+          echo "Image ${TARGET} verified."
+
+      # Failing paths write their own section; this one only reports success.
+      - name: Publish Validation Summary
+        if: ${{ success() }}
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          VERSION: ${{ steps.resolve.outputs.target_version }}
+          MODE: ${{ steps.resolve.outputs.mode }}
+          NEW_IMAGE: ${{ steps.resolve.outputs.new_image }}
+          CHART_REPO_URL: ${{ steps.resolve.outputs.chart_repo_url }}
+          IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validation-summary.sh"
+
+  gitops-commit:
+    name: Update GitOps Repository
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    timeout-minutes: 10
+    needs: validate
+    environment:
+      name: ${{ inputs.github-environment-name }}
+      url: ${{ inputs.github-environment-url }}
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+
+    outputs:
+      commit-sha: ${{ steps.commit.outputs.sha }}
+
+    steps:
+      - name: Checkout GitOps Repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.gitops-repo }}
+          ref: ${{ needs.validate.outputs.gitops-branch }}
+          token: ${{ secrets.GITOPS_TOKEN || secrets.GITHUB_TOKEN }}
+          path: gitops
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Update Version / Manifest Configurations
+        id: update
+        working-directory: gitops
+        env:
+          MODE: ${{ needs.validate.outputs.mode }}
+          MANIFEST_PATH: ${{ needs.validate.outputs.manifest-file }}
+          NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
+          VALUES_PATH: ${{ needs.validate.outputs.chart-values-file }}
+          APP_PATH: ${{ needs.validate.outputs.chart-app-yq-path }}
+          TARGET_VERSION: ${{ needs.validate.outputs.target-version }}
+          CHART_REPO_URL: ${{ needs.validate.outputs.chart-repo-url }}
+          IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
+          IMAGE_REPO_YQ_PATH: ${{ inputs.image-repo-yq-path }}
+          IMAGE_TAG_YQ_PATH: ${{ inputs.image-tag-yq-path }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/update-values.sh"
+
+      - name: Commit and Push Changes
+        id: commit
+        if: steps.update.outputs.skip != 'true'
+        working-directory: gitops
+        env:
+          GITOPS_BRANCH: ${{ needs.validate.outputs.gitops-branch }}
+          RAW_COMMIT_MSG: ${{ steps.update.outputs.commit_msg }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions-bot@users.noreply.github.com"
+
+          COMMIT_MSG="${RAW_COMMIT_MSG}
+
+          Environment: ${ENVIRONMENT}
+          Triggered by: ${GITHUB_ACTOR}
+          Source: ${GITHUB_REPOSITORY}@${GITHUB_SHA}
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          git add .
+          if git diff --cached --quiet; then
+            echo "No staged changes. Nothing to commit."
+            echo "sha=" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          git commit -m "${COMMIT_MSG}"
+
+          git push origin "HEAD:${GITOPS_BRANCH}"
+          echo "sha=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish GitOps Commit Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+          SHA: ${{ steps.commit.outputs.sha }}
+          GITOPS_REPO: ${{ inputs.gitops-repo }}
+          BRANCH: ${{ needs.validate.outputs.gitops-branch }}
+          VERSION: ${{ needs.validate.outputs.target-version }}
+          PREVIOUS: ${{ steps.update.outputs.previous }}
+          CURRENT: ${{ steps.update.outputs.current }}
+          UPDATE_OUTCOME: ${{ steps.update.outcome }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/commit-summary.sh"
+  argocd-sync:
+    name: Sync ArgoCD Application
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    needs: [validate, gitops-commit]
+    defaults:
+      run:
+        shell: bash
+    env:
+      ARGOCD_OPTS: "--grpc-web"
+      ARGOCD_VERSION: ${{ inputs.argocd-version }}
+      ARGOCD_SERVER: ${{ inputs.argocd-server }}
+      ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN || '' }}
+      SYNC_TIMEOUT: 600
+
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Cache ArgoCD CLI
+        id: cache-argocd
+        uses: actions/cache/restore@v6
+        with:
+          path: /usr/local/bin/argocd
+          key: argocd-cli-${{ env.ARGOCD_VERSION }}
+
+      - name: Install ArgoCD CLI
+        if: ${{ steps.cache-argocd.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}"
+          cd "${RUNNER_TEMP}"
+          curl -fsSL -o argocd-linux-amd64 "${BASE}/argocd-linux-amd64"
+          sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+          cd - >/dev/null
+          argocd version --client
+
+      - name: Sync and Wait for Health
+        id: sync
+        env:
+          EXPECTED_REVISION: ${{ needs.gitops-commit.outputs.commit-sha }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/sync-wait.sh"
+
+      - name: Publish Deployment Summary
+        if: always()
+        env:
+          MODE: ${{ needs.validate.outputs.mode }}
+          VERSION: ${{ needs.validate.outputs.target-version }}
+          CHART_REPO_URL: ${{ needs.validate.outputs.chart-repo-url }}
+          NEW_IMAGE: ${{ needs.validate.outputs.new-image }}
+          IMAGE_VALUES_FILE: ${{ inputs.image-values-file }}
+          BRANCH: ${{ needs.validate.outputs.gitops-branch }}
+          COMMIT_SHA: ${{ needs.gitops-commit.outputs.commit-sha }}
+          LIVE_URL: ${{ inputs.github-environment-url }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/summary.sh"
+
+      - name: Save ArgoCD CLI Cache
+        if: ${{ !cancelled() && steps.cache-argocd.outputs.cache-hit != 'true'
+          && github.ref_name == github.event.repository.default_branch }}
+        uses: actions/cache/save@v6
+        with:
+          path: /usr/local/bin/argocd
+          key: argocd-cli-${{ env.ARGOCD_VERSION }}

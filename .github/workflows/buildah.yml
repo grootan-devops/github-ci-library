@@ -1,0 +1,289 @@
+name: Image / Buildah Build, Push & Promote
+
+on:
+  workflow_call:
+    inputs:
+      image-tag:
+        required: true
+        type: string
+        description: "Tag to publish, from init.yml's image-push-tag."
+      image-repository:
+        required: true
+        type: string
+        description: "Repository to push to, from init.yml's image-push-repository."
+      base-image-repo:
+        required: false
+        type: string
+        default: ""
+        description: "Base image repository. Defaults to vars.MICRO_ROOT_BASE_IMAGE's repository."
+      base-image-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Base image tag."
+      install-packages:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated packages to microdnf install."
+      required-packages:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated packages to keep when the package manager is purged."
+      force-remove-packages:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated extra packages to remove."
+      required-rpms:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated RPM URLs or paths to install directly."
+      container-env-vars:
+        required: false
+        type: string
+        default: ""
+        description: "Space-separated names of environment variables to bake into the image."
+      container-path-env:
+        required: false
+        type: string
+        default: ""
+        description: "Prepended to the image's PATH."
+      container-entrypoint:
+        required: false
+        type: string
+        default: ""
+        description: "Image ENTRYPOINT."
+      container-cmd:
+        required: false
+        type: string
+        default: ""
+        description: "Image CMD."
+      require-scan:
+        required: false
+        type: boolean
+        default: true
+        description: "Refuse to promote unless `scan-result` says the scan succeeded. Set false only for an artifact with no scan in its pipeline."
+      scan-result:
+        required: false
+        type: string
+        default: ""
+        description: "The scan job's result, as `needs.<scan-job>.result`. Required when `require-scan` is true; an empty value refuses the promotion."
+      is-release:
+        required: false
+        type: boolean
+        default: false
+        description: "true on a production release: promote the scanned candidate instead of rebuilding."
+      release-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Production tag to promote to, from init.yml's tag."
+      candidate-tag:
+        required: false
+        type: string
+        default: ""
+        description: "Exact candidate tag to promote, from init.yml."
+      image-dev-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Candidate repository to promote from, from init.yml."
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+
+    outputs:
+      image-ref-digest:
+        description: "Digest-pinned reference of the published image"
+        value: ${{ jobs.build.outputs.IMAGE_REF_DIGEST }}
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+  IMAGE_NAME: dockerimage:internal
+  IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
+  INSTALLED_PCKG_FILE_NAME: installed_pkgs.txt
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Push
+    if: ${{ !inputs.is-release }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      # buildah needs to mount the container filesystem it is assembling.
+      options: --privileged
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    outputs:
+      IMAGE_REF_DIGEST: ${{ steps.push.outputs.IMAGE_REF_DIGEST }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Resolve Base Image
+        id: base
+        env:
+          BASE_REPO_INPUT: ${{ inputs.base-image-repo }}
+          BASE_TAG_INPUT: ${{ inputs.base-image-tag }}
+          DEFAULT_BASE: ${{ vars.MICRO_ROOT_BASE_IMAGE }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${BASE_REPO_INPUT}" ]]; then
+            REPO="${BASE_REPO_INPUT}"
+            TAG="${BASE_TAG_INPUT:?base-image-tag is required when base-image-repo is set}"
+          else
+            REPO="${REGISTRY_HOST}/${DEFAULT_BASE%%:*}"
+            TAG="${DEFAULT_BASE##*:}"
+          fi
+          echo "Base image: ${REPO}:${TAG}"
+          {
+            echo "repo=${REPO}"
+            echo "tag=${TAG}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build Image
+        id: build
+        env:
+          BASE_IMAGE_REPO: ${{ steps.base.outputs.repo }}
+          BASE_IMAGE_TAG: ${{ steps.base.outputs.tag }}
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          INSTALL_PKGS: ${{ inputs.install-packages }}
+          REQUIRED_PKGS: ${{ inputs.required-packages }}
+          FORCE_REMOVE_PKGS: ${{ inputs.force-remove-packages }}
+          REQUIRED_RPMS: ${{ inputs.required-rpms }}
+          CONTAINER_ENV_VARS: ${{ inputs.container-env-vars }}
+          CONTAINER_PATH_ENV: ${{ inputs.container-path-env }}
+          CONTAINER_ENTRYPOINT: ${{ inputs.container-entrypoint }}
+          CONTAINER_CMD: ${{ inputs.container-cmd }}
+        run: |
+          set -uo pipefail
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/build.sh" 2>&1 | tee "${RUNNER_TEMP}/buildah.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Push Image
+        id: push
+        env:
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/push-image.sh"
+
+      - name: Upload Package List
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-packages
+          path: ${{ inputs.project-path }}/installed_pkgs.txt
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload Image Info
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-info
+          path: |
+            ${{ inputs.project-path }}/IMAGE_INFO.md
+            ${{ inputs.project-path }}/installed_pkgs.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Build Failure Summary
+        if: failure()
+        env:
+          BASE_REPO: ${{ steps.base.outputs.repo }}
+          BASE_TAG: ${{ steps.base.outputs.tag }}
+          REPO: ${{ inputs.image-repository }}
+          TAG: ${{ inputs.image-tag }}
+          BASE_OUTCOME: ${{ steps.base.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/build-failure-summary.sh"
+
+  promote:
+    name: Promote
+    if: ${{ inputs.is-release }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    container:
+      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Verify The Candidate Was Scanned
+        env:
+          REQUIRE_SCAN: ${{ inputs.require-scan }}
+          SCAN_RESULT: ${{ inputs.scan-result }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/verify-scanned.sh"
+
+      - name: Promote Candidate Image To Production
+        env:
+          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          TAG: ${{ inputs.release-tag }}
+          CANDIDATE_TAG: ${{ inputs.candidate-tag }}
+          DEV_REPOSITORY: ${{ inputs.image-dev-repository }}
+          PROD_REPOSITORY: ${{ inputs.image-repository }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/buildah/promote-image.sh"
+
+      - name: Upload Image Info
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-info
+          path: ${{ inputs.project-path }}/IMAGE_INFO.md
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Publish Promotion Failure Summary
+        if: failure()
+        env:
+          TAG: ${{ inputs.release-tag }}
+          DEV_REPOSITORY: ${{ inputs.image-dev-repository }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### 🐳 Container Image"
+            echo ""
+            echo "❌ \`${TAG}\` was not promoted. Either nothing in \`${REGISTRY_HOST}/${DEV_REPOSITORY}\` matched it or the registry refused the retag; the production tag is unchanged."
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
