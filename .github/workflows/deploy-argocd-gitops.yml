@@ -156,7 +156,7 @@ jobs:
     name: Validate Deployment Prerequisites
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     timeout-minutes: 10
     permissions:
       contents: read
@@ -237,7 +237,7 @@ jobs:
     name: Update GitOps Repository
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     timeout-minutes: 10
     needs: validate
     environment:
@@ -332,7 +332,7 @@ jobs:
     name: Sync ArgoCD Application
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     timeout-minutes: 10
     permissions:
       contents: read

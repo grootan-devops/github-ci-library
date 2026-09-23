@@ -79,7 +79,7 @@ jobs:
     name: Validate Deployment Prerequisites
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     timeout-minutes: 10
     permissions:
       contents: read
@@ -159,7 +159,7 @@ jobs:
     needs: validate
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     timeout-minutes: 10
     permissions:
       contents: read

@@ -32,7 +32,9 @@ set -euo pipefail
 : "${CHART_VERSION:?CHART_VERSION must be set}"
 : "${CHART_REPOSITORY:?CHART_REPOSITORY must be set}"
 : "${CHART_DEV_REPOSITORY:=}"
-: "${CHART_REGISTRY:?CHART_REGISTRY must be set}"
+# shellcheck source=scripts/chart/registry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/registry.sh"
+chart_registry_validate
 : "${CHART_INFO_FILE_NAME:=CHART_INFO.md}"
 
 PACKAGE="${CHART_NAME}-${CHART_VERSION}.tgz"
@@ -53,22 +55,17 @@ fi
 
 TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}"
 echo "Pushing ${PACKAGE} to ${TARGET}..."
-if ! PUSH_OUTPUT="$(helm push "${PACKAGE}" "${TARGET}" 2>&1)"; then
-  echo "${PUSH_OUTPUT}" >&2
+if ! helm push "${PACKAGE}" "${TARGET}" >/dev/null 2>&1; then
   echo "::error title=Chart push::${TARGET} refused ${PACKAGE}."
   {
     echo "### ⎈ Helm Chart Package Info"
     echo ""
-    echo "❌ \`${TARGET}\` refused \`${PACKAGE}\`. Helm reported:"
-    echo ""
-    echo '```'
-    tail -n 30 <<< "${PUSH_OUTPUT}"
-    echo '```'
+    echo "❌ \`${TARGET}\` refused \`${PACKAGE}\`. Check chart credentials, repository permissions and registry connectivity."
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
-echo "${PUSH_OUTPUT}"
+echo "Published ${PACKAGE} to ${TARGET}."
 
 # Mirror a stable push into the dev channel so consumers pinned there
 # still resolve it. A convenience: a failed mirror warns, not fails.
@@ -76,7 +73,7 @@ MIRROR_STATE=""
 if [[ -n "${CHART_DEV_REPOSITORY}" && "${CHART_REPOSITORY}" != "${CHART_DEV_REPOSITORY}" ]]; then
   DEV_TARGET="oci://${CHART_REGISTRY}/${CHART_DEV_REPOSITORY}"
   echo "Mirroring ${PACKAGE} to the dev channel at ${DEV_TARGET}..."
-  if helm push "${PACKAGE}" "${DEV_TARGET}"; then
+  if helm push "${PACKAGE}" "${DEV_TARGET}" >/dev/null 2>&1; then
     echo "✅ Mirrored ${PACKAGE} to ${DEV_TARGET}."
     MIRROR_STATE="\`${DEV_TARGET}\`"
   else

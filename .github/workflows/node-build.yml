@@ -51,7 +51,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -118,7 +118,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -189,7 +189,7 @@ jobs:
       contents: read
       checks: write
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}

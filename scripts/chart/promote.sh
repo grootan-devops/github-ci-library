@@ -30,42 +30,44 @@ set -euo pipefail
 
 : "${CHART_NAME:?CHART_NAME must be set}"
 : "${PROD_REPOSITORY:?PROD_REPOSITORY must be set}"
-: "${TAG:=}"
+: "${TAG:?Release tag must be set}"
 : "${CANDIDATE_VERSION:=}"
 : "${DEV_REPOSITORY:=}"
-: "${CHART_REGISTRY:?CHART_REGISTRY must be set}"
+# shellcheck source=scripts/chart/registry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/registry.sh"
+chart_registry_validate
 : "${CHART_DIR:=./chart}"
 : "${CHART_INFO_FILE_NAME:=CHART_INFO.md}"
 
 DEV_REF="oci://${CHART_REGISTRY}/${DEV_REPOSITORY}/${CHART_NAME}"
-mkdir -p _promote
+PROMOTE_TEMP=$(mktemp -d)
+trap 'rm -rf "${PROMOTE_TEMP}"' EXIT
 PULLED=0
 
-if [[ -n "${CANDIDATE_VERSION}" ]] \
-   && helm pull "${DEV_REF}" --version "${CANDIDATE_VERSION}" --untar --untardir _promote 2>/dev/null; then
-  echo "📦 Pulled candidate ${CHART_NAME}:${CANDIDATE_VERSION}"
-  PULLED=1
-  # Provenance is recorded where the bytes are chosen, not inferred afterwards:
-  # CANDIDATE_VERSION stays set even when the pull fails, so inferring it later
-  # would credit the scanned candidate for an unscanned working-tree build.
-  PROMOTED_FROM="${CANDIDATE_VERSION}"
-else
-  LATEST="$(helm show chart "${DEV_REF}" --version "^${TAG}-0" 2>/dev/null | yq -r '.version // ""' || true)"
-  if [[ -n "${LATEST}" ]] \
-     && helm pull "${DEV_REF}" --version "${LATEST}" --untar --untardir _promote 2>/dev/null; then
-    echo "📦 Pulled newest candidate ${CHART_NAME}:${LATEST}"
+for VERSION in "${CANDIDATE_VERSION}" "^${TAG}-0"; do
+  [[ -n "${VERSION}" ]] || continue
+  if METADATA=$(chart_oci_lookup "${DEV_REF}" "${VERSION}"); then
+    LATEST=$(printf '%s' "${METADATA}" | yq -er '.version')
+    if ! helm pull "${DEV_REF}" --version "${LATEST}" --untar --untardir "${PROMOTE_TEMP}" >/dev/null 2>&1; then
+      echo "::error title=Chart promote::Candidate exists but could not be pulled; refusing a working-tree fallback."
+      exit 1
+    fi
     PULLED=1
     PROMOTED_FROM="${LATEST}"
+    break
+  else
+    RESULT=$?
+    [[ "${RESULT}" -eq 1 ]] || exit "${RESULT}"
   fi
-fi
+done
 
 if [[ ${PULLED} -eq 1 ]]; then
   echo "🚀 Re-packaging the scanned candidate at ${TAG}..."
-  helm package "_promote/${CHART_NAME}" --version "${TAG}" --app-version "${TAG}"
-  rm -rf _promote
+  helm package "${PROMOTE_TEMP}/${CHART_NAME}" --version "${TAG}" --app-version "${TAG}"
 elif [[ -f "${CHART_DIR}/Chart.yaml" ]]; then
   echo "::warning title=Chart promote::No candidate found — packaging from the working tree instead. These bytes were not scanned as a candidate."
   PROMOTED_FROM="working tree"
+  chart_dependency_login
   helm dependency update "${CHART_DIR}/"
   helm package "${CHART_DIR}" --version "${TAG}" --app-version "${TAG}"
 else
@@ -75,32 +77,23 @@ else
     echo ""
     echo "❌ \`${TAG}\` was not promoted: nothing in \`${DEV_REF}\` matched \`${CANDIDATE_VERSION:-^${TAG}-0}\`, and there is no \`${CHART_DIR}/Chart.yaml\` to fall back to. The production repository is unchanged."
     echo ""
-    echo "Candidate versions currently published:"
-    echo ""
-    echo '```'
-    helm show chart "${DEV_REF}" --version "^${TAG}-0" 2>&1 | head -n 20 || echo "(the dev repository could not be listed either)"
-    echo '```'
+    echo "Verify the candidate version and repository passed from init.yml."
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
 
-if ! PUSH_OUTPUT="$(helm push "${CHART_NAME}-${TAG}.tgz" "oci://${CHART_REGISTRY}/${PROD_REPOSITORY}" 2>&1)"; then
-  echo "${PUSH_OUTPUT}" >&2
+if ! helm push "${CHART_NAME}-${TAG}.tgz" "oci://${CHART_REGISTRY}/${PROD_REPOSITORY}" >/dev/null 2>&1; then
   echo "::error title=Chart promote::The production repository refused ${CHART_NAME}-${TAG}.tgz."
   {
     echo "### ⎈ Helm Chart Package Info"
     echo ""
-    echo "❌ \`oci://${CHART_REGISTRY}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged in the dev repository. Helm reported:"
-    echo ""
-    echo '```'
-    tail -n 30 <<< "${PUSH_OUTPUT}"
-    echo '```'
+    echo "❌ \`oci://${CHART_REGISTRY}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged. Check chart credentials, repository permissions and registry connectivity."
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
-echo "${PUSH_OUTPUT}"
+echo "Published ${CHART_NAME}:${TAG}."
 
 {
   echo "### ⎈ Helm Chart Package Info"
