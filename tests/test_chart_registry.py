@@ -1,6 +1,7 @@
 """OCI workflow regression tests using command doubles; never contact a registry."""
 import json
 import os
+import secrets
 from pathlib import Path
 import shutil
 import subprocess
@@ -53,6 +54,7 @@ elif a[0] == 'push':
         (self.work / "chart").mkdir()
         (self.work / "chart/Chart.yaml").write_text("name: demo\nversion: 1.2.0\n")
         (self.work / "demo-1.2.0.tgz").touch()
+        self.registry_password = secrets.token_urlsafe(24)
         self.env = {
             "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
             "CALLS": str(self.work / "calls.jsonl"), "GITHUB_STEP_SUMMARY": str(self.work / "summary"),
@@ -60,13 +62,13 @@ elif a[0] == 'push':
             "CHART_REGISTRY": "registry.example", "CHART_REPOSITORY": "team/helm",
             "CHART_DEV_REPOSITORY": "team/helm/dev", "DEV_REPOSITORY": "team/helm/dev",
             "PROD_REPOSITORY": "team/helm", "CANDIDATE_VERSION": "1.2.0-rc.1",
-            "CHART_REGISTRY_USERNAME": "chart-user", "CHART_REGISTRY_PASSWORD": "test-chart-secret",
+            "CHART_REGISTRY_USERNAME": "chart-user", "CHART_REGISTRY_PASSWORD": self.registry_password,
         }
 
     def run_script(self, relative, *args, **env):
         result = subprocess.run([shutil.which("bash"), str(ROOT / relative), *args],
                                 cwd=self.work, env=self.env | env, text=True, capture_output=True)
-        self.assertNotIn("test-chart-secret", result.stdout + result.stderr)
+        self.assertNotIn(self.registry_password, result.stdout + result.stderr)
         return result
 
     def calls(self):
@@ -140,7 +142,7 @@ elif a[0] == 'push':
         result = self.run_script("scripts/chart/registry.sh", "dependencies",
                                  CHART_DEPENDENCY_REGISTRY="deps.example",
                                  CHART_DEPENDENCY_REGISTRY_USERNAME="reader",
-                                 CHART_DEPENDENCY_REGISTRY_PASSWORD="test-chart-secret")
+                                 CHART_DEPENDENCY_REGISTRY_PASSWORD=self.registry_password)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls()[0][2], "deps.example")
         result = self.run_script("scripts/chart/push.sh")
