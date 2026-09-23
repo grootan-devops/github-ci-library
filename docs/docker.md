@@ -9,11 +9,19 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
    All compiling, bundling and transpiling (`npm run build`, `mvn package`, `go build`,
    `uv build`), linting and tests **MUST** execute in the `*-build.yml` workflows. The
    `Dockerfile` is purely an artifact packaging manifest; it copies pre-built output.
-   Where an interpreted stack must install dependencies, it installs **offline** from the
-   CI package cache, bind-mounted by BuildKit — never resolving over the network, which
-   would re-resolve what the pipeline already pinned and scanned. The `--mount` source must
-   name the directory the pipeline actually cached (`.uv-cache` for `python-build.yml`,
-   `.npm` for `node-build.yml`), and `.dockerignore` must admit it.
+   Where an interpreted stack must install dependencies, it installs **offline** from a
+   dependency cache explicitly made available inside the Docker build context, bind-mounted
+   by BuildKit — never resolving over the network, which would re-resolve what the pipeline
+   already pinned and scanned. The `--mount` source must name that provided directory
+   (`.uv-cache` for Python or `.npm` for Node), and `.dockerignore` must admit it.
+
+   > [!IMPORTANT]
+   > The GitHub `python-build.yml` and `node-build.yml` workflows cache `.uv-cache` and `.npm`
+   > with `actions/cache`, but `docker.yml` builds in a separate job and does not restore or
+   > receive those directories. Its registry-backed BuildKit cache stores image layers; it is
+   > not a handoff for the host-side dependency directories. A consumer using the offline
+   > examples below must arrange an explicit cache handoff into the image job's build context.
+   > Do not assume that a successful language build makes the cache available to `docker.yml`.
 2. **Non-root user and group (10001:10001).**
    - Containers must never run as `root` (UID `0`). Every Dockerfile declares `USER 10001:10001`.
    - All copied files must be owned by the non-root user: `COPY --chown=10001:10001 ...`.
@@ -151,9 +159,9 @@ ENV PATH="/app/.venv/bin:$PATH"
 # Copy locked dependency manifests
 COPY --chown=10001:10001 pyproject.toml uv.lock ./
 
-# Mount the pre-warmed CI cache via Buildx, install production dependencies offline,
-# and set ownership. The mount source is the directory python-build.yml cached.
-RUN --mount=type=bind,source=.uv-cache,target=/tmp/.uv-cache \
+# Mount a .uv-cache directory explicitly supplied in the Docker build context, install
+# production dependencies offline, and set ownership. See the cache handoff note above.
+RUN --mount=type=bind,source=.uv-cache,target=/tmp/.uv-cache,rw \
     uv sync --frozen --no-dev --no-install-project --no-install-workspace --offline --cache-dir /tmp/.uv-cache && \
     chown -R 10001:10001 /app
 
@@ -194,8 +202,8 @@ ENV NODE_ENV=production \
 # Copy locked dependency manifests
 COPY --chown=10001:10001 package*.json /app/
 
-# Mount the cache node-build.yml warmed, install production dependencies offline,
-# and set ownership
+# Mount a .npm directory explicitly supplied in the Docker build context, install production
+# dependencies offline, and set ownership. See the cache handoff note above.
 RUN --mount=type=bind,source=.npm,target=/tmp/.npm,rw \
     npm ci --omit=dev --offline --no-audit --no-fund --cache /tmp/.npm && \
     chown -R 10001:10001 /app

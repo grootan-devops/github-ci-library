@@ -8,6 +8,15 @@ Breaking changes must include an entry before release.
 The documentation restructuring requires no consumer configuration changes. Start at the
 README index and follow its task-specific links; update bookmarks to moved sections.
 
+The Dockerfile guide now clarifies a cache limitation in the GitHub workflows: Python and Node
+dependency caches are not automatically transferred from their language workflow jobs into the
+separate `docker.yml` image-build job. Consumers whose Dockerfiles perform offline Python or
+Node installs must explicitly provide the matching cache directory in the Docker build context;
+the image workflow's registry-backed BuildKit cache is not a substitute. The examples use
+read-write bind mounts because package managers may update cache metadata. This documentation
+correction does not change workflow behavior; verify the cache handoff before relying on these
+offline-install examples.
+
 Publishing remains OCI-only and requires the chart registry, repository and credential pair.
 Optional `CHART_DEPENDENCY_REGISTRY` and its username/password pair authenticate private
 dependencies on a different host. Chart scans no longer use image credentials for dependencies.

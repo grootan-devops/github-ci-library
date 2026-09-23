@@ -9,6 +9,10 @@ Reusable GitHub Actions workflows (`workflow_call`)
 Choose your project shape in the [integration examples](docs/examples/README.md), then follow the
 [getting-started guide](docs/getting-started.md). Keep only the modules your project needs.
 
+> **Docker cache caveat:** GitHub's Python and Node workflows cache dependencies, but those
+> directories are not automatically transferred to the separate `docker.yml` build job. Read
+> the [Dockerfile standards](docs/docker.md) before using an offline BuildKit cache mount.
+
 ## Documentation
 
 | Task | Read |

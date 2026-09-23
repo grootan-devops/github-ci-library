@@ -9,6 +9,8 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Clarify that Python and Node dependency caches are not automatically handed off to the
+  separate Docker image-build job, and correct the offline BuildKit examples accordingly.
 - Chart workflows now use the dedicated `CHART_REGISTRY`, `CHART_REPOSITORY`,
   `CHART_REGISTRY_USERNAME` and `CHART_REGISTRY_PASSWORD` configuration. Image registry
   configuration is required only when image publishing is enabled.
