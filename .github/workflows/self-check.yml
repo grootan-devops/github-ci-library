@@ -4,6 +4,10 @@ run-name: "Check · ${{ github.event_name }} · ${{ github.sha }}"
 on:
   workflow_dispatch:
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -20,4 +24,3 @@ jobs:
     secrets: inherit
     with:
       tag: ${{ needs.version.outputs.tag }}
-      check-library-pinning: false
