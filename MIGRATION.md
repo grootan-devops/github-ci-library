@@ -3,9 +3,13 @@
 This document records required consumer actions when upgrading between releases.
 Breaking changes must include an entry before release.
 
+## 1.3.1
+
+No migration is required. Docker image builds no longer push or pull remote registry `buildcache` layers by default.
+
 ## 1.3.0
 
-No migration is required. The GitLab template API remains unchanged.
+No migration is required. The reusable workflow inputs remain backward-compatible.
 
 ## 1.2.0
 
