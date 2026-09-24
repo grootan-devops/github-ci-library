@@ -3,6 +3,10 @@
 This document records required consumer actions when upgrading between releases.
 Breaking changes must include an entry before release.
 
+## 1.3.0
+
+No migration is required. The GitLab template API remains unchanged.
+
 ## 1.2.0
 
 The documentation restructuring requires no consumer configuration changes. Start at the
