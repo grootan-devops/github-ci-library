@@ -182,12 +182,11 @@ be specific. Add `workflow_dispatch` to any of these for on-demand runs.
 
 ### Only stable library versions reach a release
 
-Three guards enforce it, and all three are on by default for every consumer:
+Two guards enforce it, and both are on by default for every consumer:
 
 | Guard | Rejects |
 | --- | --- |
-| `check.yml` · `library-pin` (GitHub) | `uses: …/workflows/x.yml@dev`, `@main`, a commit SHA, or a `-rc` tag |
-| `Common:Check:Library:Pin` (GitLab) | `include: ref:` on a branch, and a `remote:` raw URL whose ref segment is not a tag |
+| `check.yml` · `library-pin` | `uses: …/workflows/x.yml@dev`, `@main`, a commit SHA, or a `-rc` tag |
 | `check.yml` · `chart-dependency` | a `Chart.yaml` dependency on the dev repository, **or** a version that is a range (`^1.2.0`) or a pre-release |
 
 A branch or a range moves underneath the repository: the pipeline that passed review is not
@@ -195,8 +194,7 @@ the one that ships, and the release cannot be reproduced from its tag. A commit 
 reproducible but opaque — it says nothing about which migrations the consumer still owes,
 which is what `MIGRATION.md` chains are keyed on.
 
-**The escape hatch is for testing only.** `allow-unstable-library-refs: true` (GitHub) and
-`ALLOW_UNSTABLE_LIBRARY_REFS: "true"` (GitLab) downgrade the failure to a warning so a pull
+**The escape hatch is for testing only.** `allow-unstable-library-refs: true` downgrades the failure to a warning so a pull
 request can track a library branch while that branch is still being written. The run then
 says so loudly in its summary. Leaving it on defeats the guard entirely — a release cut with
 it enabled is pinned to nothing.
