@@ -83,7 +83,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.root) }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -159,7 +159,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.checks) }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -230,7 +230,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.discover.outputs.docs) }}
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}

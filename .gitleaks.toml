@@ -1,0 +1,10 @@
+# betterleaks / gitleaks configuration.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic test fixtures"
+targetRules = ["generic-password", "generic-api-key", "generic-username"]
+paths = [
+  '''^tests?/.*$''',
+]

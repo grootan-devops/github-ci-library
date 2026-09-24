@@ -29,36 +29,17 @@ if [[ ! "${CHART_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 0
 fi
 
-# Capture helm's words: a bad credential and an unreachable registry both exit 1.
-: "${CHART_REGISTRY:?CHART_REGISTRY is required}"
-: "${CHART_REGISTRY_USERNAME:?CHART_REGISTRY_USERNAME is required}"
-: "${CHART_REGISTRY_PASSWORD:?CHART_REGISTRY_PASSWORD is required}"
-if ! LOGIN_OUTPUT="$(printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin 2>&1)"; then
-  echo "::error title=Chart::Could not authenticate to ${CHART_REGISTRY}."
-  echo "${LOGIN_OUTPUT}" >&2
-  {
-    echo "### ⎈ Chart version"
-    echo ""
-    echo "❌ Could not log in to \`${CHART_REGISTRY}\` as \`${CHART_REGISTRY_USERNAME}\`, so \`${CHART_VERSION}\` cannot be confirmed available. Helm reported:"
-    echo ""
-    echo '```'
-    tail -n 20 <<< "${LOGIN_OUTPUT}"
-    echo '```'
-    echo ""
-    echo "Check \`secrets.CHART_REGISTRY_USERNAME\` / \`secrets.CHART_REGISTRY_PASSWORD\` and that the caller passes \`secrets: inherit\`."
-    echo ""
-  } >> "${GITHUB_STEP_SUMMARY}"
-  exit 1
-fi
-
+# shellcheck source=scripts/chart/registry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../chart/registry.sh"
+chart_registry_login
+: "${CHART_REPOSITORY:?Set CHART_REPOSITORY to the OCI namespace/path}"
 TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}/${CHART_NAME}"
-if helm show chart "${TARGET}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
-  EXISTS="true"
-elif helm show chart "oci://${CHART_REGISTRY}/${CHART_REPOSITORY}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
-  EXISTS="true"
-  TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}"
+if chart_oci_lookup "${TARGET}" "${CHART_VERSION}" >/dev/null; then
+  EXISTS=true
 else
-  EXISTS="false"
+  RESULT=$?
+  [[ "${RESULT}" -eq 1 ]] || exit "${RESULT}"
+  EXISTS=false
 fi
 
 if [[ "${EXISTS}" == "true" ]]; then

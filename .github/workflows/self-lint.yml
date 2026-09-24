@@ -20,7 +20,7 @@ jobs:
       matrix:
         tool: [actionlint, shellcheck, readme-dockerfiles]
     container:
-      image: registry-1.docker.io/grootantech/toolkit:verify-v2
+      image: grootantech/toolkit:verify-v2
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
@@ -36,5 +36,5 @@ jobs:
             actionlint)  run_linted "🔧 Self lint: actionlint" actionlint ;;
             shellcheck)  mapfile -t SCRIPTS < <(find scripts -name "*.sh" | sort)
                          run_linted "🔧 Self lint: shellcheck" shellcheck "${SCRIPTS[@]}" ;;
-            readme-dockerfiles) scripts/lint/readme-dockerfile.sh README.md ;;
+            readme-dockerfiles) scripts/lint/readme-dockerfile.sh ;;
           esac

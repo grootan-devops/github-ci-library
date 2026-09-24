@@ -67,8 +67,10 @@ on:
       mock-chart:
         required: false
         type: string
-        default: "test"
-        description: "Mock consumer chart directory, relative to the chart directory, used by run-unittest."
+        default: "tests"
+        description: >-
+          Space-separated mock consumer chart directories relative to chart-dir
+          (default: tests). Paths cannot contain spaces.
       publish-candidate:
         required: false
         type: boolean
@@ -93,7 +95,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -119,7 +121,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -127,19 +129,22 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Authenticate To Chart Registry
         env:
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${CHART_REGISTRY}" || -z "${CHART_REGISTRY_USERNAME}" || -z "${CHART_REGISTRY_PASSWORD}" ]]; then
-            echo "::error title=Registry::CHART_REGISTRY, CHART_REGISTRY_USERNAME and CHART_REGISTRY_PASSWORD are required to resolve chart dependencies. Pass 'secrets: inherit'."
-            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
-            printf '### ⎈ Chart lint\n\n❌ No registry credentials, so the chart dependencies cannot be resolved and the chart was never linted. Pass `secrets: inherit` from the calling workflow.\n\n' >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
+          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
+          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
 
       - name: Update Chart Dependencies
         id: deps
@@ -200,7 +205,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -216,23 +221,44 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
+      - name: Authenticate Chart Dependencies
+        env:
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
+          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
+          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
+
       - name: Update Mock Chart Dependencies
-        run: helm dependency update "${CHART_DIR}/${{ inputs.mock-chart }}"
+        env:
+          MOCK_CHARTS: ${{ inputs.mock-chart }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MOCK_CHARTS//[[:space:]]/}" ]]; then
+            echo "::error::Set mock-chart to space-separated chart directories."
+            exit 1
+          fi
+          read -r -a mock_charts <<< "${MOCK_CHARTS}"
+          for mock_chart in "${mock_charts[@]}"; do
+            chart_path="${CHART_DIR}/${mock_chart}"
+            if [[ ! -f "${chart_path}/Chart.yaml" ]]; then
+              echo "::error::Mock chart '${chart_path}' lacks Chart.yaml."
+              exit 1
+            fi
+            helm dependency update "${chart_path}"
+          done
 
       - name: Run helm-unittest
         id: unittest
-        run: |
-          set -uo pipefail
-          helm unittest --strict \
-            --output-type JUnit \
-            --output-file unittest-report.xml \
-            "${CHART_DIR}/${{ inputs.mock-chart }}" 2>&1 | tee "${RUNNER_TEMP}/helm-unittest.log"
-          exit "${PIPESTATUS[0]}"
+        env:
+          MOCK_CHARTS: ${{ inputs.mock-chart }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/run-unittest.sh"
 
       - name: Publish Unit Test Summary
         if: always()
         env:
-          MOCK_CHART: ${{ inputs.mock-chart }}
+          MOCK_CHARTS: ${{ inputs.mock-chart }}
           OUTCOME: ${{ steps.unittest.outcome }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/unittest-summary.sh"
 
@@ -241,7 +267,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chart-unittest-report
-          path: ${{ inputs.project-path }}/unittest-report.xml
+          path: ${{ runner.temp }}/chart-unittest/*.xml
           if-no-files-found: warn
           retention-days: 7
 
@@ -254,7 +280,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -262,11 +288,22 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
       - name: Authenticate To Chart Registry
         env:
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
-        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
+          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
+          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
 
       - name: Package Chart
         id: package
@@ -324,7 +361,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -347,7 +384,7 @@ jobs:
         env:
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
-        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh"
 
       - name: Push Chart
         env:
@@ -375,7 +412,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: registry-1.docker.io/grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.0.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -395,7 +432,7 @@ jobs:
         env:
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
-        run: printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh"
 
       - name: Promote Candidate Chart To Production
         env:
@@ -404,6 +441,9 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.candidate-version }}
           DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
           PROD_REPOSITORY: ${{ inputs.chart-repository }}
+          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
+          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
+          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/promote.sh"
 
       - name: Upload Chart Info

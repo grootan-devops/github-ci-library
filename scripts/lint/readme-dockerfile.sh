@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # hadolint every ```dockerfile block in a markdown file, so a documented example cannot
 # drift from the standard the same linter enforces on a consumer's Dockerfile.
-# Usage: readme-dockerfile-check.sh [file.md ...]   (default: README.md)
+# Usage: readme-dockerfile.sh [file.md ...] (default: README.md and docs/**/*.md)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -13,6 +13,11 @@ source "${SCRIPT_DIR}/../docker/hadolint-ignores.sh"
 FILES=("$@")
 if [[ ${#FILES[@]} -eq 0 ]]; then
   FILES=("README.md")
+  if [[ -d docs ]]; then
+    while IFS= read -r -d '' MD; do
+      FILES+=("${MD}")
+    done < <(find docs -type f -name '*.md' -print0)
+  fi
 fi
 
 WORK="$(mktemp -d)"
@@ -39,7 +44,8 @@ for MD in "${FILES[@]}"; do
   for START in "${STARTS[@]}"; do
     END="$(awk -v s="${START}" 'NR>s && /^```$/ {print NR; exit}' "${MD}")"
     if [[ -z "${END}" ]]; then
-      continue
+      echo "::error file=${MD},line=${START}::Unclosed Dockerfile example."
+      exit 1
     fi
     BLOCK="${WORK}/${MD//\//_}-L${START}.Dockerfile"
     awk -v s="${START}" -v e="${END}" 'NR>s && NR<e' "${MD}" > "${BLOCK}"
