@@ -67,8 +67,10 @@ on:
       mock-chart:
         required: false
         type: string
-        default: "test"
-        description: "Mock consumer chart directory, relative to the chart directory, used by run-unittest."
+        default: "tests"
+        description: >-
+          Space-separated mock consumer chart directories relative to chart-dir
+          (default: tests). Paths cannot contain spaces.
       publish-candidate:
         required: false
         type: boolean
@@ -229,22 +231,34 @@ jobs:
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
 
       - name: Update Mock Chart Dependencies
-        run: helm dependency update "${CHART_DIR}/${{ inputs.mock-chart }}"
+        env:
+          MOCK_CHARTS: ${{ inputs.mock-chart }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MOCK_CHARTS//[[:space:]]/}" ]]; then
+            echo "::error::Set mock-chart to space-separated chart directories."
+            exit 1
+          fi
+          read -r -a mock_charts <<< "${MOCK_CHARTS}"
+          for mock_chart in "${mock_charts[@]}"; do
+            chart_path="${CHART_DIR}/${mock_chart}"
+            if [[ ! -f "${chart_path}/Chart.yaml" ]]; then
+              echo "::error::Mock chart '${chart_path}' lacks Chart.yaml."
+              exit 1
+            fi
+            helm dependency update "${chart_path}"
+          done
 
       - name: Run helm-unittest
         id: unittest
-        run: |
-          set -uo pipefail
-          helm unittest --strict \
-            --output-type JUnit \
-            --output-file unittest-report.xml \
-            "${CHART_DIR}/${{ inputs.mock-chart }}" 2>&1 | tee "${RUNNER_TEMP}/helm-unittest.log"
-          exit "${PIPESTATUS[0]}"
+        env:
+          MOCK_CHARTS: ${{ inputs.mock-chart }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/run-unittest.sh"
 
       - name: Publish Unit Test Summary
         if: always()
         env:
-          MOCK_CHART: ${{ inputs.mock-chart }}
+          MOCK_CHARTS: ${{ inputs.mock-chart }}
           OUTCOME: ${{ steps.unittest.outcome }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/unittest-summary.sh"
 
@@ -253,7 +267,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: chart-unittest-report
-          path: ${{ inputs.project-path }}/unittest-report.xml
+          path: ${{ runner.temp }}/chart-unittest/*.xml
           if-no-files-found: warn
           retention-days: 7
 

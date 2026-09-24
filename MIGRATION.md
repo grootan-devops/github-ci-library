@@ -3,6 +3,13 @@
 This document records required consumer actions when upgrading between releases.
 Breaking changes must include an entry before release.
 
+## Unreleased
+
+The chart workflow's default mock consumer chart directory is now `tests` instead of
+`test`. Rename the fixture directory to `tests/`, or keep the old location temporarily by
+setting `mock-chart: test`. Mock chart suites are selected from each chart's own
+`tests/*_test.yaml` files.
+
 ## 1.2.0
 
 The documentation restructuring requires no consumer configuration changes. Start at the

@@ -7,8 +7,15 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Allow the chart workflow's `mock-chart` input to name multiple space-separated consumer
+  charts; update each dependency tree and run its suite separately so suites are not
+  cross-run against unrelated charts.
+
 ### Changed
 
+- Use `tests` as the default mock consumer chart directory in the chart workflow.
 - Clarify that Python and Node dependency caches are not automatically handed off to the
   separate Docker image-build job, and correct the offline BuildKit examples accordingly.
 - Chart workflows now use the dedicated `CHART_REGISTRY`, `CHART_REPOSITORY`,

@@ -313,7 +313,9 @@ jobs:
 > A `type: library` chart (such as `tpllib`) is exempt from the application-chart standard:
 > no `values.schema.json`, no `manifest.yaml`, and `check-docs: false` if it ships no
 > `README.gotmpl`. A repository whose chart *is* consumed by others should also set
-> `run-unittest: true` on `chart.yml` to render the mock consumer chart under
-> `chart/test` with `helm unittest --strict`.
+> `run-unittest: true` on `chart.yml` to render mock consumer charts under
+> `chart/tests` with `helm unittest --strict`. For multiple chart directories, pass a
+> space-separated value such as `mock-chart: "tests tests/extras"`; the reusable workflow
+> updates each chart's dependencies and runs each chart's own suite glob separately.
 
 [Documentation index](../../README.md)
