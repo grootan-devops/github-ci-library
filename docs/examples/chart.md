@@ -15,7 +15,10 @@ tree, and a chart ships none. What remains is the chart's own pipeline: `lint.ym
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+      && format('PR #{0}: {1} -> {2} ({3})', github.event.pull_request.number, github.head_ref, github.base_ref, github.sha)
+      || format('Verify · {0}', github.ref_name) }}
 
 on:
   pull_request:

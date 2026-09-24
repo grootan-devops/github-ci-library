@@ -3,17 +3,15 @@
 This document records required consumer actions when upgrading between releases.
 Breaking changes must include an entry before release.
 
-## Unreleased
+## 1.2.0
+
+The documentation restructuring requires no consumer configuration changes. Start at the
+README index and follow its task-specific links; update bookmarks to moved sections.
 
 The chart workflow's default mock consumer chart directory is now `tests` instead of
 `test`. Rename the fixture directory to `tests/`, or keep the old location temporarily by
 setting `mock-chart: test`. Mock chart suites are selected from each chart's own
 `tests/*_test.yaml` files.
-
-## 1.2.0
-
-The documentation restructuring requires no consumer configuration changes. Start at the
-README index and follow its task-specific links; update bookmarks to moved sections.
 
 The Dockerfile guide now clarifies a cache limitation in the GitHub workflows: Python and Node
 dependency caches are not automatically transferred from their language workflow jobs into the

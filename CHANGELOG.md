@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-09-23
 
 ### Added
 
@@ -21,11 +21,6 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Chart workflows now use the dedicated `CHART_REGISTRY`, `CHART_REPOSITORY`,
   `CHART_REGISTRY_USERNAME` and `CHART_REGISTRY_PASSWORD` configuration. Image registry
   configuration is required only when image publishing is enabled.
-
-## [1.2.0] - 2026-09-23
-
-### Changed
-
 - Split the README into a task index with focused module, configuration and integration guides.
 - Preserve complete examples while reducing the documentation loaded for a single task.
 - Describe module responsibilities and clarify source/ref selection independently of example pins.

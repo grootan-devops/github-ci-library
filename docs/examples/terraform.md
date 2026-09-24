@@ -14,7 +14,10 @@ needed to resolve a version here.
 ```yaml
 # .github/workflows/pr.yml
 name: CI · PR Verification
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+      && format('PR #{0}: {1} -> {2} ({3})', github.event.pull_request.number, github.head_ref, github.base_ref, github.sha)
+      || format('Verify · {0}', github.ref_name) }}
 
 on:
   pull_request:
@@ -96,7 +99,10 @@ teardown and leave the fixtures standing.
 ```yaml
 # .github/workflows/terraform-test.yml
 name: CI · Terraform Module Test
-run-name: "CI · ${{ github.event_name }} · ${{ github.sha }}"
+run-name: >-
+  ${{ github.event_name == 'pull_request'
+      && format('Test PR #{0}: {1} -> {2} ({3})', github.event.pull_request.number, github.head_ref, github.base_ref, github.sha)
+      || format('Test · {0}', github.ref_name) }}
 
 on:
   pull_request:
