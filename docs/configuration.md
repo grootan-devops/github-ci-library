@@ -34,7 +34,7 @@ wherever possible.
 > [!IMPORTANT]
 > **The build container and the Docker base images are pinned in the library, not
 > configurable.** Every `container:` block names
-> `grootantech/toolkit:1.0.0` literally, and `docker.yml` hardcodes the
+> `grootantech/toolkit:1.1.0` literally, and `docker.yml` hardcodes the
 > `micro-root`, `nginx`, `python-3-12`, `node-24` and `java-25` bases and the BuildKit
 > driver. Setting `TOOLKIT_BUILD_IMAGE`, `BUILDKIT_IMAGE` or any `*_MICRO_BASE_IMAGE`
 > organisation variable has **no effect** — those rows were removed from this table because

@@ -12,6 +12,8 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Excluded `RELEASE_MIGRATION.md` from downloadable GitHub Release assets (`consolidate-assets.sh` and `publish.sh`); preserved in the consolidated release notes body (`CONSOLIDATED_RELEASE_CHANGELOG.md`).
 - Removed remote registry `buildcache` layer pushes and pulls (`cache-from` and `cache-to`) from Docker image builds.
 - Cleaned up maintainer documentation to remove orphan Python unit test references.
+- Bumped container image tags across all workflows to `grootantech/toolkit:1.1.0`.
+- Bumped default container base and builder images in `docker.yml` to latest stable releases (`micro-root:1.1.0`, `micro-nginx:1.1.1`, `micro-python-3-12:1.1.1`, `micro-java-25:1.1.1`, `micro-node-24:1.1.1`, `toolkit:1.1.0`).
 
 ## [1.3.0] - 2026-09-25
 

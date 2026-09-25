@@ -187,12 +187,12 @@ jobs:
           EXTRA_BUILD_ARGS: ${{ inputs.build-args }}
           VERSION: ${{ inputs.image-tag }}
           REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-          MICRO_ROOT_BASE_IMAGE: grootantech/micro-root:1.0.0
-          NGINX_MICRO_BASE_IMAGE: grootantech/micro-nginx:1.0.0
-          PYTHON_312_MICRO_BASE_IMAGE: grootantech/micro-python-3-12:1.0.0
-          NODE_JS_24_MICRO_BASE_IMAGE: grootantech/micro-node-24:1.0.0
-          JAVA_25_MICRO_BASE_IMAGE: grootantech/micro-java-25:1.0.0
-          TOOLKIT_BUILD_IMAGE: grootantech/toolkit:1.0.0
+          MICRO_ROOT_BASE_IMAGE: grootantech/micro-root:1.1.0
+          NGINX_MICRO_BASE_IMAGE: grootantech/micro-nginx:1.1.1
+          PYTHON_312_MICRO_BASE_IMAGE: grootantech/micro-python-3-12:1.1.1
+          NODE_JS_24_MICRO_BASE_IMAGE: grootantech/micro-node-24:1.1.1
+          JAVA_25_MICRO_BASE_IMAGE: grootantech/micro-java-25:1.1.1
+          TOOLKIT_BUILD_IMAGE: grootantech/toolkit:1.1.0
         run: |
           set -euo pipefail
           {
@@ -370,7 +370,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.1.0
     steps:
       - name: Checkout CI Library
         uses: actions/checkout@v7
