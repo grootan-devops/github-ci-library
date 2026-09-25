@@ -20,7 +20,7 @@ jobs:
       matrix:
         tool: [actionlint, shellcheck, readme-dockerfiles]
     container:
-      image: grootantech/toolkit:verify-v2
+      image: grootantech/toolkit:1.0.0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v7
