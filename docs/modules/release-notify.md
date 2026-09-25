@@ -14,7 +14,7 @@ flowchart LR
 | `notify.yml` | The same card, standalone. |
 
 Release assets: the Trivy report bundle, `installed_pkgs.txt`, `sbom.cdx.json`, the chart
-`.tgz`, the test report archive, `RELEASE_CHANGELOG.md`, `RELEASE_MIGRATION.md`, plus
+`.tgz`, the test report archive, `RELEASE_CHANGELOG.md`, plus
 anything named in `additional-artifacts`.
 
 ## A release promotes; it does not rebuild
