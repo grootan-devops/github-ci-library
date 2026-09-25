@@ -9,7 +9,9 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Excluded `RELEASE_MIGRATION.md` from downloadable GitHub Release assets (`consolidate-assets.sh` and `publish.sh`); preserved in the consolidated release notes body (`CONSOLIDATED_RELEASE_CHANGELOG.md`).
 - Removed remote registry `buildcache` layer pushes and pulls (`cache-from` and `cache-to`) from Docker image builds.
+- Cleaned up maintainer documentation to remove orphan Python unit test references.
 
 ## [1.3.0] - 2026-09-25
 

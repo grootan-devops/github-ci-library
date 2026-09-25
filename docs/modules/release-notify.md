@@ -8,7 +8,7 @@ flowchart LR
 
 | Workflow · Job | Description |
 | --- | --- |
-| `release.yml` · `collect` | Downloads this run's artifacts and, via `gh run download`, the candidate run's. Consolidates `RELEASE_CHANGELOG.md`, `RELEASE_MIGRATION.md`, image/chart/Terraform info and every scan report into the release body, and stages the assets. |
+| `release.yml` · `collect` | Downloads this run's artifacts and, via `gh run download`, the candidate run's. Consolidates `RELEASE_CHANGELOG.md`, `RELEASE_MIGRATION.md`, image/chart/Terraform info and scan reports into the release body; stages downloadable assets separately. |
 | `release.yml` · `publish` | Creates the git tag and the GitHub Release with all staged assets. |
 | `release.yml` · `notify` | Microsoft Teams Adaptive Card with the rendered release notes and links. |
 | `notify.yml` | The same card, standalone. |

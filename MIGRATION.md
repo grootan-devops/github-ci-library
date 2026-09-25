@@ -5,7 +5,7 @@ Breaking changes must include an entry before release.
 
 ## 1.3.1
 
-No migration is required. Docker image builds no longer push or pull remote registry `buildcache` layers by default.
+No consumer workflow migration is required. Docker image builds no longer push or pull remote registry `buildcache` layers by default, and `RELEASE_MIGRATION.md` is consolidated directly into the GitHub Release body notes rather than published as a standalone downloadable asset.
 
 ## 1.3.0
 

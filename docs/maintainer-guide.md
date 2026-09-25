@@ -1,12 +1,5 @@
 # Maintainer guide
 
-## Chart registry regression tests
-
-Run `python3 -m unittest discover -s tests -v` from the repository root with Python, PyYAML,
-Bash, and `yq` available. The suite uses isolated command doubles: it never logs into or
-publishes to a real registry. It covers credentials, backend requirements, collision checks,
-candidate promotion, optional mirrors and chart-scan credential wiring.
-
 ## Repository Layout
 
 A workflow in this library is a thin shell: inputs, permissions, step wiring, and a call out
