@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Guard: every reusable-workflow call pins a stable release tag.
+# Guard: every reusable-workflow call uses a stable release-tag shape.
 #
-# A caller on `@dev`, `@main` or a commit SHA silently changes underneath the
-# repository: the pipeline that passed yesterday is not the pipeline that runs
-# today, and a release cut from it cannot be reproduced. Only a published tag
-# is a fixed point.
+# Branches can move between runs. A commit SHA is immutable, but this guard
+# deliberately requires a stable release-tag shape for normal consumers. The
+# caller must separately verify that the tag was actually published.
 #
 # Scope: job-level `uses: <owner>/<repo>/.github/workflows/<file>.yml@<ref>`.
 # Step-level action pins (actions/checkout@v7) are a separate concern and are
@@ -103,8 +102,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     printf '%s' "${OFFENDERS}"
     echo '```'
     echo ""
-    echo "A branch or commit moves underneath the repository, so the pipeline that passed"
-    echo "yesterday is not the one that runs today and a release cannot be reproduced."
+    echo "Branches move between runs; commit SHAs are immutable but are outside this"
+    echo "library's stable-release-tag policy for normal consumers."
     echo "Pin a published tag: \`git ls-remote --tags <library>\` lists them."
     echo ""
     echo "\`allow-unstable-library-refs: true\` suppresses this while testing a library branch."

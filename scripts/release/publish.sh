@@ -75,7 +75,7 @@ fi
 shopt -s nullglob
 ASSETS=()
 for ASSET in payload/_release_assets/*; do
-  if [[ "$(basename "${ASSET}")" == "$(basename "${RELEASE_CHANGELOG_FILE_NAME}")" ]]; then
+  if [[ "$(basename "${ASSET}")" == "$(basename "${RELEASE_CHANGELOG_FILE_NAME}")" || "$(basename "${ASSET}")" == "${RELEASE_MIGRATION_FILE_NAME:-RELEASE_MIGRATION.md}" ]]; then
     continue
   fi
   ASSETS+=("${ASSET}")

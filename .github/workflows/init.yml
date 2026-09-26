@@ -132,7 +132,7 @@ jobs:
       pull-requests: read
 
     container:
-      image: grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.1.0
 
     env:
       PROJECT_PATH: ${{ inputs.project-path }}

@@ -111,7 +111,6 @@ fi
 
 stage installed_pkgs.txt
 stage sbom.cdx.json
-stage "${RELEASE_MIGRATION_FILE_NAME}"
 stage "${RELEASE_CHANGELOG_FILE_NAME}"
 
 shopt -s nullglob

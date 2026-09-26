@@ -3,9 +3,9 @@
 This document records required consumer actions when upgrading between releases.
 Breaking changes must include an entry before release.
 
-## 1.3.1
+## 1.4.0
 
-No migration is required. Docker image builds no longer push or pull remote registry `buildcache` layers by default.
+No consumer workflow migration is required. Docker image builds no longer push or pull remote registry `buildcache` layers by default, and `RELEASE_MIGRATION.md` is consolidated directly into the GitHub Release body notes rather than published as a standalone downloadable asset. Container base and builder images have been upgraded to their latest stable releases (`micro-root:1.1.0`, `micro-nginx:1.1.1`, `micro-python-3-12:1.1.1`, `micro-java-25:1.1.1`, `micro-node-24:1.1.1`, `toolkit:1.1.0`).
 
 ## 1.3.0
 

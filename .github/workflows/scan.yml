@@ -93,7 +93,7 @@ jobs:
       contents: read
       checks: write
     container:
-      image: grootantech/toolkit:1.0.0
+      image: grootantech/toolkit:1.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
