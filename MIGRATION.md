@@ -3,6 +3,35 @@
 This document records required consumer actions when upgrading between releases.
 Breaking changes must include an entry before release.
 
+To upgrade, apply every section after your pinned version up to the target, oldest first.
+Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
+**Recommended** (aligns an existing project with the current standards) and **Verify**.
+
+## 1.5.0
+
+### Required
+
+No migration required. The reusable workflow inputs, outputs and behaviour are unchanged; this
+release documents the standards the workflows already assume.
+
+### Recommended
+
+Align an existing project with the documented standards:
+
+- PID 1 is `ENTRYPOINT ["/usr/bin/dumb-init", "--"]`, with the process, or a start script that
+  ends in `exec`, in `CMD`.
+- Base images come from the injected build-arg `ARG`s. A `# renovate:` annotation goes only on a
+  public-registry image version held in an `ARG`, and no secret is passed as an `ARG`.
+- Paths the application writes at runtime, and a single-page application's runtime
+  configuration, are chart mounts rather than files built into the image.
+- The repository keeps only the scenario files its shape needs. A workflow that can also be
+  called (`workflow_call`) declares no `concurrency:` group, and release and deploy callers keep
+  `cancel-in-progress: false`.
+
+### Verify
+
+- The pull request pipeline passes with the new pin.
+
 ## 1.4.0
 
 No consumer workflow migration is required. Docker image builds no longer push or pull remote registry `buildcache` layers by default, and `RELEASE_MIGRATION.md` is consolidated directly into the GitHub Release body notes rather than published as a standalone downloadable asset. Container base and builder images have been upgraded to their latest stable releases (`micro-root:1.1.0`, `micro-nginx:1.1.1`, `micro-python-3-12:1.1.1`, `micro-java-25:1.1.1`, `micro-node-24:1.1.1`, `toolkit:1.1.0`).

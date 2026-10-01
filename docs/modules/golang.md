@@ -17,4 +17,9 @@ flowchart LR
 | `golang-lint.yml` · `golangci-lint` | Full linter aggregate. |
 | `golang-lint.yml` · `gosec` | Security static analysis, excluding generated code. |
 
+## Project rules
+
+- Unit tests run with `-race`; it catches what local runs do not.
+- The Go module cache is warmed and restored under one project cache identity.
+
 [Documentation index](../../README.md)

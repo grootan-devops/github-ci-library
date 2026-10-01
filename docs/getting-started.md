@@ -184,4 +184,38 @@ chart pushes. `actions: read` lets `init` and `release` reach the upstream candi
 `actions/cache` keys and require only `contents: read`; they no longer delete or rewrite a
 stable cache entry through the Actions API.
 
+## Scenario files for the repository's shape
+
+A consumer writes one workflow file per scenario — `pr.yml`, `release.yml`, the single-concern
+dispatch files (`build.yml`, `check.yml`, `lint.yml`, the scans, `sbom.yml`,
+`secret-scan.yml`, `sonarqube.yml`) and `deploy.yml` — rather than one workflow with skipped
+jobs greyed out in the graph. `init.yml` runs first and resolves the version, tags and
+repositories once; callers consume `needs.init.outputs.*` and never recompute them, and every
+call passes `secrets: inherit`.
+
+- An **image-only** repository (a Dockerfile, no application dependency manifest or chart)
+  builds, smoke-tests and scans the image. It has no `license-scan.yml`, `sbom.yml`, language
+  build or SonarQube; secret scanning still applies.
+- A pull-request workflow that filters on `paths:` includes `.github/**`, so changes to the
+  workflows themselves are verified. The release workflow's push trigger ignores `.github/**`,
+  so a workflow-only change cuts no release.
+- The release path promotes the candidate the pull request built and scanned, by digest. A
+  release that rebuilds ships bytes nobody verified.
+
+## Workflow file layout
+
+One blank line between the top-level sections — `name`, `on`, `permissions`, `concurrency`,
+`defaults`, `env`, `jobs` — and between jobs. `run-name` sits directly under `name`, since both
+name the run. A comment introducing a section belongs to it, so the blank line goes above the
+comment. A called workflow (`on: workflow_call`) has no `run-name`; the caller's titles the run.
+
+## Repository ignore files
+
+`.gitignore` keeps generated and secret files out of history: `.env` and `.env.*` (with
+`!.env.example` re-admitted), `*.pem`, `*.key`, and the outputs of the stacks the project
+actually uses — `node_modules/` and `dist/` (Node), `__pycache__/`, `.venv/`, `.uv-cache/` and
+`.pytest_cache/` (Python), `target/` and `.gradle/` (Java), `bin/` (Go). A chart adds
+`charts` and `Chart.lock` (helm-tpl-library chart standards). The `.dockerignore` rules are in
+the [Dockerfile standards](docker.md).
+
 [Documentation index](../README.md)

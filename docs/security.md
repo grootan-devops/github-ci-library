@@ -156,4 +156,66 @@ These existing standalone examples are reference configurations, not additional 
 - [CodeQL](codeql.md)
 - [Dependabot](dependabot.md)
 
+## Reviewing a consumer repository
+
+The pipeline's own checks are exact and structural. What follows needs someone to read a value
+and judge what it means.
+
+### Secrets — classify by value, not by key name
+
+Ask of every value in the repository, its CI variables, `.env` and compose files:
+
+- **Does a URL embed a credential?** A connection string with `user:password@` before its host
+  (Postgres, AMQP, MongoDB, a Git remote with a token) is a live credential, however innocuous
+  its key.
+- **Is it high-entropy?** Long random-looking strings are keys even in a field called `id` or
+  `ref`; `API_KEY: ""` or a vault reference is fine.
+- **Is a private key or certificate inlined?** `-----BEGIN ... PRIVATE KEY-----` anywhere.
+- **Is a real value posing as a placeholder?** `changeme`, `admin` or `test123` shipped to an
+  environment is a credential.
+- **Is a non-secret value in the secret store?** Over-classification hides which values matter.
+- **Is a secret transformed before it is printed?** Masking covers the known value, not its
+  base64 encoding, a `jq` extract or a slice.
+
+### Pipeline posture
+
+- Prefer a short-lived, job-scoped token to a long-lived one; a static credential is
+  read-only unless the job pushes.
+- Every secret variable is both masked and protected.
+- No secret is echoed, including through `set -x` or a constructed URL.
+- Third-party components are pinned when the job holds credentials.
+- Failures do not pass silently: no `curl` without `--fail`, no `|| true` around an auth step.
+- A job publishing outside its own project uses an explicitly granted credential; if it "just
+  works", something is over-permissioned.
+
+### GitHub specifics
+
+Anyone can open a pull request, and several triggers run something in response. For each
+workflow, ask who can cause it to run and what it holds while running.
+
+| Trigger | Attacker can trigger? | Secrets? | Token |
+| --- | --- | --- | --- |
+| `pull_request` from a fork | yes | no | read-only |
+| `pull_request_target` | yes | **yes** | read/write |
+| `issue_comment`, `issues` | yes | **yes** | read/write |
+| `workflow_run` | indirectly | **yes** | read/write |
+| `push`, `schedule`, `workflow_dispatch` | no (needs write access) | yes | per `permissions:` |
+
+- **Untrusted input arrives indirectly** — through a step output capturing a PR title, through
+  `env:` into a script file that interpolates it, through an action input the action `eval`s,
+  through `github.head_ref`, or through an artifact from a fork run unpacked in a privileged job.
+- **`workflow_run`** runs in the base repository with full secrets. Downloading and executing
+  an artifact from the untrusted run, trusting an artifact-supplied PR number or branch, or
+  checking out a ref taken from the triggering run defeats the privilege separation.
+- **`permissions:`**: `contents: read` at workflow level, and each elevation on the one job
+  that needs it, explainable in one sentence. An absent block inherits the repository default,
+  which on older repositories is read/write everywhere. `id-token: write` on a workflow that
+  never uses OIDC signals copied configuration.
+- **Runners and environments**: a self-hosted runner on a public repository runs fork code; a
+  protected Environment (required reviewers, restricted branches) is the real production gate,
+  and production credentials are Environment-scoped.
+- **Supply chain**: judge whose unpinned action it is; a pinned composite action may call an
+  unpinned one; `npm install`/`pip install` on fork-controlled lockfiles in a privileged context
+  runs arbitrary code; prefer OIDC federation to stored cloud keys.
+
 [Documentation index](../README.md)
