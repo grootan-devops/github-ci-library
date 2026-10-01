@@ -12,6 +12,12 @@ already running.
 calling workflow. The guarantee therefore does not survive the port on its own; it is the
 caller's to reinstate.
 
+Every workflow that starts itself declares a group; a workflow that can also be called
+declares none. Inside a called workflow `github.workflow` is the caller's name, so a
+dual-purpose workflow (`workflow_dispatch` and `workflow_call`) evaluates to the caller's own
+group, queues behind it, and GitHub cancels the run with "a deadlock was detected for
+concurrency group". The caller's group already covers the whole run.
+
 | Calling scenario | `group:` | `cancel-in-progress:` |
 | --- | --- | :--: |
 | Pull request verification | `${{ github.workflow }}-${{ github.ref }}` | `true` |
@@ -62,6 +68,26 @@ flowchart LR
 > There is no `trigger` phase. GitHub cannot call a reusable workflow from a matrix, so the
 > GitLab monorepo child-pipeline pattern has no counterpart here. A repository that needs
 > per-project pipelines gets one workflow file per project.
+
+### Job responsibilities
+
+An application pipeline separates dependency preparation, build and test. Jobs that exchange a
+dependency cache share one cache identity and path.
+
+| Job | Responsibility | Must not |
+| --- | --- | --- |
+| dependency | Populate the dependency cache | compile, test or lint |
+| build | Compile or bundle; emit the artifact later jobs consume | install ad hoc, run tests |
+| test | Unit tests against the built artifact | rebuild from source |
+
+- Interpreted stacks with nothing to compile go dependencies → test; leave out the build job
+  rather than adding a no-op.
+- Linters that can run standalone do not depend on the dependency job.
+- Key a cache on something only a reviewed change moves, such as a lockfile — never a branch
+  name or other mutable ref that whoever can push it can poison.
+- A skipped upstream skips its dependents, and there is no `optional:` on `needs:`: a job that
+  must tolerate a skipped dependency uses `if: ${{ needs.build.result != 'failure' }}`, and a
+  cleanup or teardown job uses `if: always()`.
 
 ---
 

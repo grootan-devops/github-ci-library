@@ -12,4 +12,11 @@ flowchart LR
 | `java-build.yml` · `build` | Offline `mvn package`. Uploads `java-artifacts` (`*.jar`, `*.war`). |
 | `java-build.yml` · `test` | Offline `mvn test`; Surefire XML published as a GitHub Check. |
 
+## Project rules
+
+- Maven runs in batch mode (`mvn -B`), or the log fills with download progress.
+- `package -DskipTests` and `test` are separate, so a test failure does not rebuild.
+- The local repository (`~/.m2`, or Gradle's cache) is cached under one stable key shared by
+  its warmer and its readers.
+
 [Documentation index](../../README.md)

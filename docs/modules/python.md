@@ -14,4 +14,11 @@ flowchart LR
 | `python-build.yml` · `test` | `pytest --junitxml --cov`, published as a GitHub Check. |
 | `python-lint.yml` · `lint` | Matrix of `ruff`, `mypy`, `isort`, `pycodestyle`, all in parallel. |
 
+## Project rules
+
+- Install from the lockfile — `uv sync --frozen` or `pip install --require-hashes` — so CI
+  cannot resolve a different tree than the one reviewed.
+- A containerised service has no build job: dependencies, then tests.
+- Linters (`ruff`, `mypy`) run standalone, without waiting on the dependency job.
+
 [Documentation index](../../README.md)

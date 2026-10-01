@@ -1,6 +1,6 @@
 # Github CI/CD Library
 
-Release `1.4.0` · [Compatibility](https://github.com/grootan-devops/ai-skills/blob/main/COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
+Release `1.5.0` · [Compatibility](https://github.com/grootan-devops/ai-skills/blob/main/COMPATIBILITY.md) · [Security](./SECURITY.md) · [Contributing](./CONTRIBUTING.md)
 
 Reusable GitHub Actions workflows (`workflow_call`)
 
@@ -17,12 +17,12 @@ Choose your project shape in the [integration examples](docs/examples/README.md)
 
 | Task | Read |
 | --- | --- |
-| Set up a pipeline | [Getting started](docs/getting-started.md) |
-| Understand triggers, dependencies and release promotion | [Pipeline lifecycle](docs/pipeline-lifecycle.md) |
+| Set up a pipeline: scenario files, file layout, permissions, ignore files | [Getting started](docs/getting-started.md) |
+| Understand triggers, concurrency, job responsibilities and release promotion | [Pipeline lifecycle](docs/pipeline-lifecycle.md) |
 | Configure variables, secrets and registries | [Configuration](docs/configuration.md) |
 | Select reusable jobs and their contracts | [Module catalog](docs/modules/README.md) |
-| Package an application and set Docker ignore rules | [Dockerfile standards](docs/docker.md) |
-| Configure scanning, ignored CVEs and scan exit codes | [Security and scanning](docs/security.md) |
+| Package an application: base images, PID 1 and Docker ignore rules | [Dockerfile standards](docs/docker.md) |
+| Configure scanning, ignored CVEs and scan exit codes; review a repository's security | [Security and scanning](docs/security.md) |
 | Copy a complete project integration | [Integration examples](docs/examples/README.md) |
 | Maintain this library and follow release conventions | [Maintainer guide](docs/maintainer-guide.md) |
 

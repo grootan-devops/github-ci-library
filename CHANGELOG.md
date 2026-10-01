@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-01
+
+### Added
+
+- `docs/docker.md`: micro base image limits, final-layer cleanup and `.dockerignore` rules.
+- `docs/getting-started.md`: scenario files for the repository's shape (image-only repositories, `paths:` filters), workflow file layout and `.gitignore` entries.
+- `docs/pipeline-lifecycle.md`: job responsibilities and the concurrency deadlock of a workflow that is both dispatched and called.
+- `docs/security.md`: reviewing a consumer repository — secrets by value, pipeline posture and GitHub specifics.
+- The per-stack project rules in the Node.js, Python, Go, Java and chart module guides.
+
+### Changed
+
+- `docs/docker.md`: PID 1 is always `ENTRYPOINT ["/usr/bin/dumb-init", "--"]` with the process or start script in `CMD`; `# renovate:` annotations are required only for public-registry image versions held in an `ARG`; comments are one line saying why; runtime-writable paths are chart mounts; never `ARG` a secret; the stack examples follow these rules, and the SPA example no longer copies `nginx.conf` into the image.
+
 ## [1.4.0] - 2026-09-25
 
 ### Changed
