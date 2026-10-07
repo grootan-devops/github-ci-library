@@ -7,6 +7,10 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.5.1
+
+No migration is required. This release only updates dependencies.
+
 ## 1.5.0
 
 ### Required
