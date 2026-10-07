@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-10-07
+
+### Changed
+
+- Updated [`docker/setup-buildx-action`](https://github.com/docker/setup-buildx-action) from [`v3@37fe631` to `v3@8d2750c`](https://github.com/docker/setup-buildx-action/compare/37fe631027851001ddb9b187196cc803df7f5f0e...8d2750c68a42422c14e847fe6c8ac0403b4cbd6f)
+
 ## [1.5.0] - 2026-10-01
 
 ### Added
