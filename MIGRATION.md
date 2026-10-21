@@ -7,6 +7,28 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.6.0
+
+### Required
+
+No migration required. `buildah.yml` gains optional `test`, `test-script`, `test-path` and
+`test-shell` inputs that default to off; existing callers behave as before. A `buildah.yml`
+caller that passes any of these inputs must pin `1.6.0` or later, because earlier releases reject
+them as unknown inputs.
+
+### Recommended
+
+- Smoke-test Buildah images the same way as Docker images: set `test: true` on the `buildah.yml`
+  caller and commit a `ci_image_test.sh` (or point `test-script`/`test-path` at an existing one).
+- A minimal Buildah image usually has no `bash`. Set `test-shell` to an interpreter the image
+  actually contains, e.g. `sh`, or the test fails before the script runs.
+
+### Verify
+
+- The pull request pipeline passes with the new pin.
+- With `test: true`, the run summary shows the `🧪 Image smoke test` section for the Buildah
+  image, run against its `image-ref-digest`.
+
 ## 1.5.0
 
 ### Required

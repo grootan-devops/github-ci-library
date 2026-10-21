@@ -86,6 +86,8 @@ jobs:
     with:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
       image-repository: ${{ needs.init.outputs.image-push-repository }}
+      test: true
+      test-shell: sh
       install-packages: "tzdata ca-certificates"
       required-packages: "tzdata ca-certificates glibc-minimal-langpack"
       container-path-env: "/opt/app/bin"
@@ -118,6 +120,10 @@ jobs:
     secrets: inherit
 ```
 
+> `test: true` runs `ci_image_test.sh` from the project root inside the pushed image.
+> The image has no `bash`, so `test-shell: sh`. Smoke-testing `buildah.yml` needs `1.6.0`
+> or later.
+>
 > The Dockerfile lint lives in `lint.yml`, not in the image workflow — and with no
 > Dockerfile present it is a no-op here, leaving YAML, markdown, `CHANGELOG.md` and
 > `MIGRATION.md`. For anything `install-packages` cannot express, drop a `buildah.sh`
@@ -234,6 +240,8 @@ jobs:
     with:
       image-tag: ${{ needs.init.outputs.image-push-tag }}
       image-repository: ${{ needs.init.outputs.image-push-repository }}
+      test: true
+      test-shell: sh
       install-packages: "tzdata ca-certificates"
       required-packages: "tzdata ca-certificates glibc-minimal-langpack"
       container-path-env: "/opt/app/bin"
