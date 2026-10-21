@@ -9,6 +9,10 @@ flowchart LR
     IB --> IT["docker.yml · test<br/>smoke test in the image"]
     IB --> IS["scan.yml<br/>scan-type: image"]
     IP["docker.yml · promote<br/>crane mutate --tag"]
+    BB["buildah.yml · build<br/>buildah commit + push"]
+    BB --> BT["buildah.yml · test<br/>smoke test in the image"]
+    BB --> IS
+    BP["buildah.yml · promote<br/>crane mutate --tag"]
 ```
 
 | Workflow · Job | Description |
@@ -17,18 +21,20 @@ flowchart LR
 | `docker.yml` · `test` | Optional smoke test executed **inside** the built image. Off by default. |
 | `docker.yml` · `promote` | Release-mode only. Refuses unless the caller passes a successful `scan-result`. Resolves the candidate and copies it by digest with `crane mutate --tag`, then tags `latest`, `MAJOR`, `MINOR`. |
 | `buildah.yml` · `build` | Dockerfile-free minimal image assembly from a base image: `microdnf install`, package-manager purge, documentation/systemd/PAM strip, `USER 10001`. |
+| `buildah.yml` · `test` | Same optional smoke test as `docker.yml` · `test`, run against the Buildah image's `image-ref-digest`. Off by default. |
 | `buildah.yml` · `promote` | Same digest-preserving promotion as `docker.yml`. |
 
 > [!IMPORTANT]
-> `docker.yml` · `build` is the **only** job in the library that does not run inside an
-> organisation build container. Building an image needs the daemon and BuildKit on the
-> runner itself. Every other job, `docker.yml` · `promote` included, is
-> containerised.
+> `docker.yml` · `build` and the `test` job of `docker.yml` and `buildah.yml` are the
+> **only** jobs in the library that do not run inside an organisation build container.
+> Building an image needs the daemon and BuildKit on the runner itself, and the smoke test
+> runs the image with the runner's `docker run`. Every other job, both `promote` jobs and
+> `buildah.yml` · `build` included, is containerised.
 
 ## Image smoke test — off unless asked for
 
-`docker.yml` and `buildah.yml` can run a script **inside the built image** before anything
-pushes or scans it. It is `test: false` by default, so a pipeline that never sets it builds
+`docker.yml` and `buildah.yml` (from `1.6.0`) can run a script **inside the built image**,
+pulled by its digest-pinned `image-ref-digest`, alongside the image scan. It is `test: false` by default, so a pipeline that never sets it builds
 an artifact nobody executed.
 
 | Input | Default | Meaning |
@@ -37,6 +43,9 @@ an artifact nobody executed.
 | `test-script` | `ci_image_test.sh` | Script executed inside the image, relative to `test-path`. |
 | `test-path` | the project path | Directory mounted into the image at `/tmp`. |
 | `test-shell` | `bash` | Interpreter the image runs it with. |
+
+A Buildah image is minimal and usually ships no `bash`: set `test-shell` to an interpreter
+the image contains (e.g. `sh`), or the test fails before the script starts.
 
 ```yaml
   image:
@@ -48,6 +57,23 @@ an artifact nobody executed.
     secrets: inherit
     with:
       test: true
+      image-tag: ${{ needs.init.outputs.image-push-tag }}
+      image-repository: ${{ needs.init.outputs.image-push-repository }}
+```
+
+The `buildah.yml` caller takes the same inputs:
+
+```yaml
+  image:
+    needs: init
+    permissions:
+      contents: read
+      packages: write
+    uses: grootan-devops/github-ci-library/.github/workflows/buildah.yml@1.6.0
+    secrets: inherit
+    with:
+      test: true
+      test-shell: sh
       image-tag: ${{ needs.init.outputs.image-push-tag }}
       image-repository: ${{ needs.init.outputs.image-push-repository }}
 ```

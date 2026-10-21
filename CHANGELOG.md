@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-10-22
+
+### Added
+
+- `buildah.yml` · `test`: optional smoke test executed inside the built image, with the same `test`, `test-script`, `test-path` and `test-shell` inputs and defaults as `docker.yml`. Off by default.
+
+### Changed
+
+- `docs/modules/image.md` and `docs/examples/buildah.md`: document the Buildah smoke test and choosing a `test-shell` the minimal image provides.
+
 ## [1.5.0] - 2026-10-01
 
 ### Added
