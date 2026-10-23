@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-10-23
+
+### Changed
+
+- Updated [`docker/build-push-action`](https://github.com/docker/build-push-action) from [`v6@53b7df9` to `v6@10e90e3`](https://github.com/docker/build-push-action/compare/53b7df96c91f9c12dcc8a07bcb9ccacbed38856a...10e90e3645eae34f1e60eeb005ba3a3d33f178e8)
+
 ## [1.6.0] - 2026-10-22
 
 ### Added
