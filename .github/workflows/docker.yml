@@ -175,7 +175,7 @@ jobs:
           echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
 
       - name: Authenticate To Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ steps.login-registry.outputs.value }}
           username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
@@ -300,7 +300,7 @@ jobs:
           echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
 
       - name: Authenticate To Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ steps.login-registry.outputs.value }}
           username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
