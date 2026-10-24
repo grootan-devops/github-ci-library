@@ -27,61 +27,12 @@ permissions:
   contents: read
 
 jobs:
-  # An empty matrix runs no jobs at all: no root module, no Terraform jobs.
-  discover:
-    name: Detect Terraform Root Module
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      root: ${{ steps.targets.outputs.root }}
-      checks: ${{ steps.targets.outputs.checks }}
-      docs: ${{ steps.targets.outputs.docs }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-
-      - name: Select Applicable Terraform Jobs
-        id: targets
-        env:
-          PROJECT_PATH: ${{ inputs.project-path }}
-          CHECK_DOCS: ${{ inputs.check-docs }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "${PROJECT_PATH}"
-
-          ROOT='[]'
-          CHECKS='[]'
-          DOCS='[]'
-
-          if [[ -f main.tf ]]; then
-            ROOT='[{"module":"root"}]'
-            CHECKS='[{"name":"Validate","check":"validate"},{"name":"TFLint","check":"tflint"}]'
-            if [[ "${CHECK_DOCS}" == "true" ]]; then
-              DOCS="${ROOT}"
-            fi
-          else
-            echo "::warning title=Terraform::No main.tf in ${PROJECT_PATH} — the Terraform checks do not apply."
-          fi
-
-          {
-            echo "root=${ROOT}"
-            echo "checks=${CHECKS}"
-            echo "docs=${DOCS}"
-          } >> "${GITHUB_OUTPUT}"
-
   init:
     name: Init
-    needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read
-    strategy:
-      matrix:
-        include: ${{ fromJSON(needs.discover.outputs.root) }}
     container:
       image: grootantech/toolkit:1.1.0
     defaults:
@@ -101,9 +52,7 @@ jobs:
         id: cache
         uses: actions/cache/restore@v6
         with:
-          path: |
-            ${{ inputs.project-path }}/.terraform
-            ${{ inputs.project-path }}/.terraform.lock.hcl
+          path: ${{ inputs.project-path }}/.terraform/providers
           key: ${{ steps.key.outputs.key }}
           restore-keys: tf-
 
@@ -142,14 +91,12 @@ jobs:
         if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
         uses: actions/cache/save@v6
         with:
-          path: |
-            ${{ inputs.project-path }}/.terraform
-            ${{ inputs.project-path }}/.terraform.lock.hcl
+          path: ${{ inputs.project-path }}/.terraform/providers
           key: ${{ steps.key.outputs.key }}
 
   check:
     name: ${{ matrix.name }}
-    needs: [discover, init]
+    needs: init
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
@@ -157,7 +104,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.discover.outputs.checks) }}
+        include:
+          - name: Validate
+            check: validate
+          - name: TFLint
+            check: tflint
     container:
       image: grootantech/toolkit:1.1.0
     defaults:
@@ -170,9 +121,7 @@ jobs:
       - name: Restore Provider Cache
         uses: actions/cache/restore@v6
         with:
-          path: |
-            ${{ inputs.project-path }}/.terraform
-            ${{ inputs.project-path }}/.terraform.lock.hcl
+          path: ${{ inputs.project-path }}/.terraform/providers
           key: ${{ needs.init.outputs.cache-key }}
           restore-keys: tf-
 
@@ -183,6 +132,12 @@ jobs:
         run: |
           set -uo pipefail
           LOG="${RUNNER_TEMP}/tf-check.log"
+          # The provider cache is saved only on the default branch, so install this commit's
+          # modules and locked providers here. No backend: validate and tflint need no state.
+          if ! terraform init -backend=false -input=false -no-color > "${LOG}" 2>&1; then
+            cat "${LOG}"
+            exit 1
+          fi
           case "${CHECK}" in
             validate)
               {
@@ -221,14 +176,11 @@ jobs:
   # Deliberately not `needs: init`: an init failure must not hide stale docs.
   docs:
     name: Documentation
-    needs: discover
+    if: ${{ inputs.check-docs }}
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 20
     permissions:
       contents: read
-    strategy:
-      matrix:
-        include: ${{ fromJSON(needs.discover.outputs.docs) }}
     container:
       image: grootantech/toolkit:1.1.0
     defaults:

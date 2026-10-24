@@ -19,6 +19,13 @@ existing secret pairs behaves as before, and everything new is optional. A calle
 - **`vars.PROJECT_REGISTRY_NAME` now selects a credential group.** `1.6.1` ignored it. An
   organisation or repository that sets it for anything else removes it: set together with
   `IMAGE_REGISTRY` or `CHART_REGISTRY`, it now stops the first step of `init.yml`.
+- **Terraform status checks are renamed.** `Init (root)`, `Documentation (root)` and
+  `Module Test (root)` report as `Init`, `Documentation` and `Module Test`. Update any branch
+  protection rule or ruleset that requires the old names, or pull requests wait on a check that
+  never reports.
+- **Terraform jobs run wherever `terraform-lint.yml` or `terraform-test.yml` is called.** None
+  checks for `main.tf` any more. Point `project-path` at the Terraform root, or stop calling them
+  from a repository that has no Terraform.
 
 ### Recommended
 
@@ -42,6 +49,8 @@ existing secret pairs behaves as before, and everything new is optional. A calle
   all at the same digest (`crane digest`).
 - On a self-hosted runner, `~/.docker/config.json` gains no entries from the build and smoke-test
   jobs.
+- `Validate` and `TFLint` pass on a pull request that adds a module, and in a repository whose
+  default branch has never saved a Terraform provider cache.
 
 ## 1.6.1
 

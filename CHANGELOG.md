@@ -34,9 +34,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `sonarqube.yml`: a `scanner-image` job resolves the scanner image from the primary registry.
 - `deploy-argocd-gitops.yml`, `deploy-komodo-gitops.yml`: accept a `REGISTRY_CONFIG` secret, and read from the primary registry. The ArgoCD image check runs whenever the primary has credentials, not only when the secret pair is set. Komodo's `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` are optional with `PROJECT_REGISTRY_NAME`.
 - `docker.yml` · `promote`: timeout raised from 20 to 30 minutes for the copies to other repositories.
+- `terraform-lint.yml`, `terraform-test.yml`: no longer look for `main.tf`. Calling the workflow opts a repository in, as with every other workflow. The jobs no longer run as a one-entry matrix, so `Init (root)`, `Documentation (root)` and `Module Test (root)` report as `Init`, `Documentation` and `Module Test`.
+- `terraform-lint.yml`: the provider cache holds only `.terraform/providers`. Restoring it no longer replaces the checked-out `.terraform.lock.hcl` with the default branch's copy, or brings in its modules and backend settings.
+
+### Removed
+
+- `terraform-lint.yml` · `discover`, `terraform-test.yml` · `discover` ("Detect Terraform Root Module") and their warning for a missing `main.tf`.
 
 ### Fixed
 
+- `terraform-lint.yml` · `Validate`, `TFLint`: run `terraform init -backend=false` before checking, instead of relying on the provider cache that only a default-branch run saves. They failed with `Missing required provider` or `Module not installed` when that cache was missing, or had been saved before the root gained a module.
 - `scan.yml`: an explicit `IMAGE_DEV_REPOSITORY_SUFFIX` containing `/` is normalised to `-` on Docker Hub, as `init.yml` already did.
 - Documentation:
   - `docs/configuration.md` no longer claims the released digest is the scanned one.

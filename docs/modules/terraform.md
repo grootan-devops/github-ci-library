@@ -10,13 +10,16 @@ flowchart LR
 
 | Workflow · Job | Description |
 | --- | --- |
-| `terraform-lint.yml` · `init` | `terraform init` with the backend workspace key prefix. Caches providers by `.terraform.lock.hcl`. |
-| `terraform-lint.yml` · `validate` | `terraform validate` and `terraform fmt -recursive -check`. |
-| `terraform-lint.yml` · `tflint` | Recursive `tflint` across all module call types. |
+| `terraform-lint.yml` · `init` | `terraform init` with the backend workspace key prefix. Caches `.terraform/providers` by `.terraform.lock.hcl`, saved from the default branch only. |
+| `terraform-lint.yml` · `validate` | `terraform init -backend=false`, then `terraform validate` and `terraform fmt -recursive -check`. |
+| `terraform-lint.yml` · `tflint` | `terraform init -backend=false`, then recursive `tflint` across all module call types. |
 | `terraform-lint.yml` · `docs` | `terraform-docs` drift check for the root and every `modules/*`. |
 | `terraform-test.yml` · `test` | `go test` module suite with a configurable timeout. |
 | `terraform-test.yml` · `destroy` | Runs **only on test failure**, so a crashed test cannot strand real infrastructure. |
 | `scan.yml` (`scan-type: config`, `config-type: terraform`) | Trivy IaC misconfiguration scan. |
+
+Calling the workflow opts the repository in: no job checks for a `main.tf`, so `project-path`
+points at the Terraform root.
 
 ## Consuming a module — no packaging step
 

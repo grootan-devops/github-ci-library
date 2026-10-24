@@ -29,46 +29,12 @@ permissions:
   contents: read
 
 jobs:
-  discover:
-    name: Detect Terraform Root Module
-    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      root: ${{ steps.targets.outputs.root }}
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-
-      - name: Select Applicable Terraform Jobs
-        id: targets
-        env:
-          PROJECT_PATH: ${{ inputs.project-path }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "${PROJECT_PATH}"
-
-          ROOT='[]'
-          if [[ -f main.tf ]]; then
-            ROOT='[{"module":"root"}]'
-          else
-            echo "::warning title=Terraform::No main.tf in ${PROJECT_PATH} — the module test does not apply."
-          fi
-
-          echo "root=${ROOT}" >> "${GITHUB_OUTPUT}"
-
   test:
     name: Module Test
-    needs: discover
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 90
     permissions:
       contents: read
-    strategy:
-      matrix:
-        include: ${{ fromJSON(needs.discover.outputs.root) }}
     container:
       image: grootantech/toolkit:1.1.0
     defaults:
