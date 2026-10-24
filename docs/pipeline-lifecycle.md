@@ -53,12 +53,12 @@ flowchart LR
 | --- | --- | --- |
 | `init` | Version discovery, registry target resolution, promotion provenance | `init.yml` · `initialize` |
 | `prepare` | Warm package manager and Trivy database caches | `*-build.yml` · `dependency`, `trivy-cache.yml` · `warm` |
-| `lint` | Style, syntax, YAML, Dockerfile and chart linting | `lint.yml`, `python-lint.yml`, `golang-lint.yml`, `node-lint.yml`, `terraform-lint.yml`, `chart.yml` · `lint` |
+| `lint` | Style, syntax, YAML, Dockerfile and chart linting | `lint.yml`, `python-lint.yml`, `golang-lint.yml`, `node-lint.yml`, `terraform.yml`, `chart.yml` · `lint` |
 | `test` | Unit tests and coverage, published as GitHub Checks | `*-build.yml` · `test` |
 | `build` | Compile, package images and charts, generate SBOM | `*-build.yml` · `build`, `docker.yml`, `buildah.yml`, `chart.yml` · `build`, `sbom.yml` · `generate` |
 | `push` | Publish candidate artifacts to the dev repositories | `docker.yml` · `build`, `chart.yml` · `push` |
 | `security` | Trivy CVE, misconfiguration, license and secret scans | `scan.yml`, `sbom.yml` · `scan`, `secret-scanning.yml` |
-| `qa` | Quality gates and container verification | `sonarqube.yml`, `docker.yml` · `test`, `terraform-test.yml` |
+| `qa` | Quality gates and container verification | `sonarqube.yml`, `docker.yml` · `test`, `terraform.yml` · `test` |
 | `check` | Release prerequisite guards | `check.yml` · six guards + `verdict` |
 | `deploy` | GitOps repository updates and sync | `deploy-argocd-gitops.yml`, `deploy-komodo-gitops.yml` |
 | `release` | Tag, GitHub Release, OCI promotion | `release.yml`, `docker.yml` · `promote`, `chart.yml` · `promote` |
@@ -119,8 +119,8 @@ repeat them.
 | `sbom.yml` · `generate` → `scan` | `SBOM:Generate`, `SBOM:Scan` | `needs: [init, trivy-cache]` | `Common:Init`, `Trivy:Cache:Warm`, `Java:Dependency:Download`; `SBOM:Scan` → `SBOM:Generate` is *internal* |
 | `secret-scanning.yml` | `Git:Secret:Scan` | `needs: init` | `Common:Init` |
 | `sonarqube.yml` | `Sonarqube` | `needs: [init, build]` | `Common:Init`, `Project:Build`, `Project:Unit:Test` |
-| `terraform-lint.yml` | `Terraform:Init`, `Terraform:Validate`, `Terraform:Lint`, `Terraform:Check:README` | `needs: init` | `Common:Init`; `Terraform:Init` → `Validate` / `Lint` is *internal* |
-| `terraform-test.yml` | `Terraform:Test` | `needs: [init, terraform-lint]` | `Terraform:Validate` **(required)**. It runs `terraform test`; the Terraform config scan lives in `scan.yml` with `scan-type: config`, `config-type: terraform`, and that is the job needing `trivy-cache`. |
+| `terraform.yml` · `init`, `check`, `docs` | `Terraform:Init`, `Terraform:Validate`, `Terraform:Lint`, `Terraform:Check:README` | `needs: init` | `Common:Init`; `Terraform:Init` → `Validate` / `Lint` is *internal* |
+| `terraform.yml` · `test` (`test: true`) | `Terraform:Test` | `needs: [init, terraform]` | `Terraform:Validate` **(required)**. It runs `terraform test`; the Terraform config scan lives in `scan.yml` with `scan-type: config`, `config-type: terraform`, and that is the job needing `trivy-cache`. |
 | `check.yml` · six guards → `verdict` | `Tag:Tag Existence`, `Changelog:Check Existence`, `Migration:Check Existence`, `Chart:Check Existence`, `Chart:Check:Dependency`, `Image:Check Existence` | **`needs: init` — and nothing else** | `.check-job-common` → `Common:Init`. See the warning below. |
 | `deploy-komodo-gitops.yml` · `validate` → `komodo-deploy` | `Deploy:Komodo:Validate:Image:<env>`, `Deploy:Komodo:<env>` | `needs: init`; add `image` when the same run pushed it | `Common:Init`, `Image:Push`; the `Validate:Image` edge is now *internal* |
 | `deploy-argocd-gitops.yml` · `validate` → `gitops-commit` → `sync` | `Deploy:ArgoCD:Validate:Chart/Image:<env>`, `Deploy:ArgoCD:<env>` | `needs: init`; add `image` / `chart` when the same run published them | `Common:Init`, `Image:Push`, `Chart:Push`; the `Validate:*` edges are *internal* |

@@ -20,6 +20,7 @@ scripts/
 ├── init/       config validation, version resolution, provenance, summary
 ├── lint/       the linter runner plus one script per linter
 ├── notify/     Teams adaptive card
+├── registry/   registry targets, credential groups, logins, copies
 ├── release/    asset consolidation, GitHub Release publication
 ├── scan/       Trivy engine, SBOM, secret history, Trivy DB cache
 ├── self/       the library's own release version
@@ -81,8 +82,12 @@ is named in `scripts/checks/select-guards.sh`. `lint.yml` does the same with
   fi
   ```
 
-- Two files are sourced rather than executed and therefore set no shell options of their
-  own: `lint/summary.sh` (the `run_linted` helper) and `docker/hadolint-ignores.sh`.
+- Four files are sourced rather than executed and therefore set no shell options of their
+  own: `lint/summary.sh` (the `run_linted` helper), `docker/hadolint-ignores.sh`,
+  `chart/registry.sh` and `registry/lib.sh`.
+- Every registry login goes through `registry/lib.sh`: the password travels on stdin only, and
+  `registry_credentials` / `registry_login` are called directly, never inside `$(...)`, a pipe
+  or a tee'd block, so the `::add-mask::` they print reaches the runner and no log file.
 - `self-lint.yml` runs `shellcheck` over every `*.sh` under `scripts/`, found recursively,
   so a new subdirectory is covered without touching the workflow.
 

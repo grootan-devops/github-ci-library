@@ -25,8 +25,12 @@
 #   KOMODO_KEY      Komodo API key
 #   KOMODO_SECRET   Komodo API secret
 #   IMAGE_TAG       container image tag to deploy
-#   IMAGE_REPO      base container image repository
+#   IMAGE_REPO      base container image repository; the first is deployed from
 #   REGISTRY_HOST   container registry host (default: empty)
+#   PROJECT_REGISTRY_NAME
+#                   a REGISTRY_CONFIG group instead of REGISTRY_HOST; IMAGE_REPO
+#                   then holds full <registry>/<path> repositories -- see
+#                   scripts/registry/lib.sh
 #   DEV_SUFFIX      appended to IMAGE_REPO for development artifacts
 #                   (default: empty)
 #
@@ -104,6 +108,11 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
   exit 1
 fi
 
+# A deployment reads from the primary registry; any other holds copies.
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../registry/lib.sh"
+IMAGE_REGISTRY="${REGISTRY_HOST}" registry_primary_target image "${IMAGE_REPO}" || exit 2
+PRIMARY="${REGISTRY_PRIMARY}"
 
 # Docker Hub has no nested repositories, so `<repo>/dev` is not a valid image
 # target and the push side rewrites the separator. scripts/init/resolve-version.sh
@@ -111,14 +120,9 @@ fi
 # `<repo>/dev` while the image had been pushed and scanned at `<repo>-dev`.
 # Charts are not rewritten: they live at an OCI path where nesting is legal,
 # which is why init normalises the image suffix only.
-IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
-case "${REGISTRY_HOST}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
-    ;;
-esac
+IMAGE_DEV_REPO="$(registry_dev_repository image "${PRIMARY}" "$(registry_primary "${REGISTRY_PRIMARY_REPO}")" "${DEV_SUFFIX}")"
 
-NEW_IMAGE="${REGISTRY_HOST}/${IMAGE_REPO}${IMAGE_DEV_SUFFIX}:${IMAGE_TAG}"
+NEW_IMAGE="${PRIMARY}/${IMAGE_DEV_REPO}:${IMAGE_TAG}"
 
 {
   echo "new_image=${NEW_IMAGE}"

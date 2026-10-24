@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-24
+
+### Added
+
+- Publishing to several registries with a credential group:
+  - The new `REGISTRY_CONFIG` secret holds credential groups as YAML or JSON. Each group, such as `client/org`, maps registry hosts like `docker.io` or `quay.io` to a `username` and `password`.
+  - `vars.PROJECT_REGISTRY_NAME` names the one group a repository publishes with.
+  - `vars.IMAGE_REPOSITORY` and `vars.CHART_REPOSITORY` then list the full repositories, `<registry>/<path>`, separated by spaces or commas. Every registry they name must be in the group, and repositories on one registry share its account.
+  - Every candidate and release goes to each listed repository. The first is the primary that base images, scans, smoke tests and deployments read from.
+  - `buildah.yml`, which builds internal images, still publishes to the single `vars.IMAGE_REGISTRY` and does not read `PROJECT_REGISTRY_NAME`.
+- `init.yml` fails in its first step when `PROJECT_REGISTRY_NAME` is set together with `IMAGE_REGISTRY` or `CHART_REGISTRY`, before any job publishes anything.
+- `docker.yml` · `copy`: copies the candidate by digest from the primary to every other repository.
+- `docker.yml` · `promote`: copies the release, with its `latest`, major and minor tags, by digest to every other image repository. `chart.yml` · `promote` publishes the same package to every other chart repository.
+- `scripts/registry/`: the shared registry helper (`lib.sh`), plus `login.sh`, `logout.sh`, `targets.sh` and `mirror-image.sh`.
+- `docs/examples/multi-registry.md`.
+- `terraform.yml`: the Terraform checks and the module test in one workflow, replacing `terraform-lint.yml` and `terraform-test.yml`. `lint` (default `true`) runs init, validate, fmt, TFLint and the documentation check with `state-name`; `test: true` runs the module test and its teardown, from a workflow that does not cancel superseded runs.
+
+### Changed
+
+- `docker.yml`: logs in with `scripts/registry/login.sh` instead of `docker/login-action`, and logs out when the job ends.
+- Registry logins outside `buildah.yml` read their password from stdin; `crane` no longer receives it as an argument.
+- `check.yml`: with a group, the image tag and chart version guards check every repository. Registries after the primary must log in.
+- `init.yml`:
+  - Without a group, `IMAGE_REGISTRY` or `CHART_REGISTRY` holding several hosts, or `IMAGE_REPOSITORY` or `CHART_REPOSITORY` holding several repositories, fails, pointing to `PROJECT_REGISTRY_NAME`.
+  - With a group, fails when a registry the repositories name has no username and password in it.
+  - With a group, `registry`, `image-registry` and `chart-registry` are the primaries' hosts, and the repository outputs list the full repositories, primary first. A single registry produces exactly the outputs of 1.6.1.
+- `sonarqube.yml`: a `scanner-image` job resolves the scanner image from the primary registry.
+- `deploy-argocd-gitops.yml`, `deploy-komodo-gitops.yml`: accept a `REGISTRY_CONFIG` secret, and read from the primary registry. The ArgoCD image check runs whenever the primary has credentials, not only when the secret pair is set. Komodo's `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` are optional with `PROJECT_REGISTRY_NAME`.
+- `docker.yml` · `promote`: timeout raised from 20 to 30 minutes for the copies to other repositories.
+- The Terraform jobs no longer look for `main.tf`. Calling `terraform.yml` opts a repository in, as with every other workflow. The jobs no longer run as a one-entry matrix, so `Init (root)`, `Documentation (root)` and `Module Test (root)` report as `Init`, `Documentation` and `Module Test`, under the calling job.
+- `terraform.yml`: the provider cache holds only `.terraform/providers`. Restoring it no longer replaces the checked-out `.terraform.lock.hcl` with the default branch's copy, or brings in its modules and backend settings.
+
+### Removed
+
+- `terraform-lint.yml` and `terraform-test.yml`, replaced by `terraform.yml`, with their `discover` jobs ("Detect Terraform Root Module") and the warning for a missing `main.tf`.
+
+### Fixed
+
+- `terraform.yml` · `Validate`, `TFLint`: run `terraform init -backend=false` before checking, instead of relying on the provider cache that only a default-branch run saves. They failed with `Missing required provider` or `Module not installed` when that cache was missing, or had been saved before the root gained a module.
+- `scan.yml`: an explicit `IMAGE_DEV_REPOSITORY_SUFFIX` containing `/` is normalised to `-` on Docker Hub, as `init.yml` already did.
+- Documentation:
+  - `docs/configuration.md` no longer claims the released digest is the scanned one.
+  - `docs/modules/init-check.md` counts 29 outputs.
+  - `docs/docker.md` no longer mentions the registry layer cache removed in 1.4.0.
+  - The README names the current release.
+
 ## [1.6.1] - 2026-10-23
 
 ### Changed

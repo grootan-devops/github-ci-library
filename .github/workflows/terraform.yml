@@ -1,0 +1,343 @@
+name: Terraform / Lint & Module Test
+
+on:
+  workflow_call:
+    inputs:
+      project-path:
+        required: false
+        type: string
+        default: "."
+        description: "Project root. Monorepo children set this."
+      lint:
+        required: false
+        type: boolean
+        default: true
+        description: "Run init, validate, fmt, TFLint and, with check-docs, the documentation check."
+      state-name:
+        required: false
+        type: string
+        default: ""
+        description: "Workspace key prefix component for the backend configuration. Required when lint is true."
+      check-docs:
+        required: false
+        type: boolean
+        default: true
+        description: "Fail when a generated README.md is out of date."
+      test:
+        required: false
+        type: boolean
+        default: false
+        description: "Run the module test suite under tests/. It provisions real infrastructure, so call it from a workflow with cancel-in-progress: false."
+      test-timeout:
+        required: false
+        type: string
+        default: "1h"
+        description: "go test timeout for the module test suite."
+      destroy-on-failure:
+        required: false
+        type: boolean
+        default: true
+        description: "Run terraform destroy when the test job fails or is cancelled."
+
+env:
+  PROJECT_PATH: ${{ inputs.project-path }}
+  TF_LOG_FILE_NAME: tf_test.log
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "0"
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    name: Init
+    if: ${{ inputs.lint }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: grootantech/toolkit:1.1.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Compute Provider Cache Key
+        id: key
+        run: echo "key=tf-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.project-path)) || 'nolock' }}" >> "${GITHUB_OUTPUT}"
+
+      - name: Restore Provider Cache
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ inputs.project-path }}/.terraform/providers
+          key: ${{ steps.key.outputs.key }}
+          restore-keys: tf-
+
+      - name: Terraform Init
+        id: tfinit
+        env:
+          TF_STATE_NAME: ${{ inputs.state-name }}
+        run: |
+          set -uo pipefail
+          if [[ -z "${TF_STATE_NAME}" ]]; then
+            echo "state-name is required when lint is true: it names the backend workspace key prefix." | tee "${RUNNER_TEMP}/tf-init.log"
+            echo "::error title=Terraform::state-name is required when lint is true."
+            exit 1
+          fi
+          SLUG="${GITHUB_REPOSITORY//\//_}"
+          terraform init -input=false -no-color -reconfigure \
+            -backend-config="workspace_key_prefix=${SLUG}/${TF_STATE_NAME}" 2>&1 | tee "${RUNNER_TEMP}/tf-init.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish Init Summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.tfinit.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "${OUTCOME}" == "success" ]]; then
+            exit 0
+          fi
+          {
+            echo "### 🌍 Terraform init"
+            echo ""
+            echo "❌ \`terraform init\` failed, so neither \`validate\` nor \`tflint\` ran. Terraform reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${RUNNER_TEMP}/tf-init.log" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Save Provider Cache
+        if: ${{ !cancelled() && github.ref_name == github.event.repository.default_branch }}
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ inputs.project-path }}/.terraform/providers
+          key: ${{ steps.key.outputs.key }}
+
+  check:
+    name: ${{ matrix.name }}
+    needs: init
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Validate
+            check: validate
+          - name: TFLint
+            check: tflint
+    container:
+      image: grootantech/toolkit:1.1.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Restore Provider Cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ inputs.project-path }}/.terraform/providers
+          key: ${{ needs.init.outputs.cache-key }}
+          restore-keys: tf-
+
+      - name: Run ${{ matrix.name }}
+        id: check
+        env:
+          CHECK: ${{ matrix.check }}
+        run: |
+          set -uo pipefail
+          LOG="${RUNNER_TEMP}/tf-check.log"
+          # The provider cache is saved only on the default branch, so install this commit's
+          # modules and locked providers here. No backend: validate and tflint need no state.
+          if ! terraform init -backend=false -input=false -no-color > "${LOG}" 2>&1; then
+            cat "${LOG}"
+            exit 1
+          fi
+          case "${CHECK}" in
+            validate)
+              {
+                terraform validate -no-color &&
+                terraform fmt -recursive -check -diff -no-color .
+              } 2>&1 | tee "${LOG}"
+              ;;
+            tflint)
+              tflint --chdir . --recursive --filter=tests/** --call-module-type=all 2>&1 | tee "${LOG}"
+              ;;
+          esac
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish Check Summary
+        if: always()
+        env:
+          NAME: ${{ matrix.name }}
+          OUTCOME: ${{ steps.check.outcome }}
+        run: |
+          set -euo pipefail
+          LOG="${RUNNER_TEMP}/tf-check.log"
+          if [[ "${OUTCOME}" == "success" ]]; then
+            exit 0
+          fi
+          {
+            echo "### 🌍 Terraform: ${NAME}"
+            echo ""
+            echo "❌ Failed. \`${NAME}\` reported:"
+            echo ""
+            echo '```'
+            tail -n 50 "${LOG}" 2>/dev/null || echo "(no output was captured)"
+            echo '```'
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # Deliberately not `needs: init`: an init failure must not hide stale docs.
+  docs:
+    name: Documentation
+    if: ${{ inputs.lint && inputs.check-docs }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    container:
+      image: grootantech/toolkit:1.1.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Check Generated Documentation
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform/docs-check.sh"
+
+  # Provisions real infrastructure: the calling workflow must not cancel a superseded run,
+  # or the teardown below never gets to run.
+  test:
+    name: Module Test
+    if: ${{ inputs.test }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    container:
+      image: grootantech/toolkit:1.1.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Run Module Test Suite
+        env:
+          TF_TEST_TIMEOUT: ${{ inputs.test-timeout }}
+        run: |
+          set -euo pipefail
+          cd tests
+          go test -v -timeout "${TF_TEST_TIMEOUT}" 2>&1 | tee "${TF_LOG_FILE_NAME}"
+
+      - name: Upload Test Artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: terraform-test-artifacts
+          path: |
+            ${{ inputs.project-path }}/tests/tf_test.log
+            ${{ inputs.project-path }}/test_output.tf
+            ${{ inputs.project-path }}/terraform.tfstate
+            ${{ inputs.project-path }}/terraform.tfstate.backup
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Publish Test Summary
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/terraform/test-summary.sh"
+
+  destroy:
+    name: Test Teardown
+    needs: test
+    if: ${{ inputs.test && inputs.destroy-on-failure && (failure() || cancelled()) && needs.test.result != 'skipped' }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    container:
+      image: grootantech/toolkit:1.1.0
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-path }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Download Test State
+        uses: actions/download-artifact@v8
+        with:
+          name: terraform-test-artifacts
+          path: ${{ inputs.project-path }}
+
+      - name: Destroy Test Infrastructure
+        id: teardown
+        run: |
+          set -uo pipefail
+          {
+            terraform init -input=false -no-color &&
+            terraform destroy -auto-approve -input=false -no-color
+          } 2>&1 | tee "${RUNNER_TEMP}/tf-destroy.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Publish Teardown Summary
+        if: always()
+        env:
+          OUTCOME: ${{ steps.teardown.outcome }}
+        run: |
+          set -euo pipefail
+          LOG="${RUNNER_TEMP}/tf-destroy.log"
+          DESTROYED="$(grep -aE 'Destroy complete!' "${LOG}" 2>/dev/null | tail -n 1 || true)"
+          {
+            echo "### 🧹 Terraform test teardown"
+            echo ""
+            if [[ "${OUTCOME}" == "success" ]]; then
+              echo "✅ ${DESTROYED:-Test infrastructure destroyed.}"
+            else
+              echo "❌ **Teardown did not complete — infrastructure may still be running and billing.** Terraform reported:"
+              echo ""
+              echo '```'
+              tail -n 50 "${LOG}" 2>/dev/null || echo "(no output was captured)"
+              echo '```'
+              echo ""
+              echo "The state file is in the \`terraform-test-artifacts\` artifact; destroy from it by hand."
+            fi
+            echo ""
+          } >> "${GITHUB_STEP_SUMMARY}"

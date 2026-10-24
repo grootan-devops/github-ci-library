@@ -16,5 +16,6 @@ library with `@1.0.0`.
 - [language-library](language-library.md)
 - [audit](audit.md)
 - [gitops](gitops.md)
+- [multi-registry](multi-registry.md)
 
 [Documentation index](../../README.md)

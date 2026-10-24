@@ -9,6 +9,11 @@
 # other run publishes to the dev repositories under a run-scoped candidate
 # suffix, so a candidate can never overwrite a published artifact.
 #
+# With vars.PROJECT_REGISTRY_NAME an artifact may go to several full
+# repositories (scripts/registry/lib.sh). The registry outputs are then the
+# primary's, and each repository output lists the full repositories,
+# space-separated, primary first.
+#
 # Exit codes: 0 resolved, 1 no discoverable version (a summary explains which
 # manifests were searched).
 #
@@ -22,10 +27,13 @@
 #   INPUT_TAG                     explicit version override (default: empty, discover instead)
 #   IMAGE_REGISTRY_HOST           vars.IMAGE_REGISTRY (default: empty)
 #   CHART_REGISTRY_HOST           vars.CHART_REGISTRY (default: empty)
-#   IMAGE_REPOSITORY_INPUT        vars.IMAGE_REPOSITORY (default: empty)
+#   PROJECT_REGISTRY_NAME         vars.PROJECT_REGISTRY_NAME (default: empty)
+#   REGISTRY_CONFIG               secrets.REGISTRY_CONFIG, read to check the group's registries
+#                                 (default: empty)
+#   IMAGE_REPOSITORY_INPUT        vars.IMAGE_REPOSITORY: a path, or full repositories with a group (default: empty)
 #   IMAGE_DEV_REPOSITORY_SUFFIX   candidate image repository suffix (default: empty, then /dev)
-#   CHART_REPOSITORY_INPUT        vars.CHART_REPOSITORY (default: empty)
-#   CHART_DEV_REPOSITORY_SUFFIX   candidate chart repository suffix (default: empty)
+#   CHART_REPOSITORY_INPUT        vars.CHART_REPOSITORY: a path, or full repositories with a group (default: empty)
+#   CHART_DEV_REPOSITORY_SUFFIX   candidate chart repository suffix (default: empty, then /dev)
 #   RELEASE_VERSION_SUFFIX        suffix appended to the release tag (default: empty)
 #   MASTER_BRANCH_REGEX           protected branches treated as release branches
 #                                 (default: empty; the workflow passes ^(.*/)?master$)
@@ -44,6 +52,7 @@ set -euo pipefail
 : "${INPUT_TAG:=}"
 : "${IMAGE_REGISTRY_HOST:=}"
 : "${CHART_REGISTRY_HOST:=}"
+: "${PROJECT_REGISTRY_NAME:=}"
 : "${IMAGE_REPOSITORY_INPUT:=}"
 : "${IMAGE_DEV_REPOSITORY_SUFFIX:=}"
 : "${CHART_REPOSITORY_INPUT:=}"
@@ -225,35 +234,93 @@ else
   IS_RELEASE="false"
 fi
 
-IMAGE_REPO="${IMAGE_REPOSITORY_INPUT}"
-IMAGE_DEV_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX:-/dev}"
-# Docker Hub has no nested repositories, so `<repo>/dev` is not a valid target.
-case "${IMAGE_REGISTRY_HOST}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    NORMALISED_DEV_SUFFIX="${IMAGE_DEV_SUFFIX//\//-}"
-    if [[ "${NORMALISED_DEV_SUFFIX}" != "${IMAGE_DEV_SUFFIX}" ]]; then
-      echo "::notice title=Dev repository::Docker Hub does not support nested repositories. Using '${NORMALISED_DEV_SUFFIX}' instead of '${IMAGE_DEV_SUFFIX}' for development images."
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+
+# Pair one artifact's registries with its repositories into TARGET_HOSTS,
+# TARGET_REPOS and TARGET_DEV_REPOS. A single registry and its repository are
+# used exactly as given, as they always were; validate-config.sh has already
+# reported what they lack. With vars.PROJECT_REGISTRY_NAME the targets are the
+# full repositories the variable lists, and an artifact this run does not
+# publish may have none, which leaves its outputs empty.
+resolve_targets() {
+  local kind="$1" ignored="$2" registry="$3" repositories="$4" suffix="$5" i status
+  TARGET_HOSTS=("${registry}")
+  TARGET_REPOS=("${repositories}")
+  if registry_named; then
+    status=0
+    if [[ "${ignored}" == "true" ]]; then
+      registry_resolve "${kind}" "${repositories}" 2>/dev/null || status=$?
+    else
+      registry_resolve "${kind}" "${repositories}" || exit 1
     fi
-    IMAGE_DEV_SUFFIX="${NORMALISED_DEV_SUFFIX}"
-    ;;
-esac
-IMAGE_DEV_REPO="${IMAGE_REPO}${IMAGE_DEV_SUFFIX}"
-CHART_REPO="${CHART_REPOSITORY_INPUT}"
+    if [[ ${status} -eq 0 ]]; then
+      TARGET_HOSTS=("${REGISTRY_HOSTS[@]}")
+      TARGET_REPOS=("${REGISTRY_REPOS[@]}")
+    else
+      TARGET_HOSTS=("")
+    fi
+  fi
+  TARGET_DEV_REPOS=()
+  for i in "${!TARGET_HOSTS[@]}"; do
+    TARGET_DEV_REPOS+=("$(registry_dev_repository "${kind}" "${TARGET_HOSTS[i]}" "${TARGET_REPOS[i]}" "${suffix}")")
+  done
+}
+
+IMAGE_DEV_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX:-/dev}"
+resolve_targets image "${IGNORE_DOCKER}" "${IMAGE_REGISTRY_HOST}" "${IMAGE_REPOSITORY_INPUT}" "${IMAGE_DEV_SUFFIX}"
+IMAGE_HOSTS=("${TARGET_HOSTS[@]}")
+IMAGE_REPOS=("${TARGET_REPOS[@]}")
+IMAGE_DEV_REPOS=("${TARGET_DEV_REPOS[@]}")
+# Docker Hub has no nested repositories, so `<repo>/dev` is not a valid target.
+for HOST in "${IMAGE_HOSTS[@]}"; do
+  if registry_is_docker_hub "${HOST}" && [[ "${IMAGE_DEV_SUFFIX}" == */* ]]; then
+    echo "::notice title=Dev repository::Docker Hub does not support nested repositories. Using '${IMAGE_DEV_SUFFIX//\//-}' instead of '${IMAGE_DEV_SUFFIX}' for development images."
+    break
+  fi
+done
+
 CHART_DEV_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX:-/dev}"
+resolve_targets chart "${IGNORE_CHART}" "${CHART_REGISTRY_HOST}" "${CHART_REPOSITORY_INPUT}" "${CHART_DEV_SUFFIX}"
+CHART_HOSTS=("${TARGET_HOSTS[@]}")
+CHART_REPOS=("${TARGET_REPOS[@]}")
+CHART_DEV_REPOS=("${TARGET_DEV_REPOS[@]}")
 # Docker Hub's Helm OCI layout is different from its image layout: the push
 # target is the namespace root and Helm appends the chart name itself. There
 # is therefore no separate chart development repository on Docker Hub. The
 # candidate version suffix already separates candidate artifacts from stable
 # releases in the shared chart repository.
-case "${CHART_REGISTRY_HOST}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    if [[ -n "${CHART_DEV_SUFFIX}" ]]; then
-      echo "::notice title=Dev chart repository::Docker Hub stores candidate and release Helm charts in the same namespace-root repository; the chart version distinguishes them. Ignoring chart development suffix '${CHART_DEV_SUFFIX}'."
+for HOST in "${CHART_HOSTS[@]}"; do
+  if registry_is_docker_hub "${HOST}" && [[ -n "${CHART_DEV_SUFFIX}" ]]; then
+    echo "::notice title=Dev chart repository::Docker Hub stores candidate and release Helm charts in the same namespace-root repository; the chart version distinguishes them. Ignoring chart development suffix '${CHART_DEV_SUFFIX}'."
+    break
+  fi
+done
+
+# With a group, a repository output lists the full repositories, primary
+# first, because the registries are only known from them; otherwise it is the
+# path in the single registry, as it always was.
+full_refs() {
+  local -n hosts="$1" repos="$2"
+  local i refs=()
+  for i in "${!hosts[@]}"; do
+    if [[ -n "${hosts[i]}" ]]; then
+      refs+=("${hosts[i]}/${repos[i]}")
     fi
-    CHART_DEV_SUFFIX=""
-    ;;
-esac
-CHART_DEV_REPO="${CHART_REPO}${CHART_DEV_SUFFIX}"
+  done
+  printf '%s\n' "${refs[*]}"
+}
+if registry_named; then
+  IMAGE_REPO="$(full_refs IMAGE_HOSTS IMAGE_REPOS)"
+  IMAGE_DEV_REPO="$(full_refs IMAGE_HOSTS IMAGE_DEV_REPOS)"
+  CHART_REPO="$(full_refs CHART_HOSTS CHART_REPOS)"
+  CHART_DEV_REPO="$(full_refs CHART_HOSTS CHART_DEV_REPOS)"
+else
+  IMAGE_REPO="${IMAGE_REPOS[0]}"
+  IMAGE_DEV_REPO="${IMAGE_DEV_REPOS[0]}"
+  CHART_REPO="${CHART_REPOS[0]}"
+  CHART_DEV_REPO="${CHART_DEV_REPOS[0]}"
+fi
 
 if [[ "${IS_RELEASE}" == "true" ]]; then
   IMAGE_PUSH_REPOSITORY="${IMAGE_REPO}"
@@ -278,9 +345,10 @@ MINOR_VERSION="$(grep -Eo '^[0-9]+\.[0-9]+' <<<"${IMAGE_PUSH_TAG}" || true)"
 {
   # Keep REGISTRY for callers written before split registries were introduced;
   # artifact-specific outputs are authoritative when both registries differ.
-  echo "REGISTRY=${IMAGE_REGISTRY_HOST:-${CHART_REGISTRY_HOST}}"
-  echo "IMAGE_REGISTRY=${IMAGE_REGISTRY_HOST}"
-  echo "CHART_REGISTRY=${CHART_REGISTRY_HOST}"
+  # Each is its artifact's primary registry.
+  echo "REGISTRY=${IMAGE_HOSTS[0]:-${CHART_HOSTS[0]}}"
+  echo "IMAGE_REGISTRY=${IMAGE_HOSTS[0]}"
+  echo "CHART_REGISTRY=${CHART_HOSTS[0]}"
   echo "TAG=${TAG}"
   echo "RELEASE_VERSION=${RELEASE_VERSION}"
   echo "VERSION_SUFFIX=${VERSION_SUFFIX}"
