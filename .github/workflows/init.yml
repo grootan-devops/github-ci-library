@@ -49,13 +49,13 @@ on:
         description: "Resolved ignore-docker decision"
         value: ${{ jobs.initialize.outputs.IGNORE_DOCKER }}
       registry:
-        description: "Resolved image registry host (legacy output; use image-registry and chart-registry for split registries)"
+        description: "Resolved image registry host, the primary (legacy output; use image-registry and chart-registry for split registries)"
         value: ${{ jobs.initialize.outputs.REGISTRY }}
       image-registry:
-        description: "Resolved container image registry host"
+        description: "Primary container image registry host: vars.IMAGE_REGISTRY, or with vars.PROJECT_REGISTRY_NAME the registry of the first image repository"
         value: ${{ jobs.initialize.outputs.IMAGE_REGISTRY }}
       chart-registry:
-        description: "Resolved Helm chart registry host"
+        description: "Primary Helm chart registry host: vars.CHART_REGISTRY, or with vars.PROJECT_REGISTRY_NAME the registry of the first chart repository"
         value: ${{ jobs.initialize.outputs.CHART_REGISTRY }}
       image-tag:
         description: "Base container image tag (application version)"
@@ -64,13 +64,13 @@ on:
         description: "Image tag this run publishes, candidate suffix included"
         value: ${{ jobs.initialize.outputs.IMAGE_PUSH_TAG }}
       image-repository:
-        description: "Production container image repository (also the duplicate-check target)"
+        description: "Production container image repository (also the duplicate-check target); with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories, primary first"
         value: ${{ jobs.initialize.outputs.IMAGE_REPOSITORY }}
       image-dev-repository:
-        description: "Candidate container image repository"
+        description: "Candidate container image repository; with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories, primary first"
         value: ${{ jobs.initialize.outputs.IMAGE_DEV_REPOSITORY }}
       image-push-repository:
-        description: "Repository this run pushes to (dev or production)"
+        description: "Repository this run pushes to (dev or production); with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories, primary first"
         value: ${{ jobs.initialize.outputs.IMAGE_PUSH_REPOSITORY }}
       chart-name:
         description: "Helm chart name"
@@ -85,13 +85,13 @@ on:
         description: "Chart version this run publishes, candidate suffix included"
         value: ${{ jobs.initialize.outputs.CHART_PUSH_VERSION }}
       chart-repository:
-        description: "Production Helm chart repository (also the duplicate-check target)"
+        description: "Production Helm chart repository (also the duplicate-check target); with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories, primary first"
         value: ${{ jobs.initialize.outputs.CHART_REPOSITORY }}
       chart-dev-repository:
-        description: "Candidate Helm chart repository; equal to the production repository on Docker Hub"
+        description: "Candidate Helm chart repository; equal to the production repository on Docker Hub; with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories, primary first"
         value: ${{ jobs.initialize.outputs.CHART_DEV_REPOSITORY }}
       chart-push-repository:
-        description: "Chart repository this run pushes to (same repository for candidate and release versions on Docker Hub)"
+        description: "Chart repository this run pushes to (same repository for candidate and release versions on Docker Hub); with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories, primary first"
         value: ${{ jobs.initialize.outputs.CHART_PUSH_REPOSITORY }}
       chart-dir:
         description: "Resolved chart directory"
@@ -147,6 +147,7 @@ jobs:
       CHART_REPOSITORY_INPUT: ${{ vars.CHART_REPOSITORY }}
       CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
       CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+      PROJECT_REGISTRY_NAME: ${{ vars.PROJECT_REGISTRY_NAME }}
       IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
       CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
       RELEASE_VERSION_SUFFIX: ${{ vars.RELEASE_VERSION_SUFFIX }}
@@ -203,7 +204,11 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
+      # First, so a configuration that names registries both ways stops the
+      # pipeline before any other job runs.
       - name: Validate Organisation Configuration
+        env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/validate-config.sh"
 
       - name: Resolve Version & Registry Targets
@@ -212,6 +217,7 @@ jobs:
           REF_PROTECTED: ${{ github.ref_protected || 'false' }}
           IMAGE_REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
           CHART_REGISTRY_HOST: ${{ vars.CHART_REGISTRY }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/resolve-version.sh"
 
       - name: Resolve Upstream Candidate Provenance

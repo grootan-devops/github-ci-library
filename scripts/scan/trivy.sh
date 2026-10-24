@@ -24,10 +24,21 @@ set -uo pipefail
 : "${SBOM_CVE_INFO_FILE_NAME:=SBOM_CVE.md}"
 : "${IMAGE_DEV_REPOSITORY_SUFFIX:=}"
 
+# IMAGE_REGISTRY is the primary registry, which every image is scanned, tested
+# and deployed from, and IMAGE_REPOSITORY the path in it; scan.yml resolves
+# both from the first full repository with vars.PROJECT_REGISTRY_NAME. Only the
+# first value of a list is used.
+IMAGE_REPOSITORY="${IMAGE_REPOSITORY:-}"
+read -r IMAGE_REPOSITORY _ <<< "${IMAGE_REPOSITORY//,/ }" || true
 if [[ -z "${IMAGE_DEV_REPOSITORY_SUFFIX}" ]]; then
   case "${IMAGE_REGISTRY:-}" in
     docker.io|index.docker.io|registry-1.docker.io) IMAGE_DEV_REPOSITORY_SUFFIX="-dev" ;;
     *) IMAGE_DEV_REPOSITORY_SUFFIX="/dev" ;;
+  esac
+else
+  case "${IMAGE_REGISTRY:-}" in
+    # Docker Hub has no nested repositories, as init.yml already applies.
+    docker.io|index.docker.io|registry-1.docker.io) IMAGE_DEV_REPOSITORY_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX//\//-}" ;;
   esac
 fi
 : "${TARGET_VERSION:=}"

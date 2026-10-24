@@ -23,14 +23,48 @@ permissions:
   contents: read
 
 jobs:
+  # The scanner image is pulled from the primary image registry, which with
+  # vars.PROJECT_REGISTRY_NAME is the registry of the first image repository.
+  scanner-image:
+    name: Resolve Scanner Image
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Resolve Scanner Image
+        id: resolve
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+          PROJECT_REGISTRY_NAME: ${{ vars.PROJECT_REGISTRY_NAME }}
+          SONAR_SCANNER_IMAGE: ${{ vars.SONAR_SCANNER_IMAGE }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/registry/lib.sh
+          source "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/lib.sh"
+          registry_primary_target image "${IMAGE_REPOSITORY}"
+          echo "image=${REGISTRY_PRIMARY}/${SONAR_SCANNER_IMAGE}" >> "${GITHUB_OUTPUT}"
+
   sonarqube:
     name: SonarQube
+    needs: scanner-image
     runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 45
     permissions:
       contents: read
     container:
-      image: ${{ vars.IMAGE_REGISTRY }}/${{ vars.SONAR_SCANNER_IMAGE }}
+      image: ${{ needs.scanner-image.outputs.image }}
     env:
       SONAR_USER_HOME: ${{ github.workspace }}/.sonar
       SONAR_SCANNER_OPTS: -XX:MaxRAMPercentage=90.0 -XX:InitialRAMPercentage=90.0

@@ -19,29 +19,39 @@
 # Exit codes: 0 promoted, 1 no candidate matched or the registry refused the
 # retag. Both failures leave the production tag unchanged.
 #
+# With vars.PROJECT_REGISTRY_NAME the promotion happens in the primary
+# repository only; the workflow then copies the released image, by digest, to
+# the others (scripts/registry/mirror-image.sh), so a candidate is resolved
+# exactly once.
+#
 # Env:
-#   REGISTRY_USERNAME  registry credential for crane
-#   REGISTRY_PASSWORD  registry credential for crane
 #   TAG                production tag to release as
 #   CANDIDATE_TAG      exact candidate tag to promote; empty means search, and
 #                      a tag that is set but absent fails the promotion
-#   DEV_REPOSITORY     candidate repository, without the registry host
-#   PROD_REPOSITORY    production repository, without the registry host
+#   DEV_REPOSITORY     candidate repository: the path in IMAGE_REGISTRY, or
+#                      with a group the full <registry>/<path> repositories,
+#                      primary first
+#   PROD_REPOSITORY    production repository, given the same way
+#   IMAGE_REGISTRY, IMAGE_REGISTRY_USERNAME, IMAGE_REGISTRY_PASSWORD, or
+#   PROJECT_REGISTRY_NAME and REGISTRY_CONFIG: the primary registry and its
+#                      credentials -- see scripts/registry/lib.sh
 #
-# Runner-provided: REGISTRY_HOST and IMAGE_INFO_FILE_NAME (workflow-level env),
-# GITHUB_STEP_SUMMARY.
+# Runner-provided: IMAGE_INFO_FILE_NAME (workflow-level env), GITHUB_STEP_SUMMARY.
 set -euo pipefail
 
-: "${REGISTRY_USERNAME?REGISTRY_USERNAME must be set}"
-: "${REGISTRY_PASSWORD?REGISTRY_PASSWORD must be set}"
 : "${TAG?TAG must be set}"
 : "${CANDIDATE_TAG?CANDIDATE_TAG must be set}"
 : "${DEV_REPOSITORY?DEV_REPOSITORY must be set}"
 : "${PROD_REPOSITORY?PROD_REPOSITORY must be set}"
-: "${REGISTRY_HOST?REGISTRY_HOST must be set}"
 : "${IMAGE_INFO_FILE_NAME?IMAGE_INFO_FILE_NAME must be set}"
 
-crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+registry_resolve image "${PROD_REPOSITORY}" "${DEV_REPOSITORY}" || exit 1
+REGISTRY_HOST="${REGISTRY_PRIMARY}"
+PROD_REPOSITORY="${REGISTRY_REPOS[0]}"
+DEV_REPOSITORY="${REGISTRY_DEV_REPOS[0]-}"
+registry_login crane 0 || exit 1
 
 DEV_IMAGE="${REGISTRY_HOST}/${DEV_REPOSITORY}"
 PROD_IMAGE="${REGISTRY_HOST}/${PROD_REPOSITORY}"

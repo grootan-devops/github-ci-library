@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
 # Shared OCI validation and lookup. Source this file; it performs no network I/O on load.
+#
+# The chart registries are CHART_REGISTRY, or with PROJECT_REGISTRY_NAME the
+# registries of the full repositories CHART_REPOSITORY lists
+# (scripts/registry/lib.sh). The first is the primary, which these helpers
+# default to.
 
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+
+# Resolve the chart registries, from CHART_REPOSITORY, into lib.sh's
+# REGISTRY_* arrays.
 chart_registry_validate() {
-  if [[ -z "${CHART_REGISTRY:-}" ]]; then
-    echo "::error title=Chart registry::Set vars.CHART_REGISTRY to an OCI registry hostname. GitHub has no package-registry fallback." >&2
-    return 1
-  fi
-  case "${CHART_REGISTRY}" in
-    *://*|*/*|*@*|*[[:space:]]*)
-      echo "::error title=Chart registry::CHART_REGISTRY must be an OCI hostname, optionally with a port; put the namespace in CHART_REPOSITORY." >&2
-      return 1
-      ;;
-  esac
+  chart_registry_targets "${CHART_REPOSITORY:-}" ""
 }
 
+# Resolve the chart registries, pairing them with REPOSITORIES and, when it is
+# not empty, DEV_REPOSITORIES.
+chart_registry_targets() {
+  if ! registry_named && [[ -z "${CHART_REGISTRY:-}" ]]; then
+    echo "::error title=Chart registry::Set vars.CHART_REGISTRY to an OCI registry hostname, or name a REGISTRY_CONFIG group in vars.PROJECT_REGISTRY_NAME and list full repositories in vars.CHART_REPOSITORY. GitHub has no package-registry fallback." >&2
+    return 1
+  fi
+  registry_resolve chart "$1" "$2" || return 1
+}
+
+# Log Helm in to the registry of chart repository INDEX, the primary by default.
+# Resolve the registries first.
 chart_registry_login() {
-  chart_registry_validate || return 1
-  if [[ -z "${CHART_REGISTRY_USERNAME:-}" || -z "${CHART_REGISTRY_PASSWORD:-}" ]]; then
-    echo "::error title=Chart registry::Set secrets.CHART_REGISTRY_USERNAME and secrets.CHART_REGISTRY_PASSWORD; pass secrets: inherit." >&2
-    return 1
-  fi
-  if ! printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" \
-    --username "${CHART_REGISTRY_USERNAME}" --password-stdin >/dev/null 2>&1; then
-    echo "::error title=Chart registry::OCI authentication failed. Check chart credentials and registry access." >&2
-    return 1
-  fi
+  registry_login helm "${1:-0}" || return 1
 }
 
 # Return 0 for present, 1 for confirmed absence, 2 for operational errors.
@@ -43,26 +47,41 @@ chart_oci_lookup() {
   return 2
 }
 
-chart_dependency_login() {
-  local CHART_REGISTRY="${CHART_REGISTRY:-}"
-  local CHART_REGISTRY_USERNAME="${CHART_REGISTRY_USERNAME:-}"
-  local CHART_REGISTRY_PASSWORD="${CHART_REGISTRY_PASSWORD:-}"
+# Dependencies come from vars.CHART_DEPENDENCY_REGISTRY, with its own secret
+# pair, when it is set. Otherwise Helm logs in to the chart registries: with
+# vars.PROJECT_REGISTRY_NAME to every registry CHART_REPOSITORY names, since a
+# dependency may live on any of them, and to a single registry only when it
+# has credentials, since public and file:// dependencies need none. Runs in a
+# subshell, so the caller's resolved chart registries are left as they were.
+chart_dependency_login() (
   if [[ -n "${CHART_DEPENDENCY_REGISTRY:-}" ]]; then
-    CHART_REGISTRY="${CHART_DEPENDENCY_REGISTRY}"
-    CHART_REGISTRY_USERNAME="${CHART_DEPENDENCY_REGISTRY_USERNAME:-}"
-    CHART_REGISTRY_PASSWORD="${CHART_DEPENDENCY_REGISTRY_PASSWORD:-}"
-  elif [[ -z "${CHART_REGISTRY_USERNAME:-}${CHART_REGISTRY_PASSWORD:-}" ]]; then
-    # Public and file:// dependencies require no registry credentials.
-    return 0
+    registry_resolve dependency || exit 1
+    registry_login helm 0 || exit 1
+    exit 0
   fi
-  chart_registry_login
-}
+  if registry_named; then
+    if [[ -z "${CHART_REPOSITORY:-}" ]]; then
+      exit 0
+    fi
+    chart_registry_validate || exit 1
+    for i in "${!REGISTRY_HOSTS[@]}"; do
+      registry_login --optional helm "${i}" || exit 1
+    done
+    exit 0
+  fi
+  if [[ -z "${CHART_REGISTRY_USERNAME:-}${CHART_REGISTRY_PASSWORD:-}" ]]; then
+    exit 0
+  fi
+  chart_registry_validate || exit 1
+  chart_registry_login || exit 1
+)
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   set -euo pipefail
   if [[ "${1:-}" == "dependencies" ]]; then
     chart_dependency_login
   else
+    chart_registry_validate
     chart_registry_login
   fi
 fi

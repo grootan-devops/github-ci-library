@@ -18,7 +18,7 @@ on:
       chart-repository:
         required: true
         type: string
-        description: "Repository to push to, from init.yml's chart-push-repository."
+        description: "Repository to push to, from init.yml's chart-push-repository. With vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories, primary first."
       is-release:
         required: false
         type: boolean
@@ -38,7 +38,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Candidate repository to promote from, from init.yml; equal to the production repository on Docker Hub."
+        description: "Candidate repository to promote from, from init.yml's chart-dev-repository; equal to the production repository on Docker Hub."
       helm-values:
         required: false
         type: string
@@ -81,6 +81,9 @@ env:
   PROJECT_PATH: ${{ inputs.project-path }}
   CHART_DIR: ${{ inputs.chart-dir }}
   CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+  PROJECT_REGISTRY_NAME: ${{ vars.PROJECT_REGISTRY_NAME }}
+  # With PROJECT_REGISTRY_NAME the repositories name the registries to log in to.
+  CHART_REPOSITORY: ${{ inputs.chart-repository }}
   CHART_INFO_FILE_NAME: CHART_INFO.md
 
 permissions:
@@ -139,6 +142,7 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
@@ -223,6 +227,7 @@ jobs:
 
       - name: Authenticate Chart Dependencies
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
@@ -298,6 +303,7 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
@@ -382,12 +388,16 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh"
 
+      # Pushes to every repository; each registry after the primary's is
+      # logged in to here, once.
       - name: Push Chart
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_NAME: ${{ inputs.chart-name }}
           CHART_VERSION: ${{ inputs.chart-version }}
           CHART_REPOSITORY: ${{ inputs.chart-repository }}
@@ -430,12 +440,16 @@ jobs:
 
       - name: Authenticate To Chart Registry
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh"
 
+      # Promotes in the primary registry, then publishes the same package to
+      # every other one.
       - name: Promote Candidate Chart To Production
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_NAME: ${{ inputs.chart-name }}
           TAG: ${{ inputs.release-tag }}
           CANDIDATE_VERSION: ${{ inputs.candidate-version }}

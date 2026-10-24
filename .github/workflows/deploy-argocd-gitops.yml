@@ -26,12 +26,12 @@ on:
         required: false
         type: string
         default: ""
-        description: "Base Helm chart repository path. Charts use the development suffix on registries that support it; Docker Hub uses the same namespace-root repository for candidate and release versions."
+        description: "Base Helm chart repository path, read from the primary chart registry. Charts use the development suffix on registries that support it; Docker Hub uses the same namespace-root repository for candidate and release versions."
       image-repository:
         required: false
         type: string
         default: ""
-        description: "Base container image repository path. Images are always read from <image-repository>/dev."
+        description: "Base container image repository path. Images are always read from <image-repository>/dev in the primary image registry."
       dev-repository-suffix:
         required: false
         type: string
@@ -112,6 +112,9 @@ on:
       CHART_REGISTRY_PASSWORD:
         required: false
         description: "Chart registry password or token used to verify the Helm chart."
+      REGISTRY_CONFIG:
+        required: false
+        description: "Registry credential groups as YAML or JSON (see docs/configuration.md); required with vars.PROJECT_REGISTRY_NAME."
       ARGOCD_AUTH_TOKEN:
         required: false
         description: "ArgoCD API token used to sync the application (defaults to secrets.ARGOCD_AUTH_TOKEN)."
@@ -127,6 +130,7 @@ env:
   IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
   IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
   CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+  PROJECT_REGISTRY_NAME: ${{ vars.PROJECT_REGISTRY_NAME }}
   CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
   CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
   CHART_NAME: ${{ inputs.chart-name }}
@@ -190,36 +194,19 @@ jobs:
       - name: Validate Chart Exists In Registry
         if: ${{ steps.resolve.outputs.mode == 'helm' && inputs.chart-name != '' && inputs.chart-version != '' }}
         env:
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHART_REPO_URL: ${{ steps.resolve.outputs.chart_repo_url }}
           TARGET_VERSION: ${{ steps.resolve.outputs.target_version }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validate-chart.sh"
 
+      # Skipped inside the script when the primary image registry has no
+      # credentials.
       - name: Validate Image Exists In Registry
-        if: steps.resolve.outputs.new_image != '' && env.IMAGE_REGISTRY_USERNAME != '' && env.IMAGE_REGISTRY_PASSWORD != ''
+        if: ${{ steps.resolve.outputs.new_image != '' }}
         env:
-          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          crane auth login "${IMAGE_REGISTRY}" --username "${IMAGE_REGISTRY_USERNAME}" --password "${IMAGE_REGISTRY_PASSWORD}"
-          TARGET="${{ steps.resolve.outputs.new_image }}"
-          if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
-            echo "${MANIFEST_OUTPUT}" >&2
-            echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."
-            {
-              echo "### 🔎 Deployment prerequisites"
-              echo ""
-              echo "❌ Nothing was deployed: \`${TARGET}\` does not resolve, so the GitOps commit would point at an image that cannot be pulled. crane reported:"
-              echo ""
-              echo '```'
-              tail -n 20 <<< "${MANIFEST_OUTPUT}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          echo "Image ${TARGET} verified."
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          TARGET: ${{ steps.resolve.outputs.new_image }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validate-image.sh"
 
       # Failing paths write their own section; this one only reports success.
       - name: Publish Validation Summary

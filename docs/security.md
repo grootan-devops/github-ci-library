@@ -188,6 +188,26 @@ Ask of every value in the repository, its CI variables, `.env` and compose files
 - A job publishing outside its own project uses an explicitly granted credential; if it "just
   works", something is over-permissioned.
 
+### Registry credentials
+
+- **Every registry logs in with its own credentials.** A single `IMAGE_REGISTRY` or
+  `CHART_REGISTRY` uses its secret pair. With `PROJECT_REGISTRY_NAME`, each registry a
+  repository names logs in with its credentials in that `REGISTRY_CONFIG` group, so a
+  credential is never sent to a registry it was not issued for. A repository naming a registry
+  outside its group fails `init.yml` instead of falling back to another account.
+- **Passwords stay off the command line.** Every login made through `scripts/registry/lib.sh`
+  passes the password on stdin, masks every password it reads from `REGISTRY_CONFIG` before
+  using it, and refuses to run under `set -x`. `REGISTRY_CONFIG` is parsed with `yq` and `jq`
+  reading stdin, and their error messages, which can quote the input, are never printed.
+  `buildah.yml` keeps its own single-registry logins.
+- **Logins on the runner host do not outlive the job.** The Docker build and smoke-test jobs log
+  out of the primary registry when they end, which matters on a self-hosted runner. The copy,
+  promote, check, chart and deploy jobs log in inside their job container, which ends with the
+  job.
+- **Keep one group per client or organisation**, quote every value, and grant the
+  organisation secret only to repositories that publish. A repository-level `REGISTRY_CONFIG`
+  replaces the organisation's.
+
 ### GitHub specifics
 
 Anyone can open a pull request, and several triggers run something in response. For each

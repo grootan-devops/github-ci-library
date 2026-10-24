@@ -13,18 +13,29 @@
 # channels, so the mirror branch is skipped and the version suffix is the
 # only candidate/release distinction.
 #
+# With vars.PROJECT_REGISTRY_NAME (scripts/registry/lib.sh) the package is
+# pushed to every full repository CHART_REPOSITORY lists -- the workflow has
+# already logged in to the primary's registry, and every other registry is
+# logged in to here, once -- and every repository is tried before the step
+# fails, so one run names all that need attention.
+#
 # Env:
 #   CHART_NAME            chart name
 #   CHART_VERSION         version being pushed; names the .tgz
-#   CHART_REPOSITORY      repository to push to, under CHART_REGISTRY
+#   CHART_REPOSITORY      repository to push to: the path in CHART_REGISTRY,
+#                         or with a group the full <registry>/<path>
+#                         repositories, primary first
 #   CHART_DEV_REPOSITORY  candidate repository to mirror into (same as the
-#                         production repository on Docker Hub)
-#   CHART_REGISTRY        OCI registry host
+#                         production repository on Docker Hub), given the
+#                         same way
+#   CHART_REGISTRY, or PROJECT_REGISTRY_NAME and REGISTRY_CONFIG
+#                         the registries and their credentials -- see
+#                         scripts/registry/lib.sh
 #   CHART_INFO_FILE_NAME  file the published details are written to
 #                         (default: CHART_INFO.md)
 #   GITHUB_STEP_SUMMARY   GitHub-provided; appended to
 #
-# Exit codes: 0 pushed; 1 the package is missing from the artifact, or the
+# Exit codes: 0 pushed; 1 the package is missing from the artifact, or a
 # registry refused it. A failed dev mirror does not change the exit code.
 set -euo pipefail
 
@@ -34,7 +45,7 @@ set -euo pipefail
 : "${CHART_DEV_REPOSITORY:=}"
 # shellcheck source=scripts/chart/registry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/registry.sh"
-chart_registry_validate
+chart_registry_targets "${CHART_REPOSITORY}" "${CHART_DEV_REPOSITORY}" || exit 1
 : "${CHART_INFO_FILE_NAME:=CHART_INFO.md}"
 
 PACKAGE="${CHART_NAME}-${CHART_VERSION}.tgz"
@@ -53,42 +64,63 @@ if [[ ! -f "${PACKAGE}" ]]; then
   exit 1
 fi
 
-TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}"
-echo "Pushing ${PACKAGE} to ${TARGET}..."
-if ! helm push "${PACKAGE}" "${TARGET}" >/dev/null 2>&1; then
-  echo "::error title=Chart push::${TARGET} refused ${PACKAGE}."
+INFO=()
+FAILED=()
+for i in "${!REGISTRY_HOSTS[@]}"; do
+  HOST="${REGISTRY_HOSTS[i]}"
+  LABEL="${HOST}/${REGISTRY_REPOS[i]}"
+  REPOSITORY="${REGISTRY_REPOS[i]}"
+  DEV_REPOSITORY="${REGISTRY_DEV_REPOS[i]-}"
+  if [[ ${i} -gt 0 ]] && ! chart_registry_login "${i}"; then
+    FAILED+=("${LABEL}")
+    continue
+  fi
+
+  TARGET="oci://${HOST}/${REPOSITORY}"
+  echo "Pushing ${PACKAGE} to ${TARGET}..."
+  if ! helm push "${PACKAGE}" "${TARGET}" >/dev/null 2>&1; then
+    echo "::error title=Chart push::${TARGET} refused ${PACKAGE}."
+    {
+      echo "### ⎈ Helm Chart Package Info"
+      echo ""
+      echo "❌ \`${TARGET}\` refused \`${PACKAGE}\`. Check chart credentials, repository permissions and registry connectivity."
+      echo ""
+    } >> "${GITHUB_STEP_SUMMARY}"
+    FAILED+=("${LABEL}")
+    continue
+  fi
+  echo "Published ${PACKAGE} to ${TARGET}."
+  INFO+=("- **🌐 Registry:** \`${TARGET}\`")
+
+  # Mirror a stable push into the dev channel so consumers pinned there
+  # still resolve it. A convenience: a failed mirror warns, not fails.
+  if [[ -n "${DEV_REPOSITORY}" && "${REPOSITORY}" != "${DEV_REPOSITORY}" ]]; then
+    DEV_TARGET="oci://${HOST}/${DEV_REPOSITORY}"
+    echo "Mirroring ${PACKAGE} to the dev channel at ${DEV_TARGET}..."
+    if helm push "${PACKAGE}" "${DEV_TARGET}" >/dev/null 2>&1; then
+      echo "✅ Mirrored ${PACKAGE} to ${DEV_TARGET}."
+      INFO+=("- **🔁 Dev mirror:** \`${DEV_TARGET}\`")
+    else
+      echo "::warning title=Chart push::Optional dev mirror push failed for '${PACKAGE}'. The chart is published at ${TARGET}."
+      INFO+=("- **🔁 Dev mirror:** ⚠️ failed — consumers pinned to \`${DEV_REPOSITORY}\` will not resolve \`${CHART_VERSION}\`")
+    fi
+  fi
+done
+
+if [[ ${#INFO[@]} -gt 0 ]]; then
   {
     echo "### ⎈ Helm Chart Package Info"
-    echo ""
-    echo "❌ \`${TARGET}\` refused \`${PACKAGE}\`. Check chart credentials, repository permissions and registry connectivity."
-    echo ""
-  } >> "${GITHUB_STEP_SUMMARY}"
+    echo "- **📦 Name:** \`${CHART_NAME}\`"
+    echo "- **🏷️ Version:** \`${CHART_VERSION}\`"
+    printf '%s\n' "${INFO[@]}"
+  } > "${CHART_INFO_FILE_NAME}"
+  cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+fi
+
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  if [[ ${#REGISTRY_HOSTS[@]} -gt 1 ]]; then
+    JOINED="$(printf '%s, ' "${FAILED[@]}")"
+    echo "::error title=Chart push::${PACKAGE} was not published to: ${JOINED%, }. Every repository was tried; re-run once they are fixed."
+  fi
   exit 1
 fi
-echo "Published ${PACKAGE} to ${TARGET}."
-
-# Mirror a stable push into the dev channel so consumers pinned there
-# still resolve it. A convenience: a failed mirror warns, not fails.
-MIRROR_STATE=""
-if [[ -n "${CHART_DEV_REPOSITORY}" && "${CHART_REPOSITORY}" != "${CHART_DEV_REPOSITORY}" ]]; then
-  DEV_TARGET="oci://${CHART_REGISTRY}/${CHART_DEV_REPOSITORY}"
-  echo "Mirroring ${PACKAGE} to the dev channel at ${DEV_TARGET}..."
-  if helm push "${PACKAGE}" "${DEV_TARGET}" >/dev/null 2>&1; then
-    echo "✅ Mirrored ${PACKAGE} to ${DEV_TARGET}."
-    MIRROR_STATE="\`${DEV_TARGET}\`"
-  else
-    echo "::warning title=Chart push::Optional dev mirror push failed for '${PACKAGE}'. The chart is published at ${TARGET}."
-    MIRROR_STATE="⚠️ failed — consumers pinned to \`${CHART_DEV_REPOSITORY}\` will not resolve \`${CHART_VERSION}\`"
-  fi
-fi
-
-{
-  echo "### ⎈ Helm Chart Package Info"
-  echo "- **📦 Name:** \`${CHART_NAME}\`"
-  echo "- **🏷️ Version:** \`${CHART_VERSION}\`"
-  echo "- **🌐 Registry:** \`${TARGET}\`"
-  if [[ -n "${MIRROR_STATE}" ]]; then
-    echo "- **🔁 Dev mirror:** ${MIRROR_STATE}"
-  fi
-} > "${CHART_INFO_FILE_NAME}"
-cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"

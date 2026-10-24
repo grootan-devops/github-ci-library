@@ -7,6 +7,42 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.7.0
+
+### Required
+
+No registry migration is required. A single `IMAGE_REGISTRY` or `CHART_REGISTRY` with the
+existing secret pairs behaves as before, and everything new is optional. A caller that passes
+`REGISTRY_CONFIG` explicitly to `deploy-argocd-gitops.yml` or `deploy-komodo-gitops.yml` must pin
+`1.7.0` or later, because earlier releases reject it as an unknown secret.
+
+- **`vars.PROJECT_REGISTRY_NAME` now selects a credential group.** `1.6.1` ignored it. An
+  organisation or repository that sets it for anything else removes it: set together with
+  `IMAGE_REGISTRY` or `CHART_REGISTRY`, it now stops the first step of `init.yml`.
+
+### Recommended
+
+- **Publishing to several registries**:
+  - Add a credential group to the `REGISTRY_CONFIG` organisation secret, as YAML: a name such as `oneuptime/prod` mapping each registry host to its `username` and `password`, every value quoted.
+  - In each repository that publishes to several registries, set `PROJECT_REGISTRY_NAME` to the group and list the full repositories in `IMAGE_REPOSITORY` and `CHART_REPOSITORY`, primary first, e.g. `registry.example.com/core/api quay.io/oneuptime/api`.
+  - Stop `IMAGE_REGISTRY` and `CHART_REGISTRY` from reaching that repository: an organisation variable can be limited to the repositories that still use it.
+  - See [Publishing to several registries](docs/configuration.md#publishing-to-several-registries).
+- **Where to set `PROJECT_REGISTRY_NAME`.** Per repository as it moves to `1.7.0`, or at organisation level only once every repository pins `1.7.0` or later: earlier releases ignore it and would take a full repository for a path.
+- **Docker Hub** images are written `docker.io/<namespace>/<name>` and charts `registry-1.docker.io/<namespace>`; a group's `docker.io` serves both.
+- **Repositories that build with `buildah.yml`** keep `IMAGE_REGISTRY` and its secret pair: Buildah publishes internal images to that single registry and does not read `PROJECT_REGISTRY_NAME`.
+- **Before the first push**, create the repository, or the Harbor project, in every registry.
+- **Callers that pass secrets explicitly** instead of `secrets: inherit`: add `REGISTRY_CONFIG` to the deploy workflow calls.
+
+### Verify
+
+- A repository that sets both `PROJECT_REGISTRY_NAME` and `IMAGE_REGISTRY` fails the first
+  step of `init.yml`, and no other job runs.
+- The `🚀 Version & Targets` summary lists every repository.
+- After a release, every repository holds the release tag and its `latest`, major and minor tags,
+  all at the same digest (`crane digest`).
+- On a self-hosted runner, `~/.docker/config.json` gains no entries from the build and smoke-test
+  jobs.
+
 ## 1.6.1
 
 No migration is required. This release only updates dependencies.

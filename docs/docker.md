@@ -24,8 +24,8 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
    > [!IMPORTANT]
    > The GitHub `python-build.yml` and `node-build.yml` workflows cache `.uv-cache` and `.npm`
    > with `actions/cache`, but `docker.yml` builds in a separate job and does not restore or
-   > receive those directories. Its registry-backed BuildKit cache stores image layers; it is
-   > not a handoff for the host-side dependency directories. A consumer using the offline
+   > receive those directories. It keeps no registry-backed layer cache either, so nothing
+   > hands the host-side dependency directories over. A consumer using the offline
    > examples below must arrange an explicit cache handoff into the image job's build context.
    > Do not assume that a successful language build makes the cache available to `docker.yml`.
 2. **Non-root user and group (10001:10001).**
@@ -50,8 +50,11 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
    | **Multi-stage builder** | `TOOLKIT_BUILD_IMAGE` | The one build container, for a builder stage only. Every toolchain is baked into it. |
    | **All** | `VERSION` | `init.yml`'s `image-push-tag` |
 
-   Each is passed as `${{ vars.IMAGE_REGISTRY }}/<value>`, where `<value>` is **pinned in
-   `docker.yml`**, not read from an organisation variable. Bumping a base image is a change
+   Each is passed as `<registry>/<value>`, where `<registry>` is the primary image registry
+   (`vars.IMAGE_REGISTRY`, or the registry of the first repository in `vars.IMAGE_REPOSITORY`
+   with `vars.PROJECT_REGISTRY_NAME`) and `<value>`
+   is **pinned in `docker.yml`**, not read from an organisation variable. Bumping a base image
+   is a change
    to the library and a new release — which is what lets a pipeline be reproduced from its
    tag alone.
 

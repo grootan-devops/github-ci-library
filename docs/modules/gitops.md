@@ -10,6 +10,11 @@ flowchart LR
 Docker Compose stacks. Verifies the image exists, patches the compose file in the GitOps
 repository, and triggers a Komodo stack redeploy.
 
+Both deployments read from each artifact's **primary**: with `PROJECT_REGISTRY_NAME`, the first
+full repository of `image-repository` and `chart-repository`, whose copies the other
+repositories hold. Pass `REGISTRY_CONFIG` along with the other secrets when you use a group and
+do not use `secrets: inherit`.
+
 | Input | Required | Description |
 | --- | :--: | --- |
 | `environment` | ✅ | Target environment |

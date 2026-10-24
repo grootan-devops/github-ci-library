@@ -18,14 +18,17 @@
 #   PR_NUMBER                 pull request number on a pull_request run (default: empty)
 #   TAG                       resolved release tag (default: empty)
 #   VERSION_SUFFIX            candidate suffix, empty on a release (default: empty)
-#   IMAGE_REGISTRY            image registry host (default: empty)
+#   IMAGE_REGISTRY            image registry host, the primary (default: empty)
 #   IMAGE_PUSH_TAG            image tag this run publishes (default: empty)
-#   IMAGE_PUSH_REPOSITORY     image repository this run pushes to (default: empty)
-#   IMAGE_REPOSITORY          production image repository (default: empty)
+#   IMAGE_PUSH_REPOSITORY     image repository this run pushes to; with a registry
+#                             group, the full repositories (default: empty)
+#   IMAGE_REPOSITORY          production image repository, as above (default: empty)
 #   CHART_PUSH_VERSION        chart version this run publishes (default: empty)
-#   CHART_REGISTRY            chart registry host (default: empty)
-#   CHART_PUSH_REPOSITORY     chart repository this run pushes to (default: empty)
-#   CHART_REPOSITORY          production chart repository (default: empty)
+#   CHART_REGISTRY            chart registry host, the primary (default: empty)
+#   CHART_PUSH_REPOSITORY     chart repository this run pushes to; with a registry
+#                             group, the full repositories (default: empty)
+#   CHART_REPOSITORY          production chart repository, as above (default: empty)
+#   PROJECT_REGISTRY_NAME     vars.PROJECT_REGISTRY_NAME, the registry group (default: empty)
 #   MERGED_PR_NUMBER          pull request this release commit came from (default: empty)
 #   UPSTREAM_HEAD_SHA         that pull request's head commit (default: empty)
 #   UPSTREAM_RUN_ID           run that built the candidate artifacts (default: empty)
@@ -52,6 +55,27 @@ set -euo pipefail
 : "${UPSTREAM_RUN_ID:=}"
 : "${CANDIDATE_IMAGE_TAG:=}"
 : "${CANDIDATE_CHART_VERSION:=}"
+
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+
+# Print one "Pushes to | Production" row per repository: the full repositories
+# of a registry group as they are, or the single registry's path under its
+# host.
+target_rows() {
+  local label="$1" primary="$2" push="$3" production="$4" i
+  local pushes=()
+  if registry_named; then
+    registry_list "${push}"
+    pushes=("${REGISTRY_LIST[@]}")
+    registry_list "${production}"
+    for i in "${!pushes[@]}"; do
+      echo "| ${label} | \`${pushes[i]}\` | \`${REGISTRY_LIST[i]-}\` |"
+    done
+    return 0
+  fi
+  echo "| ${label} | \`${primary}/${push}\` | \`${primary}/${production}\` |"
+}
 
 case "${GITHUB_EVENT_NAME}" in
   workflow_dispatch) TRIGGER="Manual" ;;
@@ -94,10 +118,10 @@ fi
     echo "| Artifact | Pushes to | Production |"
     echo "|---|---|---|"
     if [[ "${WANT_IMAGE}" == "true" ]]; then
-      echo "| Image | \`${IMAGE_REGISTRY}/${IMAGE_PUSH_REPOSITORY}\` | \`${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}\` |"
+      target_rows Image "${IMAGE_REGISTRY}" "${IMAGE_PUSH_REPOSITORY}" "${IMAGE_REPOSITORY}"
     fi
     if [[ "${WANT_CHART}" == "true" ]]; then
-      echo "| Chart | \`${CHART_REGISTRY}/${CHART_PUSH_REPOSITORY}\` | \`${CHART_REGISTRY}/${CHART_REPOSITORY}\` |"
+      target_rows Chart "${CHART_REGISTRY}" "${CHART_PUSH_REPOSITORY}" "${CHART_REPOSITORY}"
     fi
   fi
 
