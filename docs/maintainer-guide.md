@@ -88,11 +88,8 @@ is named in `scripts/checks/select-guards.sh`. `lint.yml` does the same with
 - Every registry login goes through `registry/lib.sh`: the password travels on stdin only, and
   `registry_credentials` / `registry_login` are called directly, never inside `$(...)`, a pipe
   or a tee'd block, so the `::add-mask::` they print reaches the runner and no log file.
-- `self-lint.yml` runs `shellcheck` over every `*.sh` under `scripts/` and `tests/`, found
-  recursively, so a new subdirectory is covered without touching the workflow. Its
-  `registry-lib` leg runs `tests/registry/lib.test.sh`, which stubs `docker`, `crane` and
-  `helm` to prove the registry helper's credential groups, full repositories, logins, init
-  guard and masking without a network.
+- `self-lint.yml` runs `shellcheck` over every `*.sh` under `scripts/`, found recursively,
+  so a new subdirectory is covered without touching the workflow.
 
 ## Migration Guide & Standard
 

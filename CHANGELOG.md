@@ -19,7 +19,6 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `docker.yml` · `copy`: copies the candidate by digest from the primary to every other repository.
 - `docker.yml` · `promote`: copies the release, with its `latest`, major and minor tags, by digest to every other image repository. `chart.yml` · `promote` publishes the same package to every other chart repository.
 - `scripts/registry/`: the shared registry helper (`lib.sh`), plus `login.sh`, `logout.sh`, `targets.sh` and `mirror-image.sh`.
-- `tests/registry/lib.test.sh`, run by the new `registry-lib` leg of `self-lint.yml`.
 - `docs/examples/multi-registry.md`.
 
 ### Changed

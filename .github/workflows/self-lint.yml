@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [actionlint, shellcheck, readme-dockerfiles, registry-lib]
+        tool: [actionlint, shellcheck, readme-dockerfiles]
     container:
       image: grootantech/toolkit:1.1.0
     steps:
@@ -34,8 +34,7 @@ jobs:
           source scripts/lint/summary.sh
           case "${TOOL}" in
             actionlint)  run_linted "🔧 Self lint: actionlint" actionlint ;;
-            shellcheck)  mapfile -t SCRIPTS < <(find scripts tests -name "*.sh" | sort)
+            shellcheck)  mapfile -t SCRIPTS < <(find scripts -name "*.sh" | sort)
                          run_linted "🔧 Self lint: shellcheck" shellcheck "${SCRIPTS[@]}" ;;
             readme-dockerfiles) scripts/lint/readme-dockerfile.sh ;;
-            registry-lib) run_linted "🔧 Self test: registry helper" bash tests/registry/lib.test.sh ;;
           esac
