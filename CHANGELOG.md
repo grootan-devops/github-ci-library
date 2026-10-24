@@ -20,6 +20,7 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `docker.yml` · `promote`: copies the release, with its `latest`, major and minor tags, by digest to every other image repository. `chart.yml` · `promote` publishes the same package to every other chart repository.
 - `scripts/registry/`: the shared registry helper (`lib.sh`), plus `login.sh`, `logout.sh`, `targets.sh` and `mirror-image.sh`.
 - `docs/examples/multi-registry.md`.
+- `terraform.yml`: the Terraform checks and the module test in one workflow, replacing `terraform-lint.yml` and `terraform-test.yml`. `lint` (default `true`) runs init, validate, fmt, TFLint and the documentation check with `state-name`; `test: true` runs the module test and its teardown, from a workflow that does not cancel superseded runs.
 
 ### Changed
 
@@ -33,16 +34,16 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `sonarqube.yml`: a `scanner-image` job resolves the scanner image from the primary registry.
 - `deploy-argocd-gitops.yml`, `deploy-komodo-gitops.yml`: accept a `REGISTRY_CONFIG` secret, and read from the primary registry. The ArgoCD image check runs whenever the primary has credentials, not only when the secret pair is set. Komodo's `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` are optional with `PROJECT_REGISTRY_NAME`.
 - `docker.yml` · `promote`: timeout raised from 20 to 30 minutes for the copies to other repositories.
-- `terraform-lint.yml`, `terraform-test.yml`: no longer look for `main.tf`. Calling the workflow opts a repository in, as with every other workflow. The jobs no longer run as a one-entry matrix, so `Init (root)`, `Documentation (root)` and `Module Test (root)` report as `Init`, `Documentation` and `Module Test`.
-- `terraform-lint.yml`: the provider cache holds only `.terraform/providers`. Restoring it no longer replaces the checked-out `.terraform.lock.hcl` with the default branch's copy, or brings in its modules and backend settings.
+- The Terraform jobs no longer look for `main.tf`. Calling `terraform.yml` opts a repository in, as with every other workflow. The jobs no longer run as a one-entry matrix, so `Init (root)`, `Documentation (root)` and `Module Test (root)` report as `Init`, `Documentation` and `Module Test`, under the calling job.
+- `terraform.yml`: the provider cache holds only `.terraform/providers`. Restoring it no longer replaces the checked-out `.terraform.lock.hcl` with the default branch's copy, or brings in its modules and backend settings.
 
 ### Removed
 
-- `terraform-lint.yml` · `discover`, `terraform-test.yml` · `discover` ("Detect Terraform Root Module") and their warning for a missing `main.tf`.
+- `terraform-lint.yml` and `terraform-test.yml`, replaced by `terraform.yml`, with their `discover` jobs ("Detect Terraform Root Module") and the warning for a missing `main.tf`.
 
 ### Fixed
 
-- `terraform-lint.yml` · `Validate`, `TFLint`: run `terraform init -backend=false` before checking, instead of relying on the provider cache that only a default-branch run saves. They failed with `Missing required provider` or `Module not installed` when that cache was missing, or had been saved before the root gained a module.
+- `terraform.yml` · `Validate`, `TFLint`: run `terraform init -backend=false` before checking, instead of relying on the provider cache that only a default-branch run saves. They failed with `Missing required provider` or `Module not installed` when that cache was missing, or had been saved before the root gained a module.
 - `scan.yml`: an explicit `IMAGE_DEV_REPOSITORY_SUFFIX` containing `/` is normalised to `-` on Docker Hub, as `init.yml` already did.
 - Documentation:
   - `docs/configuration.md` no longer claims the released digest is the scanned one.

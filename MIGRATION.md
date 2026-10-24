@@ -19,13 +19,19 @@ existing secret pairs behaves as before, and everything new is optional. A calle
 - **`vars.PROJECT_REGISTRY_NAME` now selects a credential group.** `1.6.1` ignored it. An
   organisation or repository that sets it for anything else removes it: set together with
   `IMAGE_REGISTRY` or `CHART_REGISTRY`, it now stops the first step of `init.yml`.
-- **Terraform status checks are renamed.** `Init (root)`, `Documentation (root)` and
-  `Module Test (root)` report as `Init`, `Documentation` and `Module Test`. Update any branch
-  protection rule or ruleset that requires the old names, or pull requests wait on a check that
-  never reports.
-- **Terraform jobs run wherever `terraform-lint.yml` or `terraform-test.yml` is called.** None
-  checks for `main.tf` any more. Point `project-path` at the Terraform root, or stop calling them
-  from a repository that has no Terraform.
+- **`terraform.yml` replaces `terraform-lint.yml` and `terraform-test.yml`.** Point the job that
+  called `terraform-lint.yml` at `terraform.yml`, with the same `state-name` and `check-docs`.
+  Point the module-test workflow's job at `terraform.yml` with `lint: false` and `test: true`,
+  keeping its `test-timeout`, `destroy-on-failure` and `cancel-in-progress: false`. See the
+  [Terraform example](docs/examples/terraform.md).
+- **Terraform status checks are renamed.** Checks report under the calling job, and `Init (root)`,
+  `Documentation (root)` and `Module Test (root)` become `Init`, `Documentation` and
+  `Module Test`: with the example's job names, `terraform / Init` and
+  `terraform-test / Module Test`. Update any branch protection rule or ruleset that requires the
+  old names, or pull requests wait on a check that never reports.
+- **Terraform jobs run wherever `terraform.yml` is called.** None checks for `main.tf` any more.
+  Point `project-path` at the Terraform root, or stop calling it from a repository that has no
+  Terraform.
 
 ### Recommended
 

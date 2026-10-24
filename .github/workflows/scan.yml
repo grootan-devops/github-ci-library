@@ -146,7 +146,7 @@ jobs:
           key: trivy-db-
           restore-keys: trivy-db-
 
-      # Key and prefix match terraform-lint.yml verbatim so both share one entry.
+      # Key and prefix match terraform.yml verbatim so both share one entry.
       - name: Restore Terraform Provider Cache
         if: ${{ inputs.scan-type == 'config' && inputs.config-type == 'terraform' }}
         uses: actions/cache/restore@v6
