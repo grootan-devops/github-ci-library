@@ -121,4 +121,30 @@ the change, the same way `RELEASE_VERSION` is bumped in the GitLab library's own
 The Dockerfile-example check discovers the root README and all Markdown pages under `docs/`.
 Keep examples in fenced `dockerfile` blocks so moved examples remain linted.
 
+## Releases and versioning
+
+Releases follow semantic versioning for the public interface: workflow names, inputs, outputs,
+secrets, job names and `docs/workflow-map.json`. Patch and minor releases stay backward
+compatible within a major version. A breaking change needs a new major version and a Required
+migration step. A deprecation is announced in the changelog and, where practical, kept through at
+least the next minor release; security, correctness or upstream requirements may remove unsafe
+behaviour sooner. Consumers pin a release tag; a branch is never a release reference. A page
+describes the release it ships in: history belongs in the changelog and migration guide.
+
+## Workflow map
+
+[`docs/workflow-map.json`](workflow-map.json) is the machine-readable form of the
+[integration examples](examples/README.md): the scenario workflow files each project shape
+needs. Audit tools read it at the release a project pins and refuse a release without it, so
+change it in the same commit as the examples:
+
+- `scenarios.<file>.purpose`: one line on what the scenario file does, quoted in findings.
+- `shapes.<shape>.scenarios`: the scenario files a repository of that shape has. The shape
+  names are the readers' own: `image-only`, `chart-only`, `service`, `service-with-chart`,
+  `library`, `app-no-artifact` and `terraform`.
+
+`schema` is the version of this contract. Raise it when a change to the file's shape, or to a
+scenario or workflow name the file refers to, would make an older reader misjudge a project:
+readers refuse a schema they do not know instead of guessing.
+
 [Documentation index](../README.md)

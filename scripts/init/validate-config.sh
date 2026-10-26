@@ -50,11 +50,11 @@ if [[ ! -f "${DOCKERFILE_PATH}" && -f "${DOCKERFILE}" ]]; then
 fi
 
 publishes_artifact() {
-  local input="${1,,}" present="${2}"
-  case "${input}" in
+  local IGNORE_VALUE="${1,,}" ARTIFACT_PRESENT="${2}"
+  case "${IGNORE_VALUE}" in
     true)  return 1 ;;
     false) return 0 ;;
-    auto|"") [[ "${present}" == "true" ]] ;;
+    auto|"") [[ "${ARTIFACT_PRESENT}" == "true" ]] ;;
     *)
       echo "::error::Invalid ignore input '${1}'. Expected one of: auto, true, false." >&2
       return 2

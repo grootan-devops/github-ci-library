@@ -176,7 +176,7 @@ Each workflow needs exactly this, and nothing else:
 | `scan` | `contents: read`, `checks: write` |
 | `<lang>-build` | `contents: read`, `checks: write` |
 | `trivy-cache` | `contents: read` |
-| `lint`, `<lang>-lint`, `check`, `sbom`, `sonarqube`, `secret-scanning`, `notify`, `terraform-*`, `deploy-*` | `contents: read` |
+| `lint`, `<lang>-lint`, `check`, `sbom`, `sonarqube`, `secret-scanning`, `notify`, `terraform`, `deploy-*` | `contents: read` |
 
 `contents: write` creates the git tag and GitHub Release. `packages: write` covers image and
 chart pushes. `actions: read` lets `init` and `release` reach the upstream candidate run.

@@ -24,8 +24,8 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
    > [!IMPORTANT]
    > The GitHub `python-build.yml` and `node-build.yml` workflows cache `.uv-cache` and `.npm`
    > with `actions/cache`, but `docker.yml` builds in a separate job and does not restore or
-   > receive those directories. Its registry-backed BuildKit cache stores image layers; it is
-   > not a handoff for the host-side dependency directories. A consumer using the offline
+   > receive those directories. It keeps no registry-backed layer cache either, so nothing
+   > hands the host-side dependency directories over. A consumer using the offline
    > examples below must arrange an explicit cache handoff into the image job's build context.
    > Do not assume that a successful language build makes the cache available to `docker.yml`.
 2. **Non-root user and group (10001:10001).**

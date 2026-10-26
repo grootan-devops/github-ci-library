@@ -7,6 +7,31 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.7.0
+
+### Required
+
+Only repositories that call the Terraform workflows change.
+
+- **`terraform.yml` replaces `terraform-lint.yml` and `terraform-test.yml`.** Point the job that
+  called `terraform-lint.yml` at `terraform.yml`, with the same `state-name` and `check-docs`.
+  Point the module-test workflow's job at `terraform.yml` with `lint: false` and `test: true`,
+  keeping its `test-timeout`, `destroy-on-failure` and `cancel-in-progress: false`. See the
+  [Terraform example](docs/examples/terraform.md).
+- **Terraform status checks are renamed.** Checks report under the calling job, and `Init (root)`,
+  `Documentation (root)` and `Module Test (root)` become `Init`, `Documentation` and
+  `Module Test`: with the example's job names, `terraform / Init` and
+  `terraform-test / Module Test`. Update any branch protection rule or ruleset that requires the
+  old names, or pull requests wait on a check that never reports.
+- **Terraform jobs run wherever `terraform.yml` is called.** None checks for `main.tf` any more.
+  Point `project-path` at the Terraform root, or stop calling it from a repository that has no
+  Terraform.
+
+### Verify
+
+- `Validate` and `TFLint` pass on a pull request that adds a module, and in a repository whose
+  default branch has never saved a Terraform provider cache.
+
 ## 1.6.1
 
 No migration is required. This release only updates dependencies.

@@ -41,74 +41,74 @@ ACTIONS='[
   {"type":"Action.OpenUrl","title":"📦 Release Assets","url":"'"${REPO_URL}/releases/tag/${TAG}"'"}
 ]'
 if [[ -n "${SONAR_EXTERNAL_URL}" && -n "${SONAR_PROJECT_KEY}" ]]; then
-  ACTIONS=$(jq --arg url "${SONAR_EXTERNAL_URL}/dashboard?id=${SONAR_PROJECT_KEY}" \
-    '. + [{"type":"Action.OpenUrl","title":"🔍 SonarQube","url":$url}]' <<<"${ACTIONS}")
+  ACTIONS=$(jq --arg URL "${SONAR_EXTERNAL_URL}/dashboard?id=${SONAR_PROJECT_KEY}" \
+    '. + [{"type":"Action.OpenUrl","title":"🔍 SonarQube","url":$URL}]' <<<"${ACTIONS}")
 fi
 
 jq -n \
-  --arg title "🚀 ${PROJECT_TITLE} · ${TAG}" \
-  --arg fallback "Release notification: ${PROJECT_TITLE} version ${TAG}." \
-  --arg speak "Release notification for ${PROJECT_TITLE}, version ${TAG}. Published by ${COMMIT_AUTHOR} on ${COMMIT_TIMESTAMP}. Release notes are included in this card." \
-  --arg author "${COMMIT_AUTHOR}" \
-  --arg timestamp "${COMMIT_TIMESTAMP}" \
-  --arg sha "${GITHUB_SHA:-unknown}" \
-  --arg ref "${GITHUB_REF_NAME:-unknown}" \
-  --argjson actions "${ACTIONS}" \
+  --arg TITLE "🚀 ${PROJECT_TITLE} · ${TAG}" \
+  --arg FALLBACK "Release notification: ${PROJECT_TITLE} version ${TAG}." \
+  --arg SPEAK "Release notification for ${PROJECT_TITLE}, version ${TAG}. Published by ${COMMIT_AUTHOR} on ${COMMIT_TIMESTAMP}. Release notes are included in this card." \
+  --arg AUTHOR "${COMMIT_AUTHOR}" \
+  --arg TIMESTAMP "${COMMIT_TIMESTAMP}" \
+  --arg SHA "${GITHUB_SHA:-unknown}" \
+  --arg REF "${GITHUB_REF_NAME:-unknown}" \
+  --argjson ACTIONS "${ACTIONS}" \
   '{
     "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
     type: "AdaptiveCard",
     version: "1.4",
-    fallbackText: $fallback,
-    speak: $speak,
+    fallbackText: $FALLBACK,
+    speak: $SPEAK,
     msteams: { width: "Full" },
     body: [
-      { type: "TextBlock", text: $title, weight: "Bolder", size: "Large", wrap: true, maxLines: 2 },
+      { type: "TextBlock", text: $TITLE, weight: "Bolder", size: "Large", wrap: true, maxLines: 2 },
       { type: "ColumnSet", spacing: "Medium", columns: [
           { type: "Column", width: "auto", items: [
               { type: "Image", url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png", size: "Small", altText: "GitHub" }
           ]},
           { type: "Column", width: "stretch", items: [
-              { type: "TextBlock", text: $author, weight: "Bolder", size: "Default", spacing: "None", wrap: true },
-              { type: "TextBlock", text: $timestamp, isSubtle: true, size: "Small", spacing: "None", wrap: true }
+              { type: "TextBlock", text: $AUTHOR, weight: "Bolder", size: "Default", spacing: "None", wrap: true },
+              { type: "TextBlock", text: $TIMESTAMP, isSubtle: true, size: "Small", spacing: "None", wrap: true }
           ]}
       ]},
       { type: "FactSet", spacing: "Small", facts: [
-          { title: "🔖 Commit", value: $sha },
-          { title: "🌿 Branch", value: $ref }
+          { title: "🔖 Commit", value: $SHA },
+          { title: "🌿 Branch", value: $REF }
       ]},
       { type: "TextBlock", text: "📋 Release Notes", weight: "Bolder", size: "Medium", spacing: "Medium", separator: true },
       { type: "Container", id: "release-notes", spacing: "Small", items: [] }
     ],
-    actions: $actions
+    actions: $ACTIONS
   }' > message_template.json
 
 if [[ ! -s "${RELEASE_CHANGELOG_CARD_FILE_NAME}" ]]; then
   if [[ -f "${RELEASE_CHANGELOG_FILE_NAME}" ]]; then
     jq -R -s -c '
       def clean_text: sub("\r$"; "") | gsub("[ \t]+"; " ") | sub("^ +"; "") | sub(" +$"; "");
-      split("\n") | reduce .[] as $line (
+      split("\n") | reduce .[] as $LINE (
         [];
-        if ($line | startswith("### ")) then
+        if ($LINE | startswith("### ")) then
           . + [{
             type: "TextBlock",
-            text: ($line | sub("^### +"; "") | clean_text),
+            text: ($LINE | sub("^### +"; "") | clean_text),
             weight: "Bolder",
             size: "Default",
             spacing: "Medium",
             wrap: true
           }]
-        elif ($line | startswith("- ")) then
+        elif ($LINE | startswith("- ")) then
           . + [{
             type: "TextBlock",
-            text: ("• " + ($line | sub("^- +"; "") | clean_text)),
+            text: ("• " + ($LINE | sub("^- +"; "") | clean_text)),
             spacing: "Small",
             wrap: true
           }]
-        elif ($line | length == 0) then .
+        elif ($LINE | length == 0) then .
         else
           . + [{
             type: "TextBlock",
-            text: ($line | clean_text),
+            text: ($LINE | clean_text),
             spacing: "Small",
             wrap: true
           }]
@@ -121,8 +121,8 @@ if [[ ! -s "${RELEASE_CHANGELOG_CARD_FILE_NAME}" ]]; then
   fi
 fi
 
-jq --slurpfile release_notes "${RELEASE_CHANGELOG_CARD_FILE_NAME}" '
-  (.body[] | select(.id == "release-notes") | .items) = ($release_notes[0] // [])
+jq --slurpfile RELEASE_NOTES "${RELEASE_CHANGELOG_CARD_FILE_NAME}" '
+  (.body[] | select(.id == "release-notes") | .items) = ($RELEASE_NOTES[0] // [])
   | {
       type: "message",
       attachments: [

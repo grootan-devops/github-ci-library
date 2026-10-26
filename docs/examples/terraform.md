@@ -1,7 +1,7 @@
 # 2. Terraform Infrastructure / Module Registry
 
 Terraform repositories build nothing and push nothing: no image, no chart, no language
-artifact. That leaves `init.yml`, `terraform-lint.yml`, `terraform-test.yml`, the
+artifact. That leaves `init.yml`, `terraform.yml`, the
 `config`/`terraform` mode of `scan.yml`, `check.yml`, `release.yml`, `secret-scanning.yml`,
 `sonarqube.yml` and `trivy-cache.yml`. `docker.yml`, `buildah.yml`, `chart.yml` and the
 `<language>-build.yml` workflows do not apply, and neither does `sbom.yml` — there is no
@@ -61,8 +61,8 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
-  terraform-lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/terraform-lint.yml@1.0.0
+  terraform:
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform.yml@1.0.0
     secrets: inherit
     with:
       state-name: network
@@ -94,7 +94,8 @@ jobs:
 The module test is a **separate workflow**, not a job in `pr.yml`. It provisions real
 infrastructure and destroys it in a post-failure job, so it must run with
 `cancel-in-progress: false` — a PR workflow cancels superseded runs, which would kill
-teardown and leave the fixtures standing.
+teardown and leave the fixtures standing. It calls the same `terraform.yml` with
+`lint: false` and `test: true`, so the checks are not run twice.
 
 ```yaml
 # .github/workflows/terraform-test.yml
@@ -123,9 +124,11 @@ permissions:
 
 jobs:
   terraform-test:
-    uses: grootan-devops/github-ci-library/.github/workflows/terraform-test.yml@1.0.0
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform.yml@1.0.0
     secrets: inherit
     with:
+      lint: false
+      test: true
       test-timeout: 45m
 ```
 
@@ -230,8 +233,8 @@ jobs:
     uses: grootan-devops/github-ci-library/.github/workflows/lint.yml@1.0.0
     secrets: inherit
 
-  terraform-lint:
-    uses: grootan-devops/github-ci-library/.github/workflows/terraform-lint.yml@1.0.0
+  terraform:
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform.yml@1.0.0
     secrets: inherit
     with:
       state-name: network

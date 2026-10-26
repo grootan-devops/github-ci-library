@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-26
+
+### Added
+
+- `terraform.yml`: the Terraform checks and the module test in one workflow, replacing `terraform-lint.yml` and `terraform-test.yml`. `lint` (default `true`) runs init, validate, fmt, TFLint and the documentation check with `state-name`; `test: true` runs the module test and its teardown, from a workflow that does not cancel superseded runs.
+- `docs/workflow-map.json`: the scenario workflow files each project shape needs, for audit tools to read at the release a project pins. `docs/maintainer-guide.md` says how to keep it in step with the examples.
+
+### Changed
+
+- The Terraform jobs no longer look for `main.tf`. Calling `terraform.yml` opts a repository in, as with every other workflow. The jobs no longer run as a one-entry matrix, so `Init (root)`, `Documentation (root)` and `Module Test (root)` report as `Init`, `Documentation` and `Module Test`, under the calling job.
+- `terraform.yml`: the provider cache holds only `.terraform/providers`. Restoring it no longer replaces the checked-out `.terraform.lock.hcl` with the default branch's copy, or brings in its modules and backend settings.
+- The README header no longer carries a hand-kept release number or a link to the ai-skills compatibility page: the tag is the release, and the maintainer guide states the versioning policy.
+- `docs/maintainer-guide.md`: the release and versioning policy (public interface, semantic versioning, deprecations).
+
+### Removed
+
+- `terraform-lint.yml` and `terraform-test.yml`, replaced by `terraform.yml`, with their `discover` jobs ("Detect Terraform Root Module") and the warning for a missing `main.tf`.
+
+### Fixed
+
+- `terraform.yml` · `Validate`, `TFLint`: run `terraform init -backend=false` before checking, instead of relying on the provider cache that only a default-branch run saves. They failed with `Missing required provider` or `Module not installed` when that cache was missing, or had been saved before the root gained a module.
+- `scan.yml`: an explicit `IMAGE_DEV_REPOSITORY_SUFFIX` containing `/` is normalised to `-` on Docker Hub, as `init.yml` already did.
+- Documentation:
+  - `docs/configuration.md` no longer claims the released digest is the scanned one.
+  - `docs/modules/init-check.md` counts 29 outputs.
+  - `docs/docker.md` no longer mentions the registry layer cache removed in 1.4.0.
+  - `docs/examples/gitops.md`: the ArgoCD example passes the required `argocd-server` input. Copied as it was, the call failed at startup.
+
 ## [1.6.1] - 2026-10-23
 
 ### Changed

@@ -193,8 +193,9 @@ can resolve without credentials. These settings do not replace required publishi
   promote and check jobs.
 - **Dev vs production**: `docker.yml` · `promote` uses `crane mutate --tag` to copy the
   manifest **layerlessly** from the dev path to the production path, rewriting only the
-  version label, then tags `${TAG}`, `latest`, `${MAJOR}` and `${MINOR}`. The released
-  digest is the scanned digest.
+  version label, then tags `${TAG}`, `latest`, `${MAJOR}` and `${MINOR}`. Rewriting the label
+  gives the released image its own digest; `IMAGE_INFO.md` records both it and the scanned
+  candidate's.
 - **Digest pinning**: `docker.yml` and `buildah.yml` output `image-ref-digest`
   (`registry/repo@sha256:...`). Feed it to `scan.yml` as `image-ref` so the scan cannot
   resolve a different tag than the one that was built.
