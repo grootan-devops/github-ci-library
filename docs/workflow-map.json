@@ -1,0 +1,126 @@
+{
+  "$comment": "The scenario workflow files each project shape needs, for audit tools to read at the release a project pins. See docs/maintainer-guide.md#workflow-map.",
+  "schema": 1,
+  "scenarios": {
+    "pr.yml": {
+      "purpose": "Full pre-merge verification."
+    },
+    "release.yml": {
+      "purpose": "Tag, promote candidate by digest, publish release, notify."
+    },
+    "build.yml": {
+      "purpose": "Build and unit test only."
+    },
+    "check.yml": {
+      "purpose": "Release prerequisite guards only."
+    },
+    "lint.yml": {
+      "purpose": "Multi-linter suite."
+    },
+    "deploy.yml": {
+      "purpose": "Targeted GitOps deployment without building."
+    },
+    "image-scan.yml": {
+      "purpose": "Scan an existing remote image tag."
+    },
+    "chart-scan.yml": {
+      "purpose": "Render and scan a local or remote chart."
+    },
+    "license-scan.yml": {
+      "purpose": "Dependency licence compliance audit."
+    },
+    "sbom.yml": {
+      "purpose": "CycloneDX SBOM generation and CVE scan."
+    },
+    "secret-scan.yml": {
+      "purpose": "Betterleaks git-history audit."
+    },
+    "sonarqube.yml": {
+      "purpose": "Analysis and quality gate."
+    }
+  },
+  "shapes": {
+    "image-only": {
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "image-scan.yml",
+        "secret-scan.yml"
+      ]
+    },
+    "chart-only": {
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "check.yml",
+        "lint.yml",
+        "chart-scan.yml",
+        "secret-scan.yml"
+      ]
+    },
+    "service": {
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "image-scan.yml",
+        "license-scan.yml",
+        "sbom.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    },
+    "service-with-chart": {
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "image-scan.yml",
+        "chart-scan.yml",
+        "license-scan.yml",
+        "sbom.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    },
+    "library": {
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "build.yml",
+        "check.yml",
+        "lint.yml",
+        "license-scan.yml",
+        "sbom.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    },
+    "app-no-artifact": {
+      "scenarios": [
+        "pr.yml",
+        "build.yml",
+        "lint.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    },
+    "terraform": {
+      "scenarios": [
+        "pr.yml",
+        "release.yml",
+        "check.yml",
+        "lint.yml",
+        "secret-scan.yml",
+        "sonarqube.yml"
+      ]
+    }
+  }
+}
