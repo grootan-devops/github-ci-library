@@ -36,10 +36,10 @@ fi
 NORMALISE='
   def arr: if . == null then [] elif type == "array" then . else [.] end;
   [ (.testsuites // .) | (.testsuite // .) | arr | .[]
-    | . as $s
-    | ($s.testcase | arr | .[]
+    | . as $S
+    | ($S.testcase | arr | .[]
         | {
-            suite:     ($s."+@name" // ""),
+            suite:     ($S."+@name" // ""),
             name:      (."+@name" // ""),
             classname: (."+@classname" // ""),
             time:      (."+@time" // ""),
@@ -72,7 +72,7 @@ if [[ "${JOB_SUMMARY}" == "true" ]]; then
     if [[ "${FAILED}" -gt 0 ]]; then
       echo "<details><summary>Failures (showing up to ${MAX_LISTED_FAILURES} of ${FAILED})</summary>"
       echo ""
-      jq -r --argjson max "${MAX_LISTED_FAILURES}" '[.[] | select(.failure != null)] | .[0:$max] | .[]
+      jq -r --argjson MAX "${MAX_LISTED_FAILURES}" '[.[] | select(.failure != null)] | .[0:$MAX] | .[]
         | "- **\(.classname // "")\(if (.classname // "") != "" then " · " else "" end)\(.name)** — \((.failure["+@message"] // .failure | tostring) | gsub("\n"; " ") | .[0:300])"' <<< "${CASES}"
       if [[ "${FAILED}" -gt "${MAX_LISTED_FAILURES}" ]]; then
         echo ""
@@ -87,13 +87,13 @@ fi
 
 if [[ -n "${GH_TOKEN:-}" ]]; then
   ANNOTATIONS="$(
-    jq -c --arg level "${ANNOTATION_LEVEL}" --argjson max "${MAX_ANNOTATIONS}" '
-      [ .[] | select(.failure != null) ] | .[0:$max]
+    jq -c --arg LEVEL "${ANNOTATION_LEVEL}" --argjson MAX "${MAX_ANNOTATIONS}" '
+      [ .[] | select(.failure != null) ] | .[0:$MAX]
       | map({
           path: ".github",
           start_line: 1,
           end_line: 1,
-          annotation_level: $level,
+          annotation_level: $LEVEL,
           title: ((.classname // "") + (if (.classname // "") != "" then " · " else "" end) + .name),
           message: ((.failure["+@message"] // .failure | tostring) | .[0:1000])
         })' <<< "${CASES}"
@@ -108,13 +108,13 @@ if [[ -n "${GH_TOKEN:-}" ]]; then
   fi
 
   if jq -n \
-      --arg name "${CHECK_NAME}" \
-      --arg sha "${GITHUB_SHA}" \
-      --arg conclusion "${CONCLUSION}" \
-      --arg summary "${SUMMARY}" \
-      --argjson annotations "${ANNOTATIONS}" \
-      '{name: $name, head_sha: $sha, status: "completed", conclusion: $conclusion,
-        output: {title: $name, summary: $summary, annotations: $annotations}}' |
+      --arg NAME "${CHECK_NAME}" \
+      --arg SHA "${GITHUB_SHA}" \
+      --arg CONCLUSION "${CONCLUSION}" \
+      --arg SUMMARY "${SUMMARY}" \
+      --argjson ANNOTATIONS "${ANNOTATIONS}" \
+      '{name: $NAME, head_sha: $SHA, status: "completed", conclusion: $CONCLUSION,
+        output: {title: $NAME, summary: $SUMMARY, annotations: $ANNOTATIONS}}' |
       curl -sSf -X POST \
         -H "Authorization: Bearer ${GH_TOKEN}" \
         -H "Accept: application/vnd.github+json" \

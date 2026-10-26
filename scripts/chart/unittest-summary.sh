@@ -36,8 +36,8 @@ TALLY="$(grep -E '^(Charts|Test Suites|Tests|Snapshot):' "${RUNNER_TEMP}/helm-un
   else
     echo "❌ \`helm unittest --strict\` failed against:"
   fi
-  for mock_chart in "${MOCK_CHART_LIST[@]}"; do
-    echo "- \`${CHART_DIR}/${mock_chart}\`"
+  for MOCK_CHART_DIR in "${MOCK_CHART_LIST[@]}"; do
+    echo "- \`${CHART_DIR}/${MOCK_CHART_DIR}\`"
   done
   if [[ ${#MOCK_CHART_LIST[@]} -eq 0 ]]; then
     echo "- (no mock chart was resolved)"
