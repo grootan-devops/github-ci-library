@@ -2,21 +2,30 @@
 
 ```mermaid
 flowchart LR
-    I["terraform-lint.yml · init"] --> V["validate + fmt -check"]
+    I["terraform.yml · init"] --> V["validate + fmt -check"]
     I --> TL["tflint"]
     I --> DO["terraform-docs drift"]
-    T["terraform-test.yml · test"] -->|on failure| DE["destroy"]
+    T["terraform.yml · test"] -->|on failure| DE["destroy"]
 ```
 
 | Workflow · Job | Description |
 | --- | --- |
-| `terraform-lint.yml` · `init` | `terraform init` with the backend workspace key prefix. Caches providers by `.terraform.lock.hcl`. |
-| `terraform-lint.yml` · `validate` | `terraform validate` and `terraform fmt -recursive -check`. |
-| `terraform-lint.yml` · `tflint` | Recursive `tflint` across all module call types. |
-| `terraform-lint.yml` · `docs` | `terraform-docs` drift check for the root and every `modules/*`. |
-| `terraform-test.yml` · `test` | `go test` module suite with a configurable timeout. |
-| `terraform-test.yml` · `destroy` | Runs **only on test failure**, so a crashed test cannot strand real infrastructure. |
+| `terraform.yml` · `init` | `terraform init` with the backend workspace key prefix. Caches `.terraform/providers` by `.terraform.lock.hcl`, saved from the default branch only. |
+| `terraform.yml` · `validate` | `terraform init -backend=false`, then `terraform validate` and `terraform fmt -recursive -check`. |
+| `terraform.yml` · `tflint` | `terraform init -backend=false`, then recursive `tflint` across all module call types. |
+| `terraform.yml` · `docs` | `terraform-docs` drift check for the root and every `modules/*`. |
+| `terraform.yml` · `test` | `go test` module suite with a configurable timeout. |
+| `terraform.yml` · `destroy` | Runs **only on test failure**, so a crashed test cannot strand real infrastructure. |
 | `scan.yml` (`scan-type: config`, `config-type: terraform`) | Trivy IaC misconfiguration scan. |
+
+`terraform.yml` runs the checks (`init`, `validate`, `tflint`, `docs`) by default, with
+`lint: true` and the required `state-name`. `test: true` runs the module test and its
+teardown; it provisions real infrastructure, so call it from its own workflow with
+`cancel-in-progress: false` and `lint: false`, as the
+[Terraform example](../examples/terraform.md) does.
+
+Calling the workflow opts the repository in: no job checks for a `main.tf`, so `project-path`
+points at the Terraform root.
 
 ## Consuming a module — no packaging step
 

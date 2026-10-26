@@ -6,39 +6,39 @@ if [[ -z "${MOCK_CHARTS//[[:space:]]/}" ]]; then
   exit 1
 fi
 
-read -r -a mock_charts <<< "${MOCK_CHARTS}"
-report_dir="${RUNNER_TEMP}/chart-unittest"
-mkdir -p "${report_dir}"
+read -r -a MOCK_CHART_LIST <<< "${MOCK_CHARTS}"
+REPORT_DIR="${RUNNER_TEMP}/chart-unittest"
+mkdir -p "${REPORT_DIR}"
 : > "${RUNNER_TEMP}/helm-unittest.log"
 
-status=0
-chart_index=0
-for mock_chart in "${mock_charts[@]}"; do
-  chart_path="${CHART_DIR}/${mock_chart}"
-  if [[ ! -f "${chart_path}/Chart.yaml" ]]; then
-    echo "::error::Mock chart '${chart_path}' lacks Chart.yaml." >&2
+STATUS=0
+CHART_INDEX=0
+for MOCK_CHART_DIR in "${MOCK_CHART_LIST[@]}"; do
+  MOCK_CHART_PATH="${CHART_DIR}/${MOCK_CHART_DIR}"
+  if [[ ! -f "${MOCK_CHART_PATH}/Chart.yaml" ]]; then
+    echo "::error::Mock chart '${MOCK_CHART_PATH}' lacks Chart.yaml." >&2
     exit 1
   fi
-  if ! compgen -G "${chart_path}/tests/*_test.yaml" >/dev/null; then
-    echo "::error::No test suites under ${chart_path}/tests/." >&2
+  if ! compgen -G "${MOCK_CHART_PATH}/tests/*_test.yaml" >/dev/null; then
+    echo "::error::No test suites under ${MOCK_CHART_PATH}/tests/." >&2
     exit 1
   fi
 
   set +e
   helm unittest --strict \
     --output-type JUnit \
-    --output-file "${report_dir}/unittest-report-${chart_index}.xml" \
-    --file "${chart_path}/tests/*_test.yaml" \
-    "${chart_path}" 2>&1 | tee -a "${RUNNER_TEMP}/helm-unittest.log"
-  pipeline_statuses=("${PIPESTATUS[@]}")
+    --output-file "${REPORT_DIR}/unittest-report-${CHART_INDEX}.xml" \
+    --file "${MOCK_CHART_PATH}/tests/*_test.yaml" \
+    "${MOCK_CHART_PATH}" 2>&1 | tee -a "${RUNNER_TEMP}/helm-unittest.log"
+  PIPELINE_STATUSES=("${PIPESTATUS[@]}")
   set -e
 
-  helm_failed="${pipeline_statuses[0]}"
-  tee_failed="${pipeline_statuses[1]}"
-  if (( helm_failed != 0 || tee_failed != 0 )); then
-    status=1
+  HELM_FAILED="${PIPELINE_STATUSES[0]}"
+  TEE_FAILED="${PIPELINE_STATUSES[1]}"
+  if (( HELM_FAILED != 0 || TEE_FAILED != 0 )); then
+    STATUS=1
   fi
-  chart_index=$((chart_index + 1))
+  CHART_INDEX=$((CHART_INDEX + 1))
 done
 
-exit "${status}"
+exit "${STATUS}"

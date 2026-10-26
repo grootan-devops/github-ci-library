@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-10-26
+
+### Added
+
+- `terraform.yml`: the Terraform checks and the module test in one workflow, replacing `terraform-lint.yml` and `terraform-test.yml`. `lint` (default `true`) runs init, validate, fmt, TFLint and the documentation check with `state-name`; `test: true` runs the module test and its teardown, from a workflow that does not cancel superseded runs.
+
+### Changed
+
+- The Terraform jobs no longer look for `main.tf`. Calling `terraform.yml` opts a repository in, as with every other workflow. The jobs no longer run as a one-entry matrix, so `Init (root)`, `Documentation (root)` and `Module Test (root)` report as `Init`, `Documentation` and `Module Test`, under the calling job.
+- `terraform.yml`: the provider cache holds only `.terraform/providers`. Restoring it no longer replaces the checked-out `.terraform.lock.hcl` with the default branch's copy, or brings in its modules and backend settings.
+
+### Removed
+
+- `terraform-lint.yml` and `terraform-test.yml`, replaced by `terraform.yml`, with their `discover` jobs ("Detect Terraform Root Module") and the warning for a missing `main.tf`.
+
+### Fixed
+
+- `terraform.yml` · `Validate`, `TFLint`: run `terraform init -backend=false` before checking, instead of relying on the provider cache that only a default-branch run saves. They failed with `Missing required provider` or `Module not installed` when that cache was missing, or had been saved before the root gained a module.
+- `scan.yml`: an explicit `IMAGE_DEV_REPOSITORY_SUFFIX` containing `/` is normalised to `-` on Docker Hub, as `init.yml` already did.
+- Documentation:
+  - `docs/configuration.md` no longer claims the released digest is the scanned one.
+  - `docs/modules/init-check.md` counts 29 outputs.
+  - `docs/docker.md` no longer mentions the registry layer cache removed in 1.4.0.
+  - `docs/examples/gitops.md`: the ArgoCD example passes the required `argocd-server` input. Copied as it was, the call failed at startup.
+  - The README names the current release.
+
 ## [1.6.1] - 2026-10-23
 
 ### Changed

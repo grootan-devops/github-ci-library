@@ -54,28 +54,28 @@ jq -Rs '
     gsub("`"; "")
     | gsub("\\*\\*"; "");
   split("\n")
-  | reduce .[] as $line (
+  | reduce .[] as $LINE (
       [];
-      if ($line | test("^#{3,} +")) then
+      if ($LINE | test("^#{3,} +")) then
         . + [{
           type: "TextBlock",
-          text: ($line | sub("^#{3,} +"; "") | clean_text),
+          text: ($LINE | sub("^#{3,} +"; "") | clean_text),
           weight: "Bolder",
           spacing: (if length == 0 then "None" else "Medium" end),
           wrap: true
         }]
-      elif ($line | test("^- +")) then
+      elif ($LINE | test("^- +")) then
         . + [{
           type: "TextBlock",
-          text: ("• " + ($line | sub("^- +"; "") | clean_text)),
+          text: ("• " + ($LINE | sub("^- +"; "") | clean_text)),
           spacing: "Small",
           wrap: true
         }]
-      elif ($line | length == 0) then .
+      elif ($LINE | length == 0) then .
       else
         . + [{
           type: "TextBlock",
-          text: ($line | clean_text),
+          text: ($LINE | clean_text),
           spacing: "Small",
           wrap: true
         }]

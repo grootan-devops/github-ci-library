@@ -53,11 +53,11 @@ git config --global --add safe.directory '*' 2>/dev/null || true
 # nothing on every containerised run. curl and jq are present, so talk to the
 # REST API directly and keep the errors.
 api() {
-  local path="$1"; shift
+  local API_PATH="$1"; shift
   curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
        -H "Accept: application/vnd.github+json" \
        -H "X-GitHub-Api-Version: 2022-11-28" \
-       "${GITHUB_API_URL}${path}" "$@"
+       "${GITHUB_API_URL}${API_PATH}" "$@"
 }
 
 API_ERR="$(mktemp)"
