@@ -20,9 +20,9 @@ flowchart LR
 | `check.yml` · `tag-existence` | Fails when the git tag already exists on a different commit. A tag already on *this* commit is treated as a re-run, not a collision. |
 | `check.yml` · `changelog-existence` | Extracts the `## [x.y.z]` section from `CHANGELOG.md` and renders it as an Adaptive Card fragment. Uploads `release-changelog`. |
 | `check.yml` · `migration-existence` | Extracts the `previous...current` section from `MIGRATION.md`. Skipped for an initial release, or disabled with `check-migration: false` for artifacts that intentionally have no migration contract. Uploads `release-migration`. |
-| `check.yml` · `chart-existence` | Fails when the chart version is already published. Candidate versions skip the collision check. |
+| `check.yml` · `chart-existence` | Fails when the chart version is already published in any chart registry. Candidate versions skip the collision check. |
 | `check.yml` · `chart-dependency` | Fails when a chart dependency resolves to a development repository. Docker Hub uses one namespace-root chart repository, so its candidate/release path check is skipped. |
-| `check.yml` · `image-existence` | Fails when the image tag is already published. |
+| `check.yml` · `image-existence` | Fails when the image tag is already published in any image registry. |
 | `check.yml` · `verdict` | Consolidates every guard into one table and one required status check. |
 
 > [!TIP]
@@ -37,6 +37,7 @@ flowchart LR
 | `release-version` | `1.4.0` | scan target resolution |
 | `is-release` | `true` | promote vs build routing |
 | `version-suffix` | `-42.891` | diagnostics |
+| `registry` / `image-registry` / `chart-registry` | `registry.example.com`, each artifact's primary | diagnostics |
 | `image-tag` / `image-push-tag` | `1.4.0` / `1.4.0-42.891` | `docker`, `buildah` |
 | `image-repository` / `image-dev-repository` / `image-push-repository` | `contoso/order-backend[-dev]` on Docker Hub | `docker`, `check`, promote |
 | `chart-name` / `chart-version` / `chart-app-version` / `chart-push-version` | `order-backend` / `1.4.0` / `1.4.0-42.891` | `chart` |
@@ -45,5 +46,10 @@ flowchart LR
 | `upstream-run-id` / `merged-pr-number` | `18234567` / `891` | `release` artifact restore |
 | `candidate-image-tag` / `candidate-chart-version` | `1.4.0-42.891` | exact promotion source |
 | `major-version` / `minor-version` | `1` / `1.4` | image aliases |
+
+With a [credential group](../configuration.md#publishing-to-several-registries), each
+repository output lists the full repositories, `<registry>/<path>`, space-separated, primary
+first, and the registry outputs are the primaries' hosts. Pass them on unchanged: the image,
+chart, check, scan and deploy workflows read the registries from the repositories.
 
 [Documentation index](../../README.md)

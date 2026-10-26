@@ -21,7 +21,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Production chart repository, from init.yml."
+        description: "Production chart repository, from init.yml; with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories."
       image-tag:
         required: false
         type: string
@@ -31,7 +31,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Production image repository, from init.yml."
+        description: "Production image repository, from init.yml; with vars.PROJECT_REGISTRY_NAME, the full <registry>/<path> repositories."
       project-path:
         required: false
         type: string
@@ -143,11 +143,13 @@ jobs:
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPOSITORY: ${{ inputs.image-repository }}
           IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          PROJECT_REGISTRY_NAME: ${{ vars.PROJECT_REGISTRY_NAME }}
           IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
           IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
           CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
           RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md

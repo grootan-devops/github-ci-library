@@ -10,22 +10,32 @@
 # release tag. Packaging from the working tree is a last resort and warns
 # loudly, because those bytes never went through the scan.
 #
+# With vars.PROJECT_REGISTRY_NAME (scripts/registry/lib.sh) the candidate is
+# resolved and promoted in the primary repository exactly as above; the same
+# promoted package is then pushed to every other repository PROD_REPOSITORY
+# lists, each registry logged in to once, and every one is tried before the
+# step fails.
+#
 # Env:
 #   CHART_NAME            chart name
 #   TAG                   production tag to promote to (default: none)
 #   CANDIDATE_VERSION     exact candidate version to promote (default: newest
 #                         candidate matching ^${TAG}-0)
 #   DEV_REPOSITORY        candidate repository to promote from (same as the
-#                         production repository on Docker Hub; default: none)
-#   PROD_REPOSITORY       production repository to push to
-#   CHART_REGISTRY        OCI registry host
+#                         production repository on Docker Hub; default: none):
+#                         the path in CHART_REGISTRY, or with a group the full
+#                         <registry>/<path> repositories, primary first
+#   PROD_REPOSITORY       production repository to push to, given the same way
+#   CHART_REGISTRY, or PROJECT_REGISTRY_NAME and REGISTRY_CONFIG
+#                         the registries, the primary being promoted in, and
+#                         their credentials -- see scripts/registry/lib.sh
 #   CHART_DIR             working-tree chart directory (default: ./chart)
 #   CHART_INFO_FILE_NAME  file the published details are written to
 #                         (default: CHART_INFO.md)
 #   GITHUB_STEP_SUMMARY   GitHub-provided; appended to
 #
 # Exit codes: 0 promoted; 1 no candidate and no local chart to fall back to,
-# or the production repository refused the package. These gate the release.
+# or a production repository refused the package. These gate the release.
 set -euo pipefail
 
 : "${CHART_NAME:?CHART_NAME must be set}"
@@ -35,11 +45,14 @@ set -euo pipefail
 : "${DEV_REPOSITORY:=}"
 # shellcheck source=scripts/chart/registry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/registry.sh"
-chart_registry_validate
+chart_registry_targets "${PROD_REPOSITORY}" "${DEV_REPOSITORY}" || exit 1
 : "${CHART_DIR:=./chart}"
 : "${CHART_INFO_FILE_NAME:=CHART_INFO.md}"
+PRIMARY="${REGISTRY_PRIMARY}"
+PROD_REPOSITORY="${REGISTRY_REPOS[0]}"
+DEV_REPOSITORY="${REGISTRY_DEV_REPOS[0]-}"
 
-DEV_REF="oci://${CHART_REGISTRY}/${DEV_REPOSITORY}/${CHART_NAME}"
+DEV_REF="oci://${PRIMARY}/${DEV_REPOSITORY}/${CHART_NAME}"
 PROMOTE_TEMP=$(mktemp -d)
 trap 'rm -rf "${PROMOTE_TEMP}"' EXIT
 PULLED=0
@@ -83,23 +96,54 @@ else
   exit 1
 fi
 
-if ! helm push "${CHART_NAME}-${TAG}.tgz" "oci://${CHART_REGISTRY}/${PROD_REPOSITORY}" >/dev/null 2>&1; then
+if ! helm push "${CHART_NAME}-${TAG}.tgz" "oci://${PRIMARY}/${PROD_REPOSITORY}" >/dev/null 2>&1; then
   echo "::error title=Chart promote::The production repository refused ${CHART_NAME}-${TAG}.tgz."
   {
     echo "### ⎈ Helm Chart Package Info"
     echo ""
-    echo "❌ \`oci://${CHART_REGISTRY}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged. Check chart credentials, repository permissions and registry connectivity."
+    echo "❌ \`oci://${PRIMARY}/${PROD_REPOSITORY}\` refused \`${CHART_NAME}-${TAG}.tgz\`. The candidate \`${PROMOTED_FROM}\` is unchanged. Check chart credentials, repository permissions and registry connectivity."
     echo ""
   } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
 echo "Published ${CHART_NAME}:${TAG}."
 
+# Every other registry receives the same promoted package.
+COPIES=()
+FAILED=()
+for ((I = 1; I < ${#REGISTRY_HOSTS[@]}; I++)); do
+  LABEL="${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}"
+  TARGET="oci://${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}"
+  if ! chart_registry_login "${I}"; then
+    FAILED+=("${LABEL}")
+    continue
+  fi
+  if ! helm push "${CHART_NAME}-${TAG}.tgz" "${TARGET}" >/dev/null 2>&1; then
+    echo "::error title=Chart promote::${TARGET} refused ${CHART_NAME}-${TAG}.tgz."
+    FAILED+=("${LABEL}")
+    continue
+  fi
+  echo "Published ${CHART_NAME}:${TAG} to ${TARGET}."
+  COPIES+=("- **🌐 Registry:** \`${TARGET}\`")
+done
+
 {
   echo "### ⎈ Helm Chart Package Info"
   echo "- **📦 Name:** \`${CHART_NAME}\`"
   echo "- **🏷️ Version:** \`${TAG}\`"
-  echo "- **🌐 Registry:** \`oci://${CHART_REGISTRY}/${PROD_REPOSITORY}\`"
+  echo "- **🌐 Registry:** \`oci://${PRIMARY}/${PROD_REPOSITORY}\`"
+  if [[ ${#COPIES[@]} -gt 0 ]]; then
+    printf '%s\n' "${COPIES[@]}"
+  fi
+  for LABEL in "${FAILED[@]}"; do
+    echo "- **🌐 Registry:** ❌ \`${LABEL}\` was not published; the log names the reason"
+  done
   echo "- **🔗 Promoted from:** \`${PROMOTED_FROM}\`"
 } > "${CHART_INFO_FILE_NAME}"
 cat "${CHART_INFO_FILE_NAME}" >> "${GITHUB_STEP_SUMMARY}"
+
+if [[ ${#FAILED[@]} -gt 0 ]]; then
+  JOINED="$(printf '%s, ' "${FAILED[@]}")"
+  echo "::error title=Chart promote::${CHART_NAME}:${TAG} was promoted in ${PRIMARY} but not published to: ${JOINED%, }. Every repository was tried; re-run once they are fixed."
+  exit 1
+fi
