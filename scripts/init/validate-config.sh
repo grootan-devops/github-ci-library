@@ -89,11 +89,11 @@ if [[ ! -f "${DOCKERFILE_PATH}" && -f "${DOCKERFILE}" ]]; then
 fi
 
 publishes_artifact() {
-  local input="${1,,}" present="${2}"
-  case "${input}" in
+  local IGNORE_VALUE="${1,,}" ARTIFACT_PRESENT="${2}"
+  case "${IGNORE_VALUE}" in
     true)  return 1 ;;
     false) return 0 ;;
-    auto|"") [[ "${present}" == "true" ]] ;;
+    auto|"") [[ "${ARTIFACT_PRESENT}" == "true" ]] ;;
     *)
       echo "::error::Invalid ignore input '${1}'. Expected one of: auto, true, false." >&2
       return 2
@@ -131,14 +131,14 @@ INVALID=false
 
 # Record what one artifact lacks with a single registry. KIND is image or chart.
 check_single() {
-  local kind="$1" registry="$2" repositories="$3"
-  local label="${kind^^}"
-  local user="${label}_REGISTRY_USERNAME" pass="${label}_REGISTRY_PASSWORD"
-  [[ -n "${registry}" ]] || MISSING+=("vars.${label}_REGISTRY")
-  [[ -n "${repositories}" ]] || MISSING+=("vars.${label}_REPOSITORY")
-  [[ -n "${!user}" ]] || MISSING+=("secrets.${user}")
-  [[ -n "${!pass}" ]] || MISSING+=("secrets.${pass}")
-  if [[ -n "${registry}" ]] && ! registry_resolve "${kind}" "${repositories}"; then
+  local ARTIFACT_KIND="$1" SINGLE_REGISTRY="$2" REPO_LIST="$3"
+  local KIND_LABEL="${ARTIFACT_KIND^^}"
+  local USER_VAR="${KIND_LABEL}_REGISTRY_USERNAME" PASS_VAR="${KIND_LABEL}_REGISTRY_PASSWORD"
+  [[ -n "${SINGLE_REGISTRY}" ]] || MISSING+=("vars.${KIND_LABEL}_REGISTRY")
+  [[ -n "${REPO_LIST}" ]] || MISSING+=("vars.${KIND_LABEL}_REPOSITORY")
+  [[ -n "${!USER_VAR}" ]] || MISSING+=("secrets.${USER_VAR}")
+  [[ -n "${!PASS_VAR}" ]] || MISSING+=("secrets.${PASS_VAR}")
+  if [[ -n "${SINGLE_REGISTRY}" ]] && ! registry_resolve "${ARTIFACT_KIND}" "${REPO_LIST}"; then
     INVALID=true
   fi
 }
@@ -147,16 +147,16 @@ check_single() {
 # registry of the group, and each of those registries has a username and
 # password.
 check_named() {
-  local kind="$1" repositories="$2" status
-  local label="${kind^^}"
-  if [[ -z "${repositories//[[:space:],]/}" ]]; then
-    MISSING+=("vars.${label}_REPOSITORY")
+  local ARTIFACT_KIND="$1" REPO_LIST="$2" RC
+  local KIND_LABEL="${ARTIFACT_KIND^^}"
+  if [[ -z "${REPO_LIST//[[:space:],]/}" ]]; then
+    MISSING+=("vars.${KIND_LABEL}_REPOSITORY")
     registry_group_load || INVALID=true
     return 0
   fi
-  status=0
-  registry_resolve "${kind}" "${repositories}" || status=$?
-  if [[ ${status} -ne 0 ]]; then
+  RC=0
+  registry_resolve "${ARTIFACT_KIND}" "${REPO_LIST}" || RC=$?
+  if [[ ${RC} -ne 0 ]]; then
     INVALID=true
     return 0
   fi

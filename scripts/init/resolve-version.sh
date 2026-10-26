@@ -244,17 +244,17 @@ source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
 # full repositories the variable lists, and an artifact this run does not
 # publish may have none, which leaves its outputs empty.
 resolve_targets() {
-  local kind="$1" ignored="$2" registry="$3" repositories="$4" suffix="$5" i status
-  TARGET_HOSTS=("${registry}")
-  TARGET_REPOS=("${repositories}")
+  local ARTIFACT_KIND="$1" IGNORED="$2" SINGLE_REGISTRY="$3" REPO_LIST="$4" REPO_SUFFIX="$5" I RC
+  TARGET_HOSTS=("${SINGLE_REGISTRY}")
+  TARGET_REPOS=("${REPO_LIST}")
   if registry_named; then
-    status=0
-    if [[ "${ignored}" == "true" ]]; then
-      registry_resolve "${kind}" "${repositories}" 2>/dev/null || status=$?
+    RC=0
+    if [[ "${IGNORED}" == "true" ]]; then
+      registry_resolve "${ARTIFACT_KIND}" "${REPO_LIST}" 2>/dev/null || RC=$?
     else
-      registry_resolve "${kind}" "${repositories}" || exit 1
+      registry_resolve "${ARTIFACT_KIND}" "${REPO_LIST}" || exit 1
     fi
-    if [[ ${status} -eq 0 ]]; then
+    if [[ ${RC} -eq 0 ]]; then
       TARGET_HOSTS=("${REGISTRY_HOSTS[@]}")
       TARGET_REPOS=("${REGISTRY_REPOS[@]}")
     else
@@ -262,8 +262,8 @@ resolve_targets() {
     fi
   fi
   TARGET_DEV_REPOS=()
-  for i in "${!TARGET_HOSTS[@]}"; do
-    TARGET_DEV_REPOS+=("$(registry_dev_repository "${kind}" "${TARGET_HOSTS[i]}" "${TARGET_REPOS[i]}" "${suffix}")")
+  for I in "${!TARGET_HOSTS[@]}"; do
+    TARGET_DEV_REPOS+=("$(registry_dev_repository "${ARTIFACT_KIND}" "${TARGET_HOSTS[${I}]}" "${TARGET_REPOS[${I}]}" "${REPO_SUFFIX}")")
   done
 }
 
@@ -301,14 +301,14 @@ done
 # first, because the registries are only known from them; otherwise it is the
 # path in the single registry, as it always was.
 full_refs() {
-  local -n hosts="$1" repos="$2"
-  local i refs=()
-  for i in "${!hosts[@]}"; do
-    if [[ -n "${hosts[i]}" ]]; then
-      refs+=("${hosts[i]}/${repos[i]}")
+  local -n _HOSTS_REF="$1" _REPOS_REF="$2"
+  local I REFS=()
+  for I in "${!_HOSTS_REF[@]}"; do
+    if [[ -n "${_HOSTS_REF[${I}]}" ]]; then
+      REFS+=("${_HOSTS_REF[${I}]}/${_REPOS_REF[${I}]}")
     fi
   done
-  printf '%s\n' "${refs[*]}"
+  printf '%s\n' "${REFS[*]}"
 }
 if registry_named; then
   IMAGE_REPO="$(full_refs IMAGE_HOSTS IMAGE_REPOS)"

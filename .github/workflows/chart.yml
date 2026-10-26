@@ -244,14 +244,14 @@ jobs:
             echo "::error::Set mock-chart to space-separated chart directories."
             exit 1
           fi
-          read -r -a mock_charts <<< "${MOCK_CHARTS}"
-          for mock_chart in "${mock_charts[@]}"; do
-            chart_path="${CHART_DIR}/${mock_chart}"
-            if [[ ! -f "${chart_path}/Chart.yaml" ]]; then
-              echo "::error::Mock chart '${chart_path}' lacks Chart.yaml."
+          read -r -a MOCK_CHART_LIST <<< "${MOCK_CHARTS}"
+          for MOCK_CHART_DIR in "${MOCK_CHART_LIST[@]}"; do
+            MOCK_CHART_PATH="${CHART_DIR}/${MOCK_CHART_DIR}"
+            if [[ ! -f "${MOCK_CHART_PATH}/Chart.yaml" ]]; then
+              echo "::error::Mock chart '${MOCK_CHART_PATH}' lacks Chart.yaml."
               exit 1
             fi
-            helm dependency update "${chart_path}"
+            helm dependency update "${MOCK_CHART_PATH}"
           done
 
       - name: Run helm-unittest

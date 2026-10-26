@@ -63,7 +63,7 @@ if registry_is_docker_hub "${PRIMARY}"; then
     "docker.io": {auth: .}
   }}' > ~/.docker/config.json
 else
-  printf '%s' "${AUTH}" | jq -R --arg reg "${PRIMARY}" '{auths: {($reg): {auth: .}}}' > ~/.docker/config.json
+  printf '%s' "${AUTH}" | jq -R --arg PRIMARY_HOST "${PRIMARY}" '{auths: {($PRIMARY_HOST): {auth: .}}}' > ~/.docker/config.json
 fi
 {
   echo "host=${PRIMARY}"

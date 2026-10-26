@@ -111,10 +111,10 @@ echo "Published ${CHART_NAME}:${TAG}."
 # Every other registry receives the same promoted package.
 COPIES=()
 FAILED=()
-for ((i = 1; i < ${#REGISTRY_HOSTS[@]}; i++)); do
-  LABEL="${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}"
-  TARGET="oci://${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}"
-  if ! chart_registry_login "${i}"; then
+for ((I = 1; I < ${#REGISTRY_HOSTS[@]}; I++)); do
+  LABEL="${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}"
+  TARGET="oci://${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}"
+  if ! chart_registry_login "${I}"; then
     FAILED+=("${LABEL}")
     continue
   fi

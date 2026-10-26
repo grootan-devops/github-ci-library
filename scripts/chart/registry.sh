@@ -34,12 +34,12 @@ chart_registry_login() {
 # Return 0 for present, 1 for confirmed absence, 2 for operational errors.
 # Successful metadata is returned on stdout for candidate-version resolution.
 chart_oci_lookup() {
-  local ref="$1" version="$2" output
-  if output=$(helm show chart "${ref}" --version "${version}" 2>&1); then
-    printf '%s\n' "${output}"
+  local LOOKUP_REF="$1" LOOKUP_VERSION="$2" LOOKUP_OUTPUT
+  if LOOKUP_OUTPUT=$(helm show chart "${LOOKUP_REF}" --version "${LOOKUP_VERSION}" 2>&1); then
+    printf '%s\n' "${LOOKUP_OUTPUT}"
     return 0
   fi
-  case "${output}" in
+  case "${LOOKUP_OUTPUT}" in
     *401*|*403*|*Unauthorized*|*unauthorized*|*denied*|*timeout*|*connection*|*"no such host"*|*x509*|*executable*|*"command not found"*) ;;
     *"not found"*|*"404 Not Found"*|*MANIFEST_UNKNOWN*|*NAME_UNKNOWN*|*"Unable to locate any tags in provided repository"*|*"Could not locate a version matching provided version string"*) return 1 ;;
   esac
@@ -64,8 +64,8 @@ chart_dependency_login() (
       exit 0
     fi
     chart_registry_validate || exit 1
-    for i in "${!REGISTRY_HOSTS[@]}"; do
-      registry_login --optional helm "${i}" || exit 1
+    for I in "${!REGISTRY_HOSTS[@]}"; do
+      registry_login --optional helm "${I}" || exit 1
     done
     exit 0
   fi

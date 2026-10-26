@@ -33,18 +33,18 @@ registry_resolve image "${IMAGE_REPOSITORY}" || exit 1
 TAKEN=()
 UNCHECKED=()
 FREE=()
-for i in "${!REGISTRY_HOSTS[@]}"; do
-  LABEL="${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}"
+for I in "${!REGISTRY_HOSTS[@]}"; do
+  LABEL="${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}"
   LOGIN_ARGS=()
-  if [[ ${i} -eq 0 ]]; then
+  if [[ ${I} -eq 0 ]]; then
     LOGIN_ARGS=(--optional)
   fi
-  if ! registry_login "${LOGIN_ARGS[@]}" crane "${i}"; then
+  if ! registry_login "${LOGIN_ARGS[@]}" crane "${I}"; then
     echo "::error title=Image::Could not authenticate to ${LABEL}."
     UNCHECKED+=("${LABEL}")
     continue
   fi
-  TARGET="${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}:${IMAGE_TAG}"
+  TARGET="${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}:${IMAGE_TAG}"
   if crane manifest "${TARGET}" >/dev/null 2>&1; then
     echo "::error title=Image::'${TARGET}' already exists in the production repository. Bump the application version."
     TAKEN+=("${TARGET}")

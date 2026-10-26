@@ -70,13 +70,13 @@ if [[ -n "${CHART_REGISTRY}" ]] || registry_named; then
 fi
 DEV_PATHS=()
 ALL_DOCKER_HUB=true
-for i in "${!HOSTS[@]}"; do
-  if registry_is_docker_hub "${HOSTS[i]}"; then
+for I in "${!HOSTS[@]}"; do
+  if registry_is_docker_hub "${HOSTS[${I}]}"; then
     continue
   fi
   ALL_DOCKER_HUB=false
-  DEV_PATH="${REPOS[i]}${CHART_DEV_REPOSITORY_SUFFIX}"
-  if [[ -n "${REPOS[i]}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" && " ${DEV_PATHS[*]} " != *" ${DEV_PATH} "* ]]; then
+  DEV_PATH="${REPOS[${I}]}${CHART_DEV_REPOSITORY_SUFFIX}"
+  if [[ -n "${REPOS[${I}]}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" && " ${DEV_PATHS[*]} " != *" ${DEV_PATH} "* ]]; then
     DEV_PATHS+=("${DEV_PATH}")
   fi
 done

@@ -66,9 +66,9 @@ fi
 
 ROWS=()
 FAILED=()
-for ((i = 1; i < ${#REGISTRY_HOSTS[@]}; i++)); do
-  TARGET="${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}"
-  if ! registry_login crane "${i}"; then
+for ((I = 1; I < ${#REGISTRY_HOSTS[@]}; I++)); do
+  TARGET="${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}"
+  if ! registry_login crane "${I}"; then
     FAILED+=("${TARGET}")
     continue
   fi

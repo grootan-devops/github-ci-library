@@ -58,9 +58,9 @@
 
 # Split a list on spaces, commas and newlines, keeping order, into REGISTRY_LIST.
 registry_list() {
-  local value="${1-}"
+  local LIST_TEXT="${1-}"
   REGISTRY_LIST=()
-  IFS=$' \t\n' read -r -d '' -a REGISTRY_LIST <<< "${value//,/ }" || true
+  IFS=$' \t\n' read -r -d '' -a REGISTRY_LIST <<< "${LIST_TEXT//,/ }" || true
 }
 
 # Print the first item of a list.
@@ -74,14 +74,14 @@ registry_primary() {
 # path, Docker Hub's aliases folded to docker.io. Logins and pushes keep the
 # host exactly as it was written.
 registry_canonical_host() {
-  local host="${1-}"
-  host="${host,,}"
-  host="${host#*://}"
-  host="${host%%/*}"
-  case "${host}" in
-    index.docker.io|registry-1.docker.io) host="docker.io" ;;
+  local CANONICAL_HOST="${1-}"
+  CANONICAL_HOST="${CANONICAL_HOST,,}"
+  CANONICAL_HOST="${CANONICAL_HOST#*://}"
+  CANONICAL_HOST="${CANONICAL_HOST%%/*}"
+  case "${CANONICAL_HOST}" in
+    index.docker.io|registry-1.docker.io) CANONICAL_HOST="docker.io" ;;
   esac
-  printf '%s\n' "${host}"
+  printf '%s\n' "${CANONICAL_HOST}"
 }
 
 registry_is_docker_hub() {
@@ -91,18 +91,18 @@ registry_is_docker_hub() {
 # Expand a list to COUNT entries into REGISTRY_EXPANDED: one value is repeated,
 # COUNT values are used as given, anything else is an error naming NAME.
 registry_expand() {
-  local name="$1" count="$2" i
+  local EXPAND_NAME="$1" EXPAND_COUNT="$2" I
   local REGISTRY_LIST=()
   registry_list "${3-}"
   REGISTRY_EXPANDED=()
-  if [[ ${#REGISTRY_LIST[@]} -eq "${count}" ]]; then
+  if [[ ${#REGISTRY_LIST[@]} -eq "${EXPAND_COUNT}" ]]; then
     REGISTRY_EXPANDED=("${REGISTRY_LIST[@]}")
   elif [[ ${#REGISTRY_LIST[@]} -eq 1 ]]; then
-    for ((i = 0; i < count; i++)); do
+    for ((I = 0; I < EXPAND_COUNT; I++)); do
       REGISTRY_EXPANDED+=("${REGISTRY_LIST[0]}")
     done
   else
-    echo "::error title=Registry::${name} has ${#REGISTRY_LIST[@]} value(s) for ${count} repositories. Give one value for all of them, or one per repository in the same order." >&2
+    echo "::error title=Registry::${EXPAND_NAME} has ${#REGISTRY_LIST[@]} value(s) for ${EXPAND_COUNT} repositories. Give one value for all of them, or one per repository in the same order." >&2
     return 1
   fi
 }
@@ -111,23 +111,23 @@ registry_expand() {
 # repositories, so `/dev` becomes `-dev`; its Helm charts live in the
 # namespace root, so charts take no suffix there at all.
 registry_dev_repository() {
-  local kind="$1" host="$2" repo="$3" suffix="${4-}"
-  if registry_is_docker_hub "${host}"; then
-    if [[ "${kind}" == "chart" ]]; then
-      suffix=""
+  local ARTIFACT_KIND="$1" REPO_HOST="$2" REPO_PATH="$3" REPO_SUFFIX="${4-}"
+  if registry_is_docker_hub "${REPO_HOST}"; then
+    if [[ "${ARTIFACT_KIND}" == "chart" ]]; then
+      REPO_SUFFIX=""
     else
-      suffix="${suffix//\//-}"
+      REPO_SUFFIX="${REPO_SUFFIX//\//-}"
     fi
   fi
-  printf '%s\n' "${repo}${suffix}"
+  printf '%s\n' "${REPO_PATH}${REPO_SUFFIX}"
 }
 
 # Print PROJECT_REGISTRY_NAME without surrounding whitespace.
 registry_group_name() {
-  local name="${PROJECT_REGISTRY_NAME-}"
-  name="${name#"${name%%[![:space:]]*}"}"
-  name="${name%"${name##*[![:space:]]}"}"
-  printf '%s\n' "${name}"
+  local GROUP_NAME="${PROJECT_REGISTRY_NAME-}"
+  GROUP_NAME="${GROUP_NAME#"${GROUP_NAME%%[![:space:]]*}"}"
+  GROUP_NAME="${GROUP_NAME%"${GROUP_NAME##*[![:space:]]}"}"
+  printf '%s\n' "${GROUP_NAME}"
 }
 
 # Succeed when PROJECT_REGISTRY_NAME names a group.
@@ -139,24 +139,24 @@ registry_named() {
 # variable: nothing says which of them should win. init.yml runs this first,
 # so a pipeline configured both ways stops before any job publishes anything.
 registry_check_mode() {
-  local variable value set=()
+  local KIND_VARIABLE VARIABLE_VALUE BOTH_SET=()
   if ! registry_named; then
     return 0
   fi
-  for variable in IMAGE_REGISTRY CHART_REGISTRY; do
-    value="${!variable-}"
-    if [[ -n "${value//[[:space:],]/}" ]]; then
-      set+=("vars.${variable}")
+  for KIND_VARIABLE in IMAGE_REGISTRY CHART_REGISTRY; do
+    VARIABLE_VALUE="${!KIND_VARIABLE-}"
+    if [[ -n "${VARIABLE_VALUE//[[:space:],]/}" ]]; then
+      BOTH_SET+=("vars.${KIND_VARIABLE}")
     fi
   done
-  if [[ ${#set[@]} -eq 0 ]]; then
+  if [[ ${#BOTH_SET[@]} -eq 0 ]]; then
     return 0
   fi
-  local joined="${set[0]}"
-  if [[ ${#set[@]} -gt 1 ]]; then
-    joined="${set[0]} and ${set[1]}"
+  local JOINED_NAMES="${BOTH_SET[0]}"
+  if [[ ${#BOTH_SET[@]} -gt 1 ]]; then
+    JOINED_NAMES="${BOTH_SET[0]} and ${BOTH_SET[1]}"
   fi
-  echo "::error title=Registry::vars.PROJECT_REGISTRY_NAME and ${joined} are both set, so it is unclear where to publish. Remove ${joined} to publish to the full repositories vars.IMAGE_REPOSITORY and vars.CHART_REPOSITORY list, or remove vars.PROJECT_REGISTRY_NAME to publish to a single registry." >&2
+  echo "::error title=Registry::vars.PROJECT_REGISTRY_NAME and ${JOINED_NAMES} are both set, so it is unclear where to publish. Remove ${JOINED_NAMES} to publish to the full repositories vars.IMAGE_REPOSITORY and vars.CHART_REPOSITORY list, or remove vars.PROJECT_REGISTRY_NAME to publish to a single registry." >&2
   return 2
 }
 
@@ -164,26 +164,26 @@ registry_check_mode() {
 # REF_HOST and REF_PATH. Fails when the first part is not a registry host, or
 # REF carries a scheme, a tag or a digest.
 registry_split_ref() {
-  local kind="$1" ref="$2" host path
+  local ARTIFACT_KIND="$1" REPO_REF="$2" SPLIT_HOST SPLIT_PATH
   REF_HOST=""
   REF_PATH=""
-  if [[ "${kind}" == "chart" ]]; then
-    ref="${ref#oci://}"
+  if [[ "${ARTIFACT_KIND}" == "chart" ]]; then
+    REPO_REF="${REPO_REF#oci://}"
   fi
-  ref="${ref%/}"
-  if [[ "${ref}" != */* || "${ref}" == *://* || "${ref}" == *@* ]]; then
+  REPO_REF="${REPO_REF%/}"
+  if [[ "${REPO_REF}" != */* || "${REPO_REF}" == *://* || "${REPO_REF}" == *@* ]]; then
     return 1
   fi
-  host="${ref%%/*}"
-  path="${ref#*/}"
-  if [[ -z "${path}" || "${path}" == /* || "${path}" == *:* ]]; then
+  SPLIT_HOST="${REPO_REF%%/*}"
+  SPLIT_PATH="${REPO_REF#*/}"
+  if [[ -z "${SPLIT_PATH}" || "${SPLIT_PATH}" == /* || "${SPLIT_PATH}" == *:* ]]; then
     return 1
   fi
-  if [[ "${host}" != *.* && "${host}" != *:* && "${host}" != "localhost" ]]; then
+  if [[ "${SPLIT_HOST}" != *.* && "${SPLIT_HOST}" != *:* && "${SPLIT_HOST}" != "localhost" ]]; then
     return 1
   fi
-  REF_HOST="${host}"
-  REF_PATH="${path}"
+  REF_HOST="${SPLIT_HOST}"
+  REF_PATH="${SPLIT_PATH}"
 }
 
 # Load REGISTRY_CONFIG once into _REGISTRY_CONFIG_JSON. YAML is converted with
@@ -197,31 +197,31 @@ registry_config_load() {
   _REGISTRY_CONFIG_LOADED=1
   _REGISTRY_CONFIG_STATUS=2
   _REGISTRY_CONFIG_JSON=""
-  local raw="${REGISTRY_CONFIG-}" json=""
-  if [[ -z "${raw//[[:space:]]/}" ]]; then
+  local RAW="${REGISTRY_CONFIG-}" JSON=""
+  if [[ -z "${RAW//[[:space:]]/}" ]]; then
     echo "::error title=Registry config::vars.PROJECT_REGISTRY_NAME is set, but the REGISTRY_CONFIG secret is empty or was not passed to this workflow. Set it on the organisation or repository and call the workflow with secrets: inherit." >&2
     return 2
   fi
-  if [[ "${raw}" != *$'\n'* && -f "${raw}" && -r "${raw}" ]]; then
-    raw="$(cat -- "${raw}")"
+  if [[ "${RAW}" != *$'\n'* && -f "${RAW}" && -r "${RAW}" ]]; then
+    RAW="$(cat -- "${RAW}")"
   fi
   if ! command -v jq >/dev/null 2>&1; then
     echo "::error title=Registry config::jq is required to read REGISTRY_CONFIG." >&2
     return 2
   fi
-  if [[ "${raw}" =~ ^[[:space:]]*\{ ]]; then
-    json="$(printf '%s' "${raw}" | jq -c . 2>/dev/null)" || json=""
+  if [[ "${RAW}" =~ ^[[:space:]]*\{ ]]; then
+    JSON="$(printf '%s' "${RAW}" | jq -c . 2>/dev/null)" || JSON=""
   elif command -v yq >/dev/null 2>&1; then
-    json="$(printf '%s' "${raw}" | yq eval -o=json -I=0 'explode(.)' - 2>/dev/null)" || json=""
+    JSON="$(printf '%s' "${RAW}" | yq eval -o=json -I=0 'explode(.)' - 2>/dev/null)" || JSON=""
   else
     echo "::error title=Registry config::yq is required to read REGISTRY_CONFIG as YAML; store it as JSON on a runner without yq." >&2
     return 2
   fi
-  if [[ -z "${json}" ]] || ! json="$(printf '%s' "${json}" | jq -c 'if type == "object" then . else error("not a map") end' 2>/dev/null)"; then
+  if [[ -z "${JSON}" ]] || ! JSON="$(printf '%s' "${JSON}" | jq -c 'if type == "object" then . else error("not a map") end' 2>/dev/null)"; then
     echo "::error title=Registry config::REGISTRY_CONFIG is not valid YAML or JSON mapping group names to their registries." >&2
     return 2
   fi
-  _REGISTRY_CONFIG_JSON="${json}"
+  _REGISTRY_CONFIG_JSON="${JSON}"
   _REGISTRY_CONFIG_STATUS=0
 }
 
@@ -229,59 +229,59 @@ registry_config_load() {
 # _REGISTRY_GROUP_HOSTS, once. Returns 0, or 2 when the group is missing or is
 # not a map of registries.
 registry_group_load() {
-  local name line status hosts
-  name="$(registry_group_name)"
-  if [[ "${_REGISTRY_GROUP_LOADED-}" == "${name}" ]]; then
+  local GROUP_NAME JQ_LINE GROUP_STATE HOST_KEYS
+  GROUP_NAME="$(registry_group_name)"
+  if [[ "${_REGISTRY_GROUP_LOADED-}" == "${GROUP_NAME}" ]]; then
     return 0
   fi
   _REGISTRY_GROUP_HOSTS=()
   registry_config_load || return 2
-  # shellcheck disable=SC2016 # $name is a jq variable, not a shell one
-  if ! line="$(printf '%s' "${_REGISTRY_CONFIG_JSON}" | jq -r --arg name "${name}" '
-      .[$name] as $g
-      | if $g == null then "missing"
-        elif ($g | type) != "object" or ($g | length) == 0
-             or ($g | keys | map(test("^[^\\s,/]+$")) | all | not)
+  # shellcheck disable=SC2016 # $GROUP_NAME and $GROUP are jq variables, not shell ones
+  if ! JQ_LINE="$(printf '%s' "${_REGISTRY_CONFIG_JSON}" | jq -r --arg GROUP_NAME "${GROUP_NAME}" '
+      .[$GROUP_NAME] as $GROUP
+      | if $GROUP == null then "missing"
+        elif ($GROUP | type) != "object" or ($GROUP | length) == 0
+             or ($GROUP | keys | map(test("^[^\\s,/]+$")) | all | not)
         then "invalid"
-        else "ok\t" + ($g | keys_unsorted | join(" ")) end' 2>/dev/null)"; then
-    line="invalid"
+        else "ok\t" + ($GROUP | keys_unsorted | join(" ")) end' 2>/dev/null)"; then
+    JQ_LINE="invalid"
   fi
-  IFS=$'\t' read -r status hosts <<< "${line}"
-  case "${status}" in
+  IFS=$'\t' read -r GROUP_STATE HOST_KEYS <<< "${JQ_LINE}"
+  case "${GROUP_STATE}" in
     ok) ;;
     missing)
-      echo "::error title=Registry config::vars.PROJECT_REGISTRY_NAME names group '${name}', which REGISTRY_CONFIG does not define." >&2
+      echo "::error title=Registry config::vars.PROJECT_REGISTRY_NAME names group '${GROUP_NAME}', which REGISTRY_CONFIG does not define." >&2
       return 2
       ;;
     *)
-      echo "::error title=Registry config::REGISTRY_CONFIG group '${name}' must map registry hosts, such as docker.io or quay.io, to their credentials." >&2
+      echo "::error title=Registry config::REGISTRY_CONFIG group '${GROUP_NAME}' must map registry hosts, such as docker.io or quay.io, to their credentials." >&2
       return 2
       ;;
   esac
-  read -r -a _REGISTRY_GROUP_HOSTS <<< "${hosts}"
-  _REGISTRY_GROUP_LOADED="${name}"
+  read -r -a _REGISTRY_GROUP_HOSTS <<< "${HOST_KEYS}"
+  _REGISTRY_GROUP_LOADED="${GROUP_NAME}"
 }
 
 # Find the group's registry for HOST, ignoring case, scheme and Docker Hub's
 # aliases, into REG_ENTRY_KEY. Returns 0 found, 1 none, 2 when two of the
 # group's registries are the same host.
 registry_group_entry() {
-  local host="$1" canonical key found=()
+  local HOST_NAME="$1" CANONICAL GROUP_KEY MATCHED_KEYS=()
   REG_ENTRY_KEY=""
-  canonical="$(registry_canonical_host "${host}")"
-  for key in "${_REGISTRY_GROUP_HOSTS[@]}"; do
-    if [[ "$(registry_canonical_host "${key}")" == "${canonical}" ]]; then
-      found+=("${key}")
+  CANONICAL="$(registry_canonical_host "${HOST_NAME}")"
+  for GROUP_KEY in "${_REGISTRY_GROUP_HOSTS[@]}"; do
+    if [[ "$(registry_canonical_host "${GROUP_KEY}")" == "${CANONICAL}" ]]; then
+      MATCHED_KEYS+=("${GROUP_KEY}")
     fi
   done
-  if [[ ${#found[@]} -eq 0 ]]; then
+  if [[ ${#MATCHED_KEYS[@]} -eq 0 ]]; then
     return 1
   fi
-  if [[ ${#found[@]} -gt 1 ]]; then
-    echo "::error title=Registry config::REGISTRY_CONFIG group '$(registry_group_name)' lists ${found[*]}, which are one registry; keep one of them." >&2
+  if [[ ${#MATCHED_KEYS[@]} -gt 1 ]]; then
+    echo "::error title=Registry config::REGISTRY_CONFIG group '$(registry_group_name)' lists ${MATCHED_KEYS[*]}, which are one registry; keep one of them." >&2
     return 2
   fi
-  REG_ENTRY_KEY="${found[0]}"
+  REG_ENTRY_KEY="${MATCHED_KEYS[0]}"
 }
 
 # Resolve where artifacts of KIND (image | chart | dependency) go, pairing each
@@ -295,62 +295,62 @@ registry_group_entry() {
 # be full repositories on the same registries or plain paths. Chart
 # dependencies always come from the single vars.CHART_DEPENDENCY_REGISTRY host.
 registry_resolve() {
-  local kind="${1-}" repositories="${2-}" dev_repositories="${3-}"
-  local label variable ref host group i key seen=" " status
+  local ARTIFACT_KIND="${1-}" REPO_LIST="${2-}" DEV_REPO_LIST="${3-}"
+  local KIND_LABEL KIND_VARIABLE REPO_REF HOST_NAME GROUP_NAME I HOST_REPO_KEY SEEN=" " RC
   local REGISTRY_LIST=() REGISTRY_EXPANDED=()
-  REGISTRY_KIND="${kind}"
+  REGISTRY_KIND="${ARTIFACT_KIND}"
   REGISTRY_HOSTS=()
   REGISTRY_REPOS=()
   REGISTRY_DEV_REPOS=()
   REGISTRY_PRIMARY=""
-  case "${kind}" in
-    image)      label="IMAGE";            variable="IMAGE_REGISTRY" ;;
-    chart)      label="CHART";            variable="CHART_REGISTRY" ;;
-    dependency) label="CHART_DEPENDENCY"; variable="CHART_DEPENDENCY_REGISTRY" ;;
+  case "${ARTIFACT_KIND}" in
+    image)      KIND_LABEL="IMAGE";            KIND_VARIABLE="IMAGE_REGISTRY" ;;
+    chart)      KIND_LABEL="CHART";            KIND_VARIABLE="CHART_REGISTRY" ;;
+    dependency) KIND_LABEL="CHART_DEPENDENCY"; KIND_VARIABLE="CHART_DEPENDENCY_REGISTRY" ;;
     *)
-      echo "::error title=Registry::Unknown registry kind '${kind}'." >&2
+      echo "::error title=Registry::Unknown registry kind '${ARTIFACT_KIND}'." >&2
       return 2
       ;;
   esac
-  if [[ "${kind}" != "dependency" ]] && registry_named; then
-    group="$(registry_group_name)"
+  if [[ "${ARTIFACT_KIND}" != "dependency" ]] && registry_named; then
+    GROUP_NAME="$(registry_group_name)"
     registry_group_load || return 2
-    registry_list "${repositories}"
+    registry_list "${REPO_LIST}"
     if [[ ${#REGISTRY_LIST[@]} -eq 0 ]]; then
-      echo "::error title=Registry::With vars.PROJECT_REGISTRY_NAME, vars.${label}_REPOSITORY lists the full repositories to publish ${kind}s to, as <registry>/<path>." >&2
+      echo "::error title=Registry::With vars.PROJECT_REGISTRY_NAME, vars.${KIND_LABEL}_REPOSITORY lists the full repositories to publish ${ARTIFACT_KIND}s to, as <registry>/<path>." >&2
       return 1
     fi
-    for ref in "${REGISTRY_LIST[@]}"; do
-      if ! registry_split_ref "${kind}" "${ref}"; then
-        echo "::error title=Registry::vars.${label}_REPOSITORY entry '${ref}' is not a full repository, <registry>/<path>, on a registry of REGISTRY_CONFIG group '${group}'." >&2
+    for REPO_REF in "${REGISTRY_LIST[@]}"; do
+      if ! registry_split_ref "${ARTIFACT_KIND}" "${REPO_REF}"; then
+        echo "::error title=Registry::vars.${KIND_LABEL}_REPOSITORY entry '${REPO_REF}' is not a full repository, <registry>/<path>, on a registry of REGISTRY_CONFIG group '${GROUP_NAME}'." >&2
         return 2
       fi
-      status=0
-      registry_group_entry "${REF_HOST}" || status=$?
-      if [[ ${status} -eq 1 ]]; then
-        echo "::error title=Registry::Registry ${REF_HOST} of '${ref}' is not in REGISTRY_CONFIG group '${group}', which has: ${_REGISTRY_GROUP_HOSTS[*]}." >&2
+      RC=0
+      registry_group_entry "${REF_HOST}" || RC=$?
+      if [[ ${RC} -eq 1 ]]; then
+        echo "::error title=Registry::Registry ${REF_HOST} of '${REPO_REF}' is not in REGISTRY_CONFIG group '${GROUP_NAME}', which has: ${_REGISTRY_GROUP_HOSTS[*]}." >&2
         return 2
-      elif [[ ${status} -ne 0 ]]; then
+      elif [[ ${RC} -ne 0 ]]; then
         return 2
       fi
       REGISTRY_HOSTS+=("${REF_HOST}")
       REGISTRY_REPOS+=("${REF_PATH}")
     done
   else
-    registry_list "${!variable-}"
+    registry_list "${!KIND_VARIABLE-}"
     if [[ ${#REGISTRY_LIST[@]} -eq 0 ]]; then
-      echo "::error title=Registry::No ${kind} registry is set: set vars.${variable}, or name a REGISTRY_CONFIG group in vars.PROJECT_REGISTRY_NAME." >&2
+      echo "::error title=Registry::No ${ARTIFACT_KIND} registry is set: set vars.${KIND_VARIABLE}, or name a REGISTRY_CONFIG group in vars.PROJECT_REGISTRY_NAME." >&2
       return 1
     fi
     if [[ ${#REGISTRY_LIST[@]} -gt 1 ]]; then
-      echo "::error title=Registry::vars.${variable} holds ${#REGISTRY_LIST[@]} hosts, but takes one. To publish to several registries, name a REGISTRY_CONFIG group in vars.PROJECT_REGISTRY_NAME, list the full repositories in vars.${label}_REPOSITORY, and remove vars.${variable}." >&2
+      echo "::error title=Registry::vars.${KIND_VARIABLE} holds ${#REGISTRY_LIST[@]} hosts, but takes one. To publish to several registries, name a REGISTRY_CONFIG group in vars.PROJECT_REGISTRY_NAME, list the full repositories in vars.${KIND_LABEL}_REPOSITORY, and remove vars.${KIND_VARIABLE}." >&2
       return 2
     fi
     REGISTRY_HOSTS=("${REGISTRY_LIST[0]}")
     REGISTRY_REPOS=("")
-    registry_list "${repositories}"
+    registry_list "${REPO_LIST}"
     if [[ ${#REGISTRY_LIST[@]} -gt 1 ]]; then
-      echo "::error title=Registry::vars.${label}_REPOSITORY holds ${#REGISTRY_LIST[@]} repositories, but vars.${variable} publishes to one. To publish to several, name a REGISTRY_CONFIG group in vars.PROJECT_REGISTRY_NAME, list the full repositories in vars.${label}_REPOSITORY, and remove vars.${variable}." >&2
+      echo "::error title=Registry::vars.${KIND_LABEL}_REPOSITORY holds ${#REGISTRY_LIST[@]} repositories, but vars.${KIND_VARIABLE} publishes to one. To publish to several, name a REGISTRY_CONFIG group in vars.PROJECT_REGISTRY_NAME, list the full repositories in vars.${KIND_LABEL}_REPOSITORY, and remove vars.${KIND_VARIABLE}." >&2
       return 1
     fi
     if [[ ${#REGISTRY_LIST[@]} -eq 1 ]]; then
@@ -358,37 +358,37 @@ registry_resolve() {
     fi
   fi
   REGISTRY_PRIMARY="${REGISTRY_HOSTS[0]}"
-  if [[ "${kind}" != "image" ]]; then
-    for host in "${REGISTRY_HOSTS[@]}"; do
-      case "${host}" in
+  if [[ "${ARTIFACT_KIND}" != "image" ]]; then
+    for HOST_NAME in "${REGISTRY_HOSTS[@]}"; do
+      case "${HOST_NAME}" in
         *://*|*/*|*@*)
-          echo "::error title=Chart registry::${host} is not an OCI hostname. Chart registries are hostnames, optionally with a port; put the namespace in CHART_REPOSITORY." >&2
+          echo "::error title=Chart registry::${HOST_NAME} is not an OCI hostname. Chart registries are hostnames, optionally with a port; put the namespace in CHART_REPOSITORY." >&2
           return 2
           ;;
       esac
     done
   fi
-  if [[ -n "${dev_repositories//[[:space:],]/}" ]]; then
-    registry_expand "${label}_DEV_REPOSITORY" "${#REGISTRY_HOSTS[@]}" "${dev_repositories}" || return 1
-    for i in "${!REGISTRY_HOSTS[@]}"; do
-      ref="${REGISTRY_EXPANDED[i]}"
-      if [[ -n "${group-}" ]] && registry_split_ref "${kind}" "${ref}"; then
-        if [[ "$(registry_canonical_host "${REF_HOST}")" != "$(registry_canonical_host "${REGISTRY_HOSTS[i]}")" ]]; then
-          echo "::error title=Registry::Development repository '${ref}' is not on ${REGISTRY_HOSTS[i]}, the registry of ${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}." >&2
+  if [[ -n "${DEV_REPO_LIST//[[:space:],]/}" ]]; then
+    registry_expand "${KIND_LABEL}_DEV_REPOSITORY" "${#REGISTRY_HOSTS[@]}" "${DEV_REPO_LIST}" || return 1
+    for I in "${!REGISTRY_HOSTS[@]}"; do
+      REPO_REF="${REGISTRY_EXPANDED[${I}]}"
+      if [[ -n "${GROUP_NAME-}" ]] && registry_split_ref "${ARTIFACT_KIND}" "${REPO_REF}"; then
+        if [[ "$(registry_canonical_host "${REF_HOST}")" != "$(registry_canonical_host "${REGISTRY_HOSTS[${I}]}")" ]]; then
+          echo "::error title=Registry::Development repository '${REPO_REF}' is not on ${REGISTRY_HOSTS[${I}]}, the registry of ${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}." >&2
           return 1
         fi
-        ref="${REF_PATH}"
+        REPO_REF="${REF_PATH}"
       fi
-      REGISTRY_DEV_REPOS+=("${ref}")
+      REGISTRY_DEV_REPOS+=("${REPO_REF}")
     done
   fi
-  for i in "${!REGISTRY_HOSTS[@]}"; do
-    key="$(registry_canonical_host "${REGISTRY_HOSTS[i]}")/${REGISTRY_REPOS[i]}"
-    if [[ "${seen}" == *" ${key} "* ]]; then
-      echo "::error title=Registry::${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]} is listed twice." >&2
+  for I in "${!REGISTRY_HOSTS[@]}"; do
+    HOST_REPO_KEY="$(registry_canonical_host "${REGISTRY_HOSTS[${I}]}")/${REGISTRY_REPOS[${I}]}"
+    if [[ "${SEEN}" == *" ${HOST_REPO_KEY} "* ]]; then
+      echo "::error title=Registry::${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]} is listed twice." >&2
       return 1
     fi
-    seen+="${key} "
+    SEEN+="${HOST_REPO_KEY} "
   done
 }
 
@@ -398,28 +398,28 @@ registry_resolve() {
 # of REPOSITORIES, empty when there is none. Reads no credentials. Returns 2,
 # having said why, only when that repository is not <registry>/<path>.
 registry_primary_target() {
-  local kind="$1" repositories="${2-}" variable first
+  local ARTIFACT_KIND="$1" REPO_LIST="${2-}" KIND_VARIABLE FIRST_REF
   REGISTRY_PRIMARY=""
   REGISTRY_PRIMARY_REPO=""
-  case "${kind}" in
-    image) variable="IMAGE_REGISTRY" ;;
-    chart) variable="CHART_REGISTRY" ;;
+  case "${ARTIFACT_KIND}" in
+    image) KIND_VARIABLE="IMAGE_REGISTRY" ;;
+    chart) KIND_VARIABLE="CHART_REGISTRY" ;;
     *)
-      echo "::error title=Registry::Unknown registry kind '${kind}'." >&2
+      echo "::error title=Registry::Unknown registry kind '${ARTIFACT_KIND}'." >&2
       return 2
       ;;
   esac
   if ! registry_named; then
-    REGISTRY_PRIMARY="${!variable-}"
-    REGISTRY_PRIMARY_REPO="${repositories}"
+    REGISTRY_PRIMARY="${!KIND_VARIABLE-}"
+    REGISTRY_PRIMARY_REPO="${REPO_LIST}"
     return 0
   fi
-  first="$(registry_primary "${repositories}")"
-  if [[ -z "${first}" ]]; then
+  FIRST_REF="$(registry_primary "${REPO_LIST}")"
+  if [[ -z "${FIRST_REF}" ]]; then
     return 0
   fi
-  if ! registry_split_ref "${kind}" "${first}"; then
-    echo "::error title=Registry::'${first}' is not a full repository, <registry>/<path>, as vars.PROJECT_REGISTRY_NAME requires." >&2
+  if ! registry_split_ref "${ARTIFACT_KIND}" "${FIRST_REF}"; then
+    echo "::error title=Registry::'${FIRST_REF}' is not a full repository, <registry>/<path>, as vars.PROJECT_REGISTRY_NAME requires." >&2
     return 2
   fi
   REGISTRY_PRIMARY="${REF_HOST}"
@@ -432,16 +432,16 @@ registry_mask() {
   if [[ "${GITHUB_ACTIONS-}" != "true" || -z "${1-}" ]]; then
     return 0
   fi
-  local percent="%"
-  local value="${1//"${percent}"/%25}"
-  value="${value//$'\r'/%0D}"
-  value="${value//$'\n'/%0A}"
-  printf '::add-mask::%s\n' "${value}"
+  local PERCENT="%"
+  local MASK_VALUE="${1//"${PERCENT}"/%25}"
+  MASK_VALUE="${MASK_VALUE//$'\r'/%0D}"
+  MASK_VALUE="${MASK_VALUE//$'\n'/%0A}"
+  printf '::add-mask::%s\n' "${MASK_VALUE}"
 }
 
-# shellcheck disable=SC2016 # $group and $key are jq variables, not shell ones
+# shellcheck disable=SC2016 # $GROUP_NAME and $GROUP_KEY are jq variables, not shell ones
 _REGISTRY_CREDENTIALS='
-  .[$group][$key]
+  .[$GROUP_NAME][$GROUP_KEY]
   | if type != "object" then "invalid"
     elif has("rolearn") then "rolearn"
     elif ([.username, .password] | map(type == "string" and length > 0) | all)
@@ -453,7 +453,7 @@ _REGISTRY_CREDENTIALS='
 # REG_SOURCE: its registry's entry in the group, or the single registry's
 # secret pair. Returns 0 found, 1 none, 2 configuration error.
 registry_credentials() {
-  local index="${1-0}" host group prefix user pass line status user64 pass64
+  local INDEX="${1-0}" HOST_NAME GROUP_NAME SECRET_PREFIX USER_VAR PASS_VAR JQ_LINE CRED_STATE USER64 PASS64
   REG_USER=""
   REG_PASS=""
   REG_SOURCE=""
@@ -461,64 +461,64 @@ registry_credentials() {
     echo "::error title=Registry::Shell tracing (set -x) is on; refusing to handle registry credentials." >&2
     return 2
   fi
-  host="${REGISTRY_HOSTS[index]-}"
-  if [[ -z "${host}" ]]; then
-    echo "::error title=Registry::${REGISTRY_KIND-registry} target ${index} does not exist." >&2
+  HOST_NAME="${REGISTRY_HOSTS[${INDEX}]-}"
+  if [[ -z "${HOST_NAME}" ]]; then
+    echo "::error title=Registry::${REGISTRY_KIND-registry} target ${INDEX} does not exist." >&2
     return 2
   fi
   if [[ "${REGISTRY_KIND-}" != "dependency" ]] && registry_named; then
-    group="$(registry_group_name)"
+    GROUP_NAME="$(registry_group_name)"
     registry_group_load || return 2
-    status=0
-    registry_group_entry "${host}" || status=$?
-    if [[ ${status} -ne 0 ]]; then
-      return "${status}"
+    CRED_STATE=0
+    registry_group_entry "${HOST_NAME}" || CRED_STATE=$?
+    if [[ ${CRED_STATE} -ne 0 ]]; then
+      return "${CRED_STATE}"
     fi
-    if ! line="$(printf '%s' "${_REGISTRY_CONFIG_JSON}" | jq -r --arg group "${group}" --arg key "${REG_ENTRY_KEY}" "${_REGISTRY_CREDENTIALS}" 2>/dev/null)"; then
-      line="invalid"
+    if ! JQ_LINE="$(printf '%s' "${_REGISTRY_CONFIG_JSON}" | jq -r --arg GROUP_NAME "${GROUP_NAME}" --arg GROUP_KEY "${REG_ENTRY_KEY}" "${_REGISTRY_CREDENTIALS}" 2>/dev/null)"; then
+      JQ_LINE="invalid"
     fi
-    IFS=$'\t' read -r status user64 pass64 <<< "${line}"
-    case "${status}" in
+    IFS=$'\t' read -r CRED_STATE USER64 PASS64 <<< "${JQ_LINE}"
+    case "${CRED_STATE}" in
       full) ;;
       none) return 1 ;;
       rolearn)
-        echo "::error title=Registry config::REGISTRY_CONFIG group '${group}' uses rolearn (AWS ECR) for ${REG_ENTRY_KEY}, which this library does not support." >&2
+        echo "::error title=Registry config::REGISTRY_CONFIG group '${GROUP_NAME}' uses rolearn (AWS ECR) for ${REG_ENTRY_KEY}, which this library does not support." >&2
         return 2
         ;;
       *)
-        echo "::error title=Registry config::REGISTRY_CONFIG group '${group}' needs a username and a password, quoted, for ${REG_ENTRY_KEY}." >&2
+        echo "::error title=Registry config::REGISTRY_CONFIG group '${GROUP_NAME}' needs a username and a password, quoted, for ${REG_ENTRY_KEY}." >&2
         return 2
         ;;
     esac
-    if [[ "$(registry_canonical_host "${host}")" == *.dkr.ecr.*.amazonaws.com* ]]; then
-      echo "::error title=Registry config::${host} is AWS ECR, which needs a short-lived token this library does not mint." >&2
+    if [[ "$(registry_canonical_host "${HOST_NAME}")" == *.dkr.ecr.*.amazonaws.com* ]]; then
+      echo "::error title=Registry config::${HOST_NAME} is AWS ECR, which needs a short-lived token this library does not mint." >&2
       return 2
     fi
-    REG_USER="$(printf '%s' "${user64}" | base64 -d)"
-    REG_PASS="$(printf '%s' "${pass64}" | base64 -d)"
+    REG_USER="$(printf '%s' "${USER64}" | base64 -d)"
+    REG_PASS="$(printf '%s' "${PASS64}" | base64 -d)"
     registry_mask "${REG_PASS}"
-    REG_SOURCE="REGISTRY_CONFIG group '${group}'"
+    REG_SOURCE="REGISTRY_CONFIG group '${GROUP_NAME}'"
     return 0
   fi
   case "${REGISTRY_KIND-}" in
-    image)      prefix="IMAGE_REGISTRY" ;;
-    chart)      prefix="CHART_REGISTRY" ;;
-    dependency) prefix="CHART_DEPENDENCY_REGISTRY" ;;
+    image)      SECRET_PREFIX="IMAGE_REGISTRY" ;;
+    chart)      SECRET_PREFIX="CHART_REGISTRY" ;;
+    dependency) SECRET_PREFIX="CHART_DEPENDENCY_REGISTRY" ;;
     *)
       echo "::error title=Registry::Unknown registry kind '${REGISTRY_KIND-}'." >&2
       return 2
       ;;
   esac
-  user="${prefix}_USERNAME"
-  pass="${prefix}_PASSWORD"
-  if [[ -n "${!user-}" && -n "${!pass-}" ]]; then
-    REG_USER="${!user}"
-    REG_PASS="${!pass}"
-    REG_SOURCE="secrets.${user}/${pass}"
+  USER_VAR="${SECRET_PREFIX}_USERNAME"
+  PASS_VAR="${SECRET_PREFIX}_PASSWORD"
+  if [[ -n "${!USER_VAR-}" && -n "${!PASS_VAR-}" ]]; then
+    REG_USER="${!USER_VAR}"
+    REG_PASS="${!PASS_VAR}"
+    REG_SOURCE="secrets.${USER_VAR}/${PASS_VAR}"
     return 0
   fi
-  if [[ -n "${!user-}" || -n "${!pass-}" ]]; then
-    echo "::warning title=Registry::Only one of secrets.${user} and secrets.${pass} is set, so the pair is ignored for ${host}."
+  if [[ -n "${!USER_VAR-}" || -n "${!PASS_VAR-}" ]]; then
+    echo "::warning title=Registry::Only one of secrets.${USER_VAR} and secrets.${PASS_VAR} is set, so the pair is ignored for ${HOST_NAME}."
   fi
   return 1
 }
@@ -528,105 +528,105 @@ registry_credentials() {
 # group, so a missing account stops the run before anything is built. Returns 0,
 # 1 when a registry has none, or 2 on a configuration error.
 registry_require_credentials() {
-  local i host checked=" " status rc=0
-  for i in "${!REGISTRY_HOSTS[@]}"; do
-    host="$(registry_canonical_host "${REGISTRY_HOSTS[i]}")"
-    if [[ "${checked}" == *" ${host} "* ]]; then
+  local I HOST_NAME CHECKED_HOSTS=" " CRED_RC WORST_RC=0
+  for I in "${!REGISTRY_HOSTS[@]}"; do
+    HOST_NAME="$(registry_canonical_host "${REGISTRY_HOSTS[${I}]}")"
+    if [[ "${CHECKED_HOSTS}" == *" ${HOST_NAME} "* ]]; then
       continue
     fi
-    checked+="${host} "
-    status=0
-    registry_credentials "${i}" || status=$?
-    if [[ ${status} -eq 1 ]]; then
-      echo "::error title=Registry config::REGISTRY_CONFIG group '$(registry_group_name)' has no username and password for ${REGISTRY_HOSTS[i]}." >&2
+    CHECKED_HOSTS+="${HOST_NAME} "
+    CRED_RC=0
+    registry_credentials "${I}" || CRED_RC=$?
+    if [[ ${CRED_RC} -eq 1 ]]; then
+      echo "::error title=Registry config::REGISTRY_CONFIG group '$(registry_group_name)' has no username and password for ${REGISTRY_HOSTS[${I}]}." >&2
     fi
-    if [[ ${status} -gt ${rc} ]]; then
-      rc=${status}
+    if [[ ${CRED_RC} -gt ${WORST_RC} ]]; then
+      WORST_RC=${CRED_RC}
     fi
   done
   REG_USER=""
   REG_PASS=""
-  return "${rc}"
+  return "${WORST_RC}"
 }
 
 # Log TOOL (docker | crane | helm) in to the registry of target INDEX, once per
 # registry and tool. With --optional, a registry without credentials is used
 # anonymously instead of failing. The password only ever travels on stdin.
 registry_login() {
-  local optional="false"
+  local LOGIN_OPTIONAL="false"
   if [[ "${1-}" == "--optional" ]]; then
-    optional="true"
+    LOGIN_OPTIONAL="true"
     shift
   fi
-  local tool="${1-}" index="${2-0}"
-  local host key server output status prefix
-  case "${tool}" in
+  local LOGIN_TOOL="${1-}" INDEX="${2-0}"
+  local HOST_NAME LOGIN_KEY SERVER CLI_OUTPUT RC SECRET_PREFIX
+  case "${LOGIN_TOOL}" in
     docker|crane|helm) ;;
     *)
-      echo "::error title=Registry::Unknown login tool '${tool}'." >&2
+      echo "::error title=Registry::Unknown login tool '${LOGIN_TOOL}'." >&2
       return 2
       ;;
   esac
-  host="${REGISTRY_HOSTS[index]-}"
-  key="${tool}:$(registry_canonical_host "${host}")"
-  if [[ "${_REGISTRY_LOGINS-}" == *" ${key} "* ]]; then
+  HOST_NAME="${REGISTRY_HOSTS[${INDEX}]-}"
+  LOGIN_KEY="${LOGIN_TOOL}:$(registry_canonical_host "${HOST_NAME}")"
+  if [[ "${_REGISTRY_LOGINS-}" == *" ${LOGIN_KEY} "* ]]; then
     return 0
   fi
-  status=0
-  registry_credentials "${index}" || status=$?
-  if [[ ${status} -eq 1 ]]; then
-    if [[ "${optional}" == "true" ]]; then
-      echo "No credentials for ${host}; using it anonymously."
+  RC=0
+  registry_credentials "${INDEX}" || RC=$?
+  if [[ ${RC} -eq 1 ]]; then
+    if [[ "${LOGIN_OPTIONAL}" == "true" ]]; then
+      echo "No credentials for ${HOST_NAME}; using it anonymously."
       return 0
     fi
     if [[ "${REGISTRY_KIND-}" != "dependency" ]] && registry_named; then
-      echo "::error title=Registry config::REGISTRY_CONFIG group '$(registry_group_name)' has no username and password for ${host}." >&2
+      echo "::error title=Registry config::REGISTRY_CONFIG group '$(registry_group_name)' has no username and password for ${HOST_NAME}." >&2
     else
-      prefix="${REGISTRY_KIND^^}_REGISTRY"
+      SECRET_PREFIX="${REGISTRY_KIND^^}_REGISTRY"
       if [[ "${REGISTRY_KIND}" == "dependency" ]]; then
-        prefix="CHART_DEPENDENCY_REGISTRY"
+        SECRET_PREFIX="CHART_DEPENDENCY_REGISTRY"
       fi
-      echo "::error title=Registry::No credentials for ${host}. Set secrets.${prefix}_USERNAME and secrets.${prefix}_PASSWORD and pass secrets: inherit." >&2
+      echo "::error title=Registry::No credentials for ${HOST_NAME}. Set secrets.${SECRET_PREFIX}_USERNAME and secrets.${SECRET_PREFIX}_PASSWORD and pass secrets: inherit." >&2
     fi
     return 1
-  elif [[ ${status} -ne 0 ]]; then
+  elif [[ ${RC} -ne 0 ]]; then
     return 2
   fi
-  server="${host}"
+  SERVER="${HOST_NAME}"
   # BuildKit and the docker CLI look Docker Hub up under its default index key,
   # which `docker login` only writes when it is given no server.
-  if [[ "${tool}" == "docker" ]] && registry_is_docker_hub "${host}"; then
-    server=""
+  if [[ "${LOGIN_TOOL}" == "docker" ]] && registry_is_docker_hub "${HOST_NAME}"; then
+    SERVER=""
   fi
-  if output="$(printf '%s' "${REG_PASS}" | _registry_cli "${tool}" "${server}" "${REG_USER}" 2>&1)"; then
-    echo "Logged in to ${host} (${tool}) with ${REG_SOURCE}."
-    _REGISTRY_LOGINS="${_REGISTRY_LOGINS:- }${key} "
-    if [[ "${tool}" == "docker" ]]; then
-      _registry_ledger_add "${server:-docker.io}"
+  if CLI_OUTPUT="$(printf '%s' "${REG_PASS}" | _registry_cli "${LOGIN_TOOL}" "${SERVER}" "${REG_USER}" 2>&1)"; then
+    echo "Logged in to ${HOST_NAME} (${LOGIN_TOOL}) with ${REG_SOURCE}."
+    _REGISTRY_LOGINS="${_REGISTRY_LOGINS:- }${LOGIN_KEY} "
+    if [[ "${LOGIN_TOOL}" == "docker" ]]; then
+      _registry_ledger_add "${SERVER:-docker.io}"
     fi
-    status=0
+    RC=0
   else
-    echo "::error title=Registry::${tool} login to ${host} with ${REG_SOURCE} was refused." >&2
-    tail -n 5 <<< "${output}" >&2
-    status=1
+    echo "::error title=Registry::${LOGIN_TOOL} login to ${HOST_NAME} with ${REG_SOURCE} was refused." >&2
+    tail -n 5 <<< "${CLI_OUTPUT}" >&2
+    RC=1
   fi
   REG_USER=""
   REG_PASS=""
-  return "${status}"
+  return "${RC}"
 }
 
 _registry_cli() {
-  local tool="$1" server="$2" user="$3"
-  case "${tool}" in
+  local CLI_TOOL="$1" CLI_SERVER="$2" CLI_USER="$3"
+  case "${CLI_TOOL}" in
     docker)
-      if [[ -n "${server}" ]]; then
-        docker login --username "${user}" --password-stdin "${server}"
+      if [[ -n "${CLI_SERVER}" ]]; then
+        docker login --username "${CLI_USER}" --password-stdin "${CLI_SERVER}"
       else
-        docker login --username "${user}" --password-stdin
+        docker login --username "${CLI_USER}" --password-stdin
       fi
       ;;
-    crane) crane auth login "${server}" --username "${user}" --password-stdin ;;
-    helm)  helm registry login "${server}" --username "${user}" --password-stdin ;;
+    crane) crane auth login "${CLI_SERVER}" --username "${CLI_USER}" --password-stdin ;;
+    helm)  helm registry login "${CLI_SERVER}" --username "${CLI_USER}" --password-stdin ;;
   esac
 }
 
@@ -641,17 +641,17 @@ _registry_ledger_add() {
 
 # Log docker out of every server this job logged in to. Never fails.
 registry_logout() {
-  local ledger="${RUNNER_TEMP-}/registry-logins.docker" server
-  if [[ -z "${RUNNER_TEMP-}" || ! -f "${ledger}" ]]; then
+  local LEDGER="${RUNNER_TEMP-}/registry-logins.docker" SERVER
+  if [[ -z "${RUNNER_TEMP-}" || ! -f "${LEDGER}" ]]; then
     return 0
   fi
-  while IFS= read -r server; do
-    if [[ "${server}" == "docker.io" ]]; then
+  while IFS= read -r SERVER; do
+    if [[ "${SERVER}" == "docker.io" ]]; then
       docker logout >/dev/null 2>&1 || true
-    elif [[ -n "${server}" ]]; then
-      docker logout "${server}" >/dev/null 2>&1 || true
+    elif [[ -n "${SERVER}" ]]; then
+      docker logout "${SERVER}" >/dev/null 2>&1 || true
     fi
-    echo "Logged out of ${server}."
-  done < <(sort -u "${ledger}")
-  rm -f "${ledger}"
+    echo "Logged out of ${SERVER}."
+  done < <(sort -u "${LEDGER}")
+  rm -f "${LEDGER}"
 }

@@ -66,12 +66,12 @@ fi
 
 INFO=()
 FAILED=()
-for i in "${!REGISTRY_HOSTS[@]}"; do
-  HOST="${REGISTRY_HOSTS[i]}"
-  LABEL="${HOST}/${REGISTRY_REPOS[i]}"
-  REPOSITORY="${REGISTRY_REPOS[i]}"
-  DEV_REPOSITORY="${REGISTRY_DEV_REPOS[i]-}"
-  if [[ ${i} -gt 0 ]] && ! chart_registry_login "${i}"; then
+for I in "${!REGISTRY_HOSTS[@]}"; do
+  HOST="${REGISTRY_HOSTS[${I}]}"
+  LABEL="${HOST}/${REGISTRY_REPOS[${I}]}"
+  REPOSITORY="${REGISTRY_REPOS[${I}]}"
+  DEV_REPOSITORY="${REGISTRY_DEV_REPOS[${I}]-}"
+  if [[ ${I} -gt 0 ]] && ! chart_registry_login "${I}"; then
     FAILED+=("${LABEL}")
     continue
   fi

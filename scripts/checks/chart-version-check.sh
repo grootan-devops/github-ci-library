@@ -43,13 +43,13 @@ chart_registry_targets "${CHART_REPOSITORY}" "" || exit 1
 TAKEN=()
 FREE=()
 UNCHECKED=()
-for i in "${!REGISTRY_HOSTS[@]}"; do
-  LABEL="${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}"
-  if ! chart_registry_login "${i}"; then
+for I in "${!REGISTRY_HOSTS[@]}"; do
+  LABEL="${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}"
+  if ! chart_registry_login "${I}"; then
     UNCHECKED+=("${LABEL}")
     continue
   fi
-  TARGET="oci://${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}/${CHART_NAME}"
+  TARGET="oci://${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}/${CHART_NAME}"
   RESULT=0
   chart_oci_lookup "${TARGET}" "${CHART_VERSION}" >/dev/null || RESULT=$?
   if [[ "${RESULT}" -eq 0 ]]; then

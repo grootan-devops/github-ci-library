@@ -63,18 +63,18 @@ source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
 # of a registry group as they are, or the single registry's path under its
 # host.
 target_rows() {
-  local label="$1" primary="$2" push="$3" production="$4" i
-  local pushes=()
+  local ROW_LABEL="$1" ROW_PRIMARY="$2" PUSH_REPOS="$3" PRODUCTION_REPOS="$4" I
+  local PUSH_LIST=()
   if registry_named; then
-    registry_list "${push}"
-    pushes=("${REGISTRY_LIST[@]}")
-    registry_list "${production}"
-    for i in "${!pushes[@]}"; do
-      echo "| ${label} | \`${pushes[i]}\` | \`${REGISTRY_LIST[i]-}\` |"
+    registry_list "${PUSH_REPOS}"
+    PUSH_LIST=("${REGISTRY_LIST[@]}")
+    registry_list "${PRODUCTION_REPOS}"
+    for I in "${!PUSH_LIST[@]}"; do
+      echo "| ${ROW_LABEL} | \`${PUSH_LIST[${I}]}\` | \`${REGISTRY_LIST[${I}]-}\` |"
     done
     return 0
   fi
-  echo "| ${label} | \`${primary}/${push}\` | \`${primary}/${production}\` |"
+  echo "| ${ROW_LABEL} | \`${ROW_PRIMARY}/${PUSH_REPOS}\` | \`${ROW_PRIMARY}/${PRODUCTION_REPOS}\` |"
 }
 
 case "${GITHUB_EVENT_NAME}" in

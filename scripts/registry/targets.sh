@@ -51,6 +51,6 @@ fi
   echo "others=${OTHERS}"
 } >> "${GITHUB_OUTPUT}"
 
-for i in "${!REGISTRY_HOSTS[@]}"; do
-  echo "Target: ${REGISTRY_HOSTS[i]}/${REGISTRY_REPOS[i]}${TAG:+:${TAG}}"
+for I in "${!REGISTRY_HOSTS[@]}"; do
+  echo "Target: ${REGISTRY_HOSTS[${I}]}/${REGISTRY_REPOS[${I}]}${TAG:+:${TAG}}"
 done
