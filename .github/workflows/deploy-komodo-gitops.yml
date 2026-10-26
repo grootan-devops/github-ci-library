@@ -44,7 +44,7 @@ on:
       image-repository:
         required: true
         type: string
-        description: "Base container image repository. Images are always read from <image-repository>/dev."
+        description: "Base container image repository. Images are always read from <image-repository>/dev in the primary image registry."
       build-env:
         required: false
         default: ""
@@ -53,11 +53,14 @@ on:
 
     secrets:
       IMAGE_REGISTRY_USERNAME:
-        required: true
-        description: "Registry username used to verify the image."
+        required: false
+        description: "Registry username used to verify the image; not needed with vars.PROJECT_REGISTRY_NAME."
       IMAGE_REGISTRY_PASSWORD:
-        required: true
-        description: "Registry password or token used to verify the image."
+        required: false
+        description: "Registry password or token used to verify the image; not needed with vars.PROJECT_REGISTRY_NAME."
+      REGISTRY_CONFIG:
+        required: false
+        description: "Registry credential groups as YAML or JSON (see docs/configuration.md); required with vars.PROJECT_REGISTRY_NAME."
       KOMODO_API_KEY:
         required: false
         description: "Komodo API key used to trigger the stack redeploy (defaults to secrets.KOMODO_API_KEY)."
@@ -111,6 +114,7 @@ jobs:
           KOMODO_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
           KOMODO_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
           REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
+          PROJECT_REGISTRY_NAME: ${{ vars.PROJECT_REGISTRY_NAME }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           IMAGE_REPO: ${{ inputs.image-repository }}
           DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
@@ -118,29 +122,14 @@ jobs:
 
       - name: Validate Image Exists In Registry
         env:
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ inputs.image-repository }}
+          PROJECT_REGISTRY_NAME: ${{ vars.PROJECT_REGISTRY_NAME }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
           TARGET: ${{ steps.resolve.outputs.new_image }}
-        run: |
-          set -euo pipefail
-          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
-          if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
-            echo "${MANIFEST_OUTPUT}" >&2
-            echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."
-            {
-              echo "### 🔎 Deployment prerequisites"
-              echo ""
-              echo "❌ Nothing was deployed: \`${TARGET}\` does not resolve, so the compose file would point at an image the stack cannot pull. crane reported:"
-              echo ""
-              echo '```'
-              tail -n 20 <<< "${MANIFEST_OUTPUT}"
-              echo '```'
-              echo ""
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          echo "Image ${TARGET} verified."
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/validate-image.sh"
 
       # Failing paths write their own section; this one only reports success.
       - name: Publish Validation Summary

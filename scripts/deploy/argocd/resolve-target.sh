@@ -27,8 +27,11 @@
 #   CHART_VERSION        chart version to deploy
 #   IMAGE_REGISTRY       container image registry hostname
 #   CHART_REGISTRY       Helm chart registry hostname
-#   CHART_REPOSITORY     base chart repository path
-#   IMAGE_REPOSITORY     base image repository path
+#   PROJECT_REGISTRY_NAME a REGISTRY_CONFIG group instead of the two registries;
+#                        the repositories below are then full <registry>/<path>
+#                        repositories -- see scripts/registry/lib.sh
+#   CHART_REPOSITORY     base chart repository; the first is deployed from
+#   IMAGE_REPOSITORY     base image repository; the first is deployed from
 #   DEV_SUFFIX           suffix appended to the repository paths
 set -euo pipefail
 
@@ -149,26 +152,27 @@ fi
 
 TARGET_VERSION="${CHART_VERSION}"
 
+# A deployment reads from each artifact's primary registry; any other holds
+# copies of the same artifacts.
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../../registry/lib.sh"
+registry_primary_target image "${IMAGE_REPOSITORY}" || exit 2
+IMAGE_HOST="${REGISTRY_PRIMARY}"
+IMAGE_REPO="$(registry_primary "${REGISTRY_PRIMARY_REPO}")"
+registry_primary_target chart "${CHART_REPOSITORY}" || exit 2
+CHART_HOST="${REGISTRY_PRIMARY}"
+CHART_REPO="$(registry_primary "${REGISTRY_PRIMARY_REPO}")"
+
 # Docker Hub has no nested repositories, so `<repo>/dev` is not a valid image
 # target and the push side rewrites the separator. Charts have an additional
 # Docker Hub constraint: Helm appends the chart name to the OCI target, so
 # candidate and release charts must use the same namespace-root repository and
 # are distinguished by their versions.
-IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
-CHART_DEV_SUFFIX="${DEV_SUFFIX}"
-case "${IMAGE_REGISTRY}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
-    ;;
-esac
-case "${CHART_REGISTRY}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    CHART_DEV_SUFFIX=""
-    ;;
-esac
+IMAGE_DEV_REPO="$(registry_dev_repository image "${IMAGE_HOST}" "${IMAGE_REPO}" "${DEV_SUFFIX}")"
+CHART_DEV_REPO="$(registry_dev_repository chart "${CHART_HOST}" "${CHART_REPO}" "${DEV_SUFFIX}")"
 
-CHART_REPO_URL="${CHART_REGISTRY}/${CHART_REPOSITORY}${CHART_DEV_SUFFIX}"
-NEW_IMAGE="${NEW_IMAGE_INPUT:-${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}${IMAGE_DEV_SUFFIX}:${TARGET_VERSION}}"
+CHART_REPO_URL="${CHART_HOST}/${CHART_DEV_REPO}"
+NEW_IMAGE="${NEW_IMAGE_INPUT:-${IMAGE_HOST}/${IMAGE_DEV_REPO}:${TARGET_VERSION}}"
 
 {
   echo "gitops_branch=${GITOPS_BRANCH}"

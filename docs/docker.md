@@ -50,8 +50,11 @@ Every image built by this platform adheres strictly to the **Packaging-Only Stan
    | **Multi-stage builder** | `TOOLKIT_BUILD_IMAGE` | The one build container, for a builder stage only. Every toolchain is baked into it. |
    | **All** | `VERSION` | `init.yml`'s `image-push-tag` |
 
-   Each is passed as `${{ vars.IMAGE_REGISTRY }}/<value>`, where `<value>` is **pinned in
-   `docker.yml`**, not read from an organisation variable. Bumping a base image is a change
+   Each is passed as `<registry>/<value>`, where `<registry>` is the primary image registry
+   (`vars.IMAGE_REGISTRY`, or the registry of the first repository in `vars.IMAGE_REPOSITORY`
+   with `vars.PROJECT_REGISTRY_NAME`) and `<value>`
+   is **pinned in `docker.yml`**, not read from an organisation variable. Bumping a base image
+   is a change
    to the library and a new release — which is what lets a pipeline be reproduced from its
    tag alone.
 

@@ -6,7 +6,18 @@
 # forced to configure IMAGE_REGISTRY or IMAGE_REPOSITORY, while a repository
 # publishing both artifacts must configure both sets.
 #
-# Exit codes: 0 configured, or nothing to publish. 1 variables missing.
+# Registries are configured one of two ways (scripts/registry/lib.sh): one
+# registry per artifact through vars.IMAGE_REGISTRY / vars.CHART_REGISTRY and
+# their secret pairs, or a credential group through vars.PROJECT_REGISTRY_NAME,
+# which names a group of the REGISTRY_CONFIG secret. Setting both is ambiguous,
+# so that is checked first and stops the run whatever this caller publishes.
+# With a group, every repository a published artifact lists must be a full
+# <registry>/<path> on one of the group's registries, and each of those
+# registries needs a username and password. A single registry is reported word
+# for word as it always was.
+#
+# Exit codes: 0 configured, or nothing to publish. 1 variables missing,
+# inconsistent or ambiguous.
 #
 # Env:
 #   IGNORE_DOCKER_INPUT      inputs.ignore-docker, "true" when no image is published
@@ -23,6 +34,9 @@
 #   CHART_REPOSITORY_INPUT   vars.CHART_REPOSITORY (default: empty, which is the failure)
 #   CHART_REGISTRY_USERNAME  secrets.CHART_REGISTRY_USERNAME (default: empty)
 #   CHART_REGISTRY_PASSWORD  secrets.CHART_REGISTRY_PASSWORD (default: empty)
+#   PROJECT_REGISTRY_NAME    vars.PROJECT_REGISTRY_NAME, the REGISTRY_CONFIG group to publish
+#                            with (default: empty, one registry per artifact)
+#   REGISTRY_CONFIG          secrets.REGISTRY_CONFIG, the credential groups (default: empty)
 set -euo pipefail
 
 : "${IGNORE_DOCKER_INPUT:=}"
@@ -39,6 +53,31 @@ set -euo pipefail
 : "${CHART_REPOSITORY_INPUT:=}"
 : "${CHART_REGISTRY_USERNAME:=}"
 : "${CHART_REGISTRY_PASSWORD:=}"
+: "${PROJECT_REGISTRY_NAME:=}"
+: "${REGISTRY_CONFIG:=}"
+
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+# lib.sh reads each artifact's single registry under these names.
+export IMAGE_REGISTRY="${IMAGE_REGISTRY_INPUT}" CHART_REGISTRY="${CHART_REGISTRY_INPUT}"
+
+# Report an invalid configuration, whose annotations are already printed.
+fail_invalid() {
+  {
+    echo "## 🚀 CI/CD Version & Target Discovery"
+    echo ""
+    echo "❌ $1 Nothing downstream ran."
+    echo ""
+  } >> "${GITHUB_STEP_SUMMARY}"
+  exit 1
+}
+
+# A group and a single registry together leave no way to tell where to
+# publish, so this holds whatever the caller publishes, and runs before
+# anything else.
+if ! registry_check_mode; then
+  fail_invalid "\`vars.PROJECT_REGISTRY_NAME\` is set together with \`vars.IMAGE_REGISTRY\` or \`vars.CHART_REGISTRY\`, so it is unclear where to publish. Keep \`PROJECT_REGISTRY_NAME\` to publish to the full repositories \`vars.IMAGE_REPOSITORY\` and \`vars.CHART_REPOSITORY\` list, or the registry variables to publish to one registry per artifact, and remove the other."
+fi
 
 CHART_FILE_PATH="${PROJECT_PATH}/${CHART_DIR}/${CHART_FILE}"
 if [[ ! -f "${CHART_FILE_PATH}" && -f "${CHART_DIR}/${CHART_FILE}" ]]; then
@@ -88,17 +127,59 @@ if [[ "${PUBLISH_DOCKER}" == "false" && "${PUBLISH_CHART}" == "false" ]]; then
 fi
 
 MISSING=()
-if [[ "${PUBLISH_DOCKER}" == "true" ]]; then
-  [[ -n "${IMAGE_REGISTRY_INPUT}" ]] || MISSING+=("vars.IMAGE_REGISTRY")
-  [[ -n "${IMAGE_REPOSITORY_INPUT}" ]] || MISSING+=("vars.IMAGE_REPOSITORY")
-  [[ -n "${IMAGE_REGISTRY_USERNAME}" ]] || MISSING+=("secrets.IMAGE_REGISTRY_USERNAME")
-  [[ -n "${IMAGE_REGISTRY_PASSWORD}" ]] || MISSING+=("secrets.IMAGE_REGISTRY_PASSWORD")
+INVALID=false
+
+# Record what one artifact lacks with a single registry. KIND is image or chart.
+check_single() {
+  local ARTIFACT_KIND="$1" SINGLE_REGISTRY="$2" REPO_LIST="$3"
+  local KIND_LABEL="${ARTIFACT_KIND^^}"
+  local USER_VAR="${KIND_LABEL}_REGISTRY_USERNAME" PASS_VAR="${KIND_LABEL}_REGISTRY_PASSWORD"
+  [[ -n "${SINGLE_REGISTRY}" ]] || MISSING+=("vars.${KIND_LABEL}_REGISTRY")
+  [[ -n "${REPO_LIST}" ]] || MISSING+=("vars.${KIND_LABEL}_REPOSITORY")
+  [[ -n "${!USER_VAR}" ]] || MISSING+=("secrets.${USER_VAR}")
+  [[ -n "${!PASS_VAR}" ]] || MISSING+=("secrets.${PASS_VAR}")
+  if [[ -n "${SINGLE_REGISTRY}" ]] && ! registry_resolve "${ARTIFACT_KIND}" "${REPO_LIST}"; then
+    INVALID=true
+  fi
+}
+
+# Check the full repositories one artifact is published to: each is on a
+# registry of the group, and each of those registries has a username and
+# password.
+check_named() {
+  local ARTIFACT_KIND="$1" REPO_LIST="$2" RC
+  local KIND_LABEL="${ARTIFACT_KIND^^}"
+  if [[ -z "${REPO_LIST//[[:space:],]/}" ]]; then
+    MISSING+=("vars.${KIND_LABEL}_REPOSITORY")
+    registry_group_load || INVALID=true
+    return 0
+  fi
+  RC=0
+  registry_resolve "${ARTIFACT_KIND}" "${REPO_LIST}" || RC=$?
+  if [[ ${RC} -ne 0 ]]; then
+    INVALID=true
+    return 0
+  fi
+  registry_require_credentials || INVALID=true
+}
+
+if registry_named; then
+  if [[ "${PUBLISH_DOCKER}" == "true" ]]; then
+    check_named image "${IMAGE_REPOSITORY_INPUT}"
+  fi
+  if [[ "${PUBLISH_CHART}" == "true" ]]; then
+    check_named chart "${CHART_REPOSITORY_INPUT}"
+  fi
+else
+  if [[ "${PUBLISH_DOCKER}" == "true" ]]; then
+    check_single image "${IMAGE_REGISTRY_INPUT}" "${IMAGE_REPOSITORY_INPUT}"
+  fi
+  if [[ "${PUBLISH_CHART}" == "true" ]]; then
+    check_single chart "${CHART_REGISTRY_INPUT}" "${CHART_REPOSITORY_INPUT}"
+  fi
 fi
-if [[ "${PUBLISH_CHART}" == "true" ]]; then
-  [[ -n "${CHART_REGISTRY_INPUT}" ]] || MISSING+=("vars.CHART_REGISTRY")
-  [[ -n "${CHART_REPOSITORY_INPUT}" ]] || MISSING+=("vars.CHART_REPOSITORY")
-  [[ -n "${CHART_REGISTRY_USERNAME}" ]] || MISSING+=("secrets.CHART_REGISTRY_USERNAME")
-  [[ -n "${CHART_REGISTRY_PASSWORD}" ]] || MISSING+=("secrets.CHART_REGISTRY_PASSWORD")
+if [[ "${INVALID}" == "true" && ${#MISSING[@]} -eq 0 ]]; then
+  fail_invalid "The registry configuration is inconsistent; the annotations above name each problem."
 fi
 if [[ ${#MISSING[@]} -gt 0 ]]; then
   echo "::error title=Configuration::Set these organisation or repository variables: ${MISSING[*]}"

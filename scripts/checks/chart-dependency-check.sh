@@ -57,29 +57,48 @@ FAILED=false
 
 # Keep the dependency guard aligned with init.yml. Docker Hub stores candidate
 # and release charts in one namespace-root repository, so there is no separate
-# development chart path to reject. Other registries retain the `/dev` path.
-case "${CHART_REGISTRY}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    CHART_DEV_REPOSITORY_SUFFIX=""
-    ;;
-esac
+# development chart path to reject. Other registries retain the `/dev` path,
+# and with vars.PROJECT_REGISTRY_NAME each listed repository has its own.
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+HOSTS=("")
+REPOS=("${CHART_REPOSITORY:-}")
+if [[ -n "${CHART_REGISTRY}" ]] || registry_named; then
+  registry_resolve chart "${CHART_REPOSITORY:-}" || exit 1
+  HOSTS=("${REGISTRY_HOSTS[@]}")
+  REPOS=("${REGISTRY_REPOS[@]}")
+fi
+DEV_PATHS=()
+ALL_DOCKER_HUB=true
+for I in "${!HOSTS[@]}"; do
+  if registry_is_docker_hub "${HOSTS[${I}]}"; then
+    continue
+  fi
+  ALL_DOCKER_HUB=false
+  DEV_PATH="${REPOS[${I}]}${CHART_DEV_REPOSITORY_SUFFIX}"
+  if [[ -n "${REPOS[${I}]}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" && " ${DEV_PATHS[*]} " != *" ${DEV_PATH} "* ]]; then
+    DEV_PATHS+=("${DEV_PATH}")
+  fi
+done
 
 # --- 1. no dependency may resolve to the development repository -------------
-if [[ "${CHART_REGISTRY}" == "docker.io" || "${CHART_REGISTRY}" == "index.docker.io" || "${CHART_REGISTRY}" == "registry-1.docker.io" ]]; then
+if [[ "${ALL_DOCKER_HUB}" == "true" ]]; then
   echo "::notice title=Chart dependency::Docker Hub uses one namespace-root chart repository for candidate and release versions; the development-repository dependency check is not applicable."
-elif [[ -n "${CHART_REPOSITORY:-}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" ]]; then
-  export DEV_PATH="${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}"
-  DEV_OFFENDERS="$(yq -r '
-    .dependencies[]?
-    | select((.repository // "") | test(strenv(DEV_PATH)))
-    | .name + " -> " + (.repository // "")' "${CHART_FILE}")"
-  if [[ -n "${DEV_OFFENDERS}" ]]; then
-    FAILED=true
-    echo "::error title=Chart dependency::A dependency resolves to the development repository '${DEV_PATH}'."
-    printf '%s\n' "${DEV_OFFENDERS}"
-    summarise "❌ These dependencies point at the development repository \`${DEV_PATH}\`:" \
-      "${DEV_OFFENDERS}" "Depend on published stable releases instead."
-  fi
+elif [[ ${#DEV_PATHS[@]} -gt 0 ]]; then
+  for DEV_PATH in "${DEV_PATHS[@]}"; do
+    export DEV_PATH
+    DEV_OFFENDERS="$(yq -r '
+      .dependencies[]?
+      | select((.repository // "") | test(strenv(DEV_PATH)))
+      | .name + " -> " + (.repository // "")' "${CHART_FILE}")"
+    if [[ -n "${DEV_OFFENDERS}" ]]; then
+      FAILED=true
+      echo "::error title=Chart dependency::A dependency resolves to the development repository '${DEV_PATH}'."
+      printf '%s\n' "${DEV_OFFENDERS}"
+      summarise "❌ These dependencies point at the development repository \`${DEV_PATH}\`:" \
+        "${DEV_OFFENDERS}" "Depend on published stable releases instead."
+    fi
+  done
 else
   echo "::notice title=Chart dependency::CHART_REPOSITORY or CHART_DEV_REPOSITORY_SUFFIX is unset, so the development-repository check is skipped."
 fi
