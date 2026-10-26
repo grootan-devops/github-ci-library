@@ -49,6 +49,7 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `docs/configuration.md` no longer claims the released digest is the scanned one.
   - `docs/modules/init-check.md` counts 29 outputs.
   - `docs/docker.md` no longer mentions the registry layer cache removed in 1.4.0.
+  - `docs/examples/gitops.md`: the ArgoCD example passes the required `argocd-server` input. Copied as it was, the call failed at startup.
   - The README names the current release.
 
 ## [1.6.1] - 2026-10-23

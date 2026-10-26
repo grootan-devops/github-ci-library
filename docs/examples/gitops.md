@@ -53,12 +53,13 @@ jobs:
       chart-repository: ${{ needs.init.outputs.chart-repository }}
       image-repository: ${{ needs.init.outputs.image-repository }}
       argocd-app-name: order-backend-${{ inputs.environment }}
+      argocd-server: argocd.example.com
       github-environment-name: ${{ inputs.environment }}
 ```
 
-`gitops-branch` and `argocd-app-name` are required inputs; the deploy refuses at
-`validate` without them, and equally without either `chart-values-file` (Helm mode) or
-`manifest-file` plus `new-image` (manifest mode). Swap
+`gitops-branch`, `argocd-app-name` and `argocd-server` are required inputs: GitHub will not
+start the run without them. The deploy also refuses at `validate` without either
+`chart-values-file` (Helm mode) or `manifest-file` plus `new-image` (manifest mode). Swap
 `deploy-argocd-gitops.yml` for `deploy-komodo-gitops.yml` to patch a Docker Compose stack
 instead; its inputs are in the [deploy/gitops](../modules/gitops.md#deploygitops) module catalog.
 
