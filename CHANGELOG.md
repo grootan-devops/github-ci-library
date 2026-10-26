@@ -29,7 +29,7 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `init.yml`:
   - Without a group, `IMAGE_REGISTRY` or `CHART_REGISTRY` holding several hosts, or `IMAGE_REPOSITORY` or `CHART_REPOSITORY` holding several repositories, fails, pointing to `PROJECT_REGISTRY_NAME`.
   - With a group, fails when a registry the repositories name has no username and password in it.
-  - With a group, `registry`, `image-registry` and `chart-registry` are the primaries' hosts, and the repository outputs list the full repositories, primary first. A single registry produces exactly the outputs of 1.6.1.
+  - With a group, `registry`, `image-registry` and `chart-registry` are the primaries' hosts, and the repository outputs list the full repositories, primary first. A single registry produces exactly the outputs of 1.7.0.
 - `sonarqube.yml`: a `scanner-image` job resolves the scanner image from the primary registry.
 - `deploy-argocd-gitops.yml`, `deploy-komodo-gitops.yml`: accept a `REGISTRY_CONFIG` secret, and read from the primary registry. The ArgoCD image check runs whenever the primary has credentials, not only when the secret pair is set. Komodo's `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` are optional with `PROJECT_REGISTRY_NAME`.
 - `docker.yml` · `promote`: timeout raised from 20 to 30 minutes for the copies to other repositories.
