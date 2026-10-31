@@ -26,7 +26,7 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
 ### Verify
 
 - The pull request pipeline passes with the new pin.
-- A `docker.yml` run's build log shows the new base image tags (for example
+- `docker.yml` passes the new base image tags as build arguments (for example
   `grootantech/micro-node-24:1.2.1`).
 
 ## 1.7.0
