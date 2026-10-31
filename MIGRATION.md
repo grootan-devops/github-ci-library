@@ -7,6 +7,28 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.9.0
+
+### Required
+
+- **Node.js projects build and lint on Node.js 26.** `node-build.yml` and `node-lint.yml` run in
+  `grootantech/toolkit:2.0.1`, which ships Node.js 26 and npm 12.2 instead of Node.js 24. A
+  project whose `package.json` `engines` field, lockfile or tests require Node.js 24 must allow
+  26 before taking this release. The runtime image is unchanged: `NODE_JS_24_MICRO_BASE_IMAGE`
+  stays on Node.js 24.
+
+### Recommended
+
+- Run the pull request pipeline once on this release before pinning it everywhere: the toolkit
+  also moves Terraform to 1.17, OpenTofu to 1.13, Maven to 3.10 and Trivy to 0.76, which can
+  report new findings or lint warnings.
+
+### Verify
+
+- The pull request pipeline passes with the new pin.
+- `docker.yml` passes the new base image tags as build arguments (for example
+  `grootantech/micro-node-24:1.2.1`).
+
 ## 1.7.0
 
 ### Required

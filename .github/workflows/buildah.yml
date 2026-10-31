@@ -142,7 +142,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: grootantech/toolkit:1.1.0
+      image: grootantech/toolkit:2.0.1
       # buildah needs to mount the container filesystem it is assembling.
       options: --privileged
     defaults:
@@ -344,7 +344,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: grootantech/toolkit:1.1.0
+      image: grootantech/toolkit:2.0.1
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
