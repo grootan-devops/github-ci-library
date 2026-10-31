@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-11-01
+
+### Changed
+
+- Updated [`grootantech/toolkit`](https://github.com/grootan-devops/toolkit) from [`1.1.0` to `2.0.1`](https://github.com/grootan-devops/toolkit/compare/1.1.0...2.0.1), the build container of every job. Toolkit 2.0.0 moves Node.js from 24 to 26 and npm to 12.2, and updates Helm 4.3.1, Trivy 0.76.1, Terraform 1.17.0, OpenTofu 1.13.2, yq 4.54.1, Go 1.27.3, Maven 3.10.0, uv 0.13.5, golangci-lint 2.15.0 and Biome 2.6.3.
+- Updated [`moby/buildkit`](https://github.com/moby/buildkit) from [`v0.29.0` to `v0.34.1`](https://github.com/moby/buildkit/releases/tag/v0.34.1), the BuildKit driver of `docker.yml`.
+- Updated the `docker.yml` base images injected as build arguments:
+  - `grootantech/micro-root` from `1.1.0` to `1.2.0`
+  - `grootantech/micro-nginx` from `1.1.1` to `1.2.1`
+  - `grootantech/micro-python-3-12` from `1.1.1` to `1.2.1`
+  - `grootantech/micro-node-24` from `1.1.1` to `1.2.1`
+  - `grootantech/micro-java-25` from `1.1.1` to `1.3.1`
+
 ## [1.7.0] - 2026-10-26
 
 ### Added
