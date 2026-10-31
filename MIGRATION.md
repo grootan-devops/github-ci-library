@@ -7,16 +7,16 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
-## 1.8.0
+## 1.10.0
 
 ### Required
 
 No registry migration is required. A single `IMAGE_REGISTRY` or `CHART_REGISTRY` with the
 existing secret pairs behaves as before, and everything new is optional. A caller that passes
 `REGISTRY_CONFIG` explicitly to `deploy-argocd-gitops.yml` or `deploy-komodo-gitops.yml` must pin
-`1.8.0` or later, because earlier releases reject it as an unknown secret.
+`1.10.0` or later, because earlier releases reject it as an unknown secret.
 
-- **`vars.PROJECT_REGISTRY_NAME` now selects a credential group.** `1.7.0` and earlier ignore it. An
+- **`vars.PROJECT_REGISTRY_NAME` now selects a credential group.** `1.9.0` and earlier ignore it. An
   organisation or repository that sets it for anything else removes it: set together with
   `IMAGE_REGISTRY` or `CHART_REGISTRY`, it now stops the first step of `init.yml`.
 
@@ -27,7 +27,7 @@ existing secret pairs behaves as before, and everything new is optional. A calle
   - In each repository that publishes to several registries, set `PROJECT_REGISTRY_NAME` to the group and list the full repositories in `IMAGE_REPOSITORY` and `CHART_REPOSITORY`, primary first, e.g. `registry.example.com/core/api quay.io/oneuptime/api`.
   - Stop `IMAGE_REGISTRY` and `CHART_REGISTRY` from reaching that repository: an organisation variable can be limited to the repositories that still use it.
   - See [Publishing to several registries](docs/configuration.md#publishing-to-several-registries).
-- **Where to set `PROJECT_REGISTRY_NAME`.** Per repository as it moves to `1.8.0`, or at organisation level only once every repository pins `1.8.0` or later: earlier releases ignore it and would take a full repository for a path.
+- **Where to set `PROJECT_REGISTRY_NAME`.** Per repository as it moves to `1.10.0`, or at organisation level only once every repository pins `1.10.0` or later: earlier releases ignore it and would take a full repository for a path.
 - **Docker Hub** images are written `docker.io/<namespace>/<name>` and charts `registry-1.docker.io/<namespace>`; a group's `docker.io` serves both.
 - **Repositories that build with `buildah.yml`** keep `IMAGE_REGISTRY` and its secret pair: Buildah publishes internal images to that single registry and does not read `PROJECT_REGISTRY_NAME`.
 - **Before the first push**, create the repository, or the Harbor project, in every registry.
@@ -42,6 +42,28 @@ existing secret pairs behaves as before, and everything new is optional. A calle
   all at the same digest (`crane digest`).
 - On a self-hosted runner, `~/.docker/config.json` gains no entries from the build and smoke-test
   jobs.
+
+## 1.9.0
+
+### Required
+
+- **Node.js projects build and lint on Node.js 26.** `node-build.yml` and `node-lint.yml` run in
+  `grootantech/toolkit:2.0.1`, which ships Node.js 26 and npm 12.2 instead of Node.js 24. A
+  project whose `package.json` `engines` field, lockfile or tests require Node.js 24 must allow
+  26 before taking this release. The runtime image is unchanged: `NODE_JS_24_MICRO_BASE_IMAGE`
+  stays on Node.js 24.
+
+### Recommended
+
+- Run the pull request pipeline once on this release before pinning it everywhere: the toolkit
+  also moves Terraform to 1.17, OpenTofu to 1.13, Maven to 3.10 and Trivy to 0.76, which can
+  report new findings or lint warnings.
+
+### Verify
+
+- The pull request pipeline passes with the new pin.
+- `docker.yml` passes the new base image tags as build arguments (for example
+  `grootantech/micro-node-24:1.2.1`).
 
 ## 1.7.0
 

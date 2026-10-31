@@ -10,7 +10,7 @@
 #   One registry  vars.IMAGE_REGISTRY / vars.CHART_REGISTRY hold its host,
 #                 vars.IMAGE_REPOSITORY / vars.CHART_REPOSITORY the path in it,
 #                 and secrets.<KIND>_REGISTRY_USERNAME / _PASSWORD log in to it,
-#                 exactly as before 1.8.0.
+#                 exactly as before 1.10.0.
 #   A group       vars.PROJECT_REGISTRY_NAME names one group of the
 #                 REGISTRY_CONFIG secret, YAML (or JSON) that maps each group's
 #                 registries to their credentials:

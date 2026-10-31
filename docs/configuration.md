@@ -35,7 +35,7 @@ wherever possible.
 > [!IMPORTANT]
 > **The build container and the Docker base images are pinned in the library, not
 > configurable.** Every `container:` block names
-> `grootantech/toolkit:1.1.0` literally, and `docker.yml` hardcodes the
+> `grootantech/toolkit:2.0.1` literally, and `docker.yml` hardcodes the
 > `micro-root`, `nginx`, `python-3-12`, `node-24` and `java-25` bases and the BuildKit
 > driver. Setting `TOOLKIT_BUILD_IMAGE`, `BUILDKIT_IMAGE` or any `*_MICRO_BASE_IMAGE`
 > organisation variable has **no effect** — those rows were removed from this table because
@@ -313,9 +313,9 @@ A pull request run of version `1.4.0` with these variables publishes:
   before the first push; a registry that refuses to create one fails the job.
 
 > [!IMPORTANT]
-> Releases before `1.8.0` ignore `PROJECT_REGISTRY_NAME`, read `IMAGE_REGISTRY` and
+> Releases before `1.10.0` ignore `PROJECT_REGISTRY_NAME`, read `IMAGE_REGISTRY` and
 > `CHART_REGISTRY` only, and would take a full repository for a path. Set the group and the full
-> repositories per repository as it moves to `1.8.0`, or at organisation level only once every
-> repository pins `1.8.0` or later.
+> repositories per repository as it moves to `1.10.0`, or at organisation level only once every
+> repository pins `1.10.0` or later.
 
 [Documentation index](../README.md)
