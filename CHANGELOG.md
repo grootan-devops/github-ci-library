@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-10-31
+
+### Changed
+
+- Updated [`docker/login-action`](https://github.com/docker/login-action) from [`v3@dbcb813` to `v3@c94ce9f`](https://github.com/docker/login-action/compare/dbcb813823bdd20940b903addbd779551569679f...c94ce9fb468520275223c153574b00df6fe4bcc9)
+
 ## [1.7.0] - 2026-10-26
 
 ### Added
