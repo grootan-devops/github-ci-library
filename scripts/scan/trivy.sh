@@ -22,17 +22,12 @@ set -uo pipefail
 : "${TF_CVE_INFO_FILE_NAME:=TF_CVE.md}"
 : "${LICENSE_INFO_FILE_NAME:=LICENSE_CVE.md}"
 : "${SBOM_CVE_INFO_FILE_NAME:=SBOM_CVE.md}"
-: "${IMAGE_DEV_REPOSITORY_SUFFIX:=/dev}"
-
-# Docker Hub has no nested repositories, so a `/` in the suffix becomes `-` there,
-# as init.yml does: candidates live in `<repo>-dev`.
-case "${IMAGE_REGISTRY:-}" in
-  docker.io|index.docker.io|registry-1.docker.io) IMAGE_DEV_REPOSITORY_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX//\//-}" ;;
-esac
 : "${TARGET_VERSION:=}"
 : "${RELEASE_VERSION:=}"
 : "${IMAGE_REGISTRY:=}"
 : "${IMAGE_REPOSITORY:=}"
+# The candidate repository of the selected destination (scripts/registry/auth.sh).
+: "${IMAGE_DEV_REPOSITORY:=}"
 : "${IMAGE_REF:=}"
 : "${CONFIG_TYPE:=}"
 
@@ -196,7 +191,7 @@ build_trivy_command() {
           SCAN_IMAGE_REPO="${IMAGE_REPOSITORY}"
           log_info "Stable release version '${TARGET_TAG}' detected — pulling from non-dev production registry: ${IMAGE_REGISTRY}/${SCAN_IMAGE_REPO}:${TARGET_TAG}" >&2
         else
-          SCAN_IMAGE_REPO="${IMAGE_REPOSITORY}${IMAGE_DEV_REPOSITORY_SUFFIX}"
+          SCAN_IMAGE_REPO="${IMAGE_DEV_REPOSITORY}"
           log_info "Candidate/dev version '${TARGET_TAG}' detected — pulling from dev registry: ${IMAGE_REGISTRY}/${SCAN_IMAGE_REPO}:${TARGET_TAG}" >&2
         fi
         FULL_IMAGE="${IMAGE_REGISTRY}/${SCAN_IMAGE_REPO}:${TARGET_TAG}"

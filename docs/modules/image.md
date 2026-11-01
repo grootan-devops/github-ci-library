@@ -17,12 +17,13 @@ flowchart LR
 
 | Workflow · Job | Description |
 | --- | --- |
-| `docker.yml` · `build` | Buildx build and push, with every organisation base image injected as a build argument and registry layer cache. Outputs `image-ref-digest`. |
+| `docker.yml` · `build` | Buildx build and push to the primary registry, with every organisation base image injected as a build argument and registry layer cache. Outputs `image-ref-digest`. |
+| `docker.yml` · `copy` | Only with several destinations in `IMAGE_REPOSITORY`: copies the candidate by digest to the other registries. See [Registries](../configuration.md#registries). |
 | `docker.yml` · `test` | Optional smoke test executed **inside** the built image. Off by default. |
-| `docker.yml` · `promote` | Release-mode only. Refuses unless the caller passes a successful `scan-result`. Resolves the candidate and copies it by digest with `crane mutate --tag`, then tags `latest`, `MAJOR`, `MINOR`. |
+| `docker.yml` · `promote` | Release-mode only. Refuses unless the caller passes a successful `scan-result`. Resolves the candidate and copies it by digest with `crane mutate --tag`, then tags `latest`, `MAJOR`, `MINOR`, and copies the release to the other registries. |
 | `buildah.yml` · `build` | Dockerfile-free minimal image assembly from a base image: `microdnf install`, package-manager purge, documentation/systemd/PAM strip, `USER 10001`. |
 | `buildah.yml` · `test` | Same optional smoke test as `docker.yml` · `test`, run against the Buildah image's `image-ref-digest`. Off by default. |
-| `buildah.yml` · `promote` | Same digest-preserving promotion as `docker.yml`. |
+| `buildah.yml` · `promote` | Same digest-preserving promotion as `docker.yml`. Buildah publishes to one registry, `IMAGE_REGISTRY`. |
 
 > [!IMPORTANT]
 > `docker.yml` · `build` and the `test` job of `docker.yml` and `buildah.yml` are the

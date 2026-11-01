@@ -21,8 +21,6 @@ set -euo pipefail
 
 PROJECT_PATH="${PROJECT_PATH:-.}"
 CHART_DIR="${CHART_DIR:-./chart}"
-CHART_DEV_REPOSITORY_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX:-/dev}"
-CHART_REGISTRY="${CHART_REGISTRY:-}"
 ALLOW_UNSTABLE_LIBRARY_REFS="${ALLOW_UNSTABLE_LIBRARY_REFS:-false}"
 CHART_FILE="${PROJECT_PATH}/${CHART_DIR}/Chart.yaml"
 
@@ -55,20 +53,17 @@ summarise() {
 
 FAILED=false
 
-# Keep the dependency guard aligned with init.yml. Docker Hub stores candidate
-# and release charts in one namespace-root repository, so there is no separate
-# development chart path to reject. Other registries retain the `/dev` path.
-case "${CHART_REGISTRY}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    CHART_DEV_REPOSITORY_SUFFIX=""
-    ;;
-esac
-
-# --- 1. no dependency may resolve to the development repository -------------
-if [[ "${CHART_REGISTRY}" == "docker.io" || "${CHART_REGISTRY}" == "index.docker.io" || "${CHART_REGISTRY}" == "registry-1.docker.io" ]]; then
-  echo "::notice title=Chart dependency::Docker Hub uses one namespace-root chart repository for candidate and release versions; the development-repository dependency check is not applicable."
-elif [[ -n "${CHART_REPOSITORY:-}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" ]]; then
-  export DEV_PATH="${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}"
+# --- 1. no dependency may resolve to a development repository ---------------
+# The development repositories are the chart destinations' dev paths. Docker Hub keeps
+# candidate and release charts in one repository, so it has no dev path to reject.
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+TARGETS=$(registry_targets chart) || exit 1
+CHECKED=false
+while IFS=$'\t' read -r _ STABLE DEV; do
+  [[ "${DEV}" != "${STABLE}" ]] || continue
+  CHECKED=true
+  export DEV_PATH="${DEV}"
   DEV_OFFENDERS="$(yq -r '
     .dependencies[]?
     | select((.repository // "") | test(strenv(DEV_PATH)))
@@ -80,8 +75,9 @@ elif [[ -n "${CHART_REPOSITORY:-}" && -n "${CHART_DEV_REPOSITORY_SUFFIX}" ]]; th
     summarise "❌ These dependencies point at the development repository \`${DEV_PATH}\`:" \
       "${DEV_OFFENDERS}" "Depend on published stable releases instead."
   fi
-else
-  echo "::notice title=Chart dependency::CHART_REPOSITORY or CHART_DEV_REPOSITORY_SUFFIX is unset, so the development-repository check is skipped."
+done <<<"${TARGETS}"
+if [[ "${CHECKED}" == "false" ]]; then
+  echo "::notice title=Chart dependency::No chart destination has a separate development repository, so the development-repository check is skipped."
 fi
 
 # --- 2. every dependency pins an exact version ------------------------------

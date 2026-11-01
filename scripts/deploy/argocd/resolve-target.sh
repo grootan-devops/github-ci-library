@@ -25,11 +25,10 @@
 #   MANIFEST_FILE        Kubernetes manifest path (manifest mode)
 #   NEW_IMAGE_INPUT      explicit image reference (mandatory in manifest mode)
 #   CHART_VERSION        chart version to deploy
-#   IMAGE_REGISTRY       container image registry hostname
-#   CHART_REGISTRY       Helm chart registry hostname
-#   CHART_REPOSITORY     base chart repository path
-#   IMAGE_REPOSITORY     base image repository path
-#   DEV_SUFFIX           suffix appended to the repository paths
+#   IMAGE_HOST, IMAGE_STABLE, IMAGE_DEV  the selected image destination: host, release
+#                        and candidate repository (scripts/registry/auth.sh deploy)
+#   CHART_HOST, CHART_STABLE, CHART_DEV  the same for the chart
+#   DEV_SUFFIX           overrides the candidate suffix (default: the configured one)
 set -euo pipefail
 
 : "${ENVIRONMENT:=}"
@@ -46,10 +45,12 @@ set -euo pipefail
 : "${MANIFEST_FILE:=}"
 : "${NEW_IMAGE_INPUT:=}"
 : "${CHART_VERSION:=}"
-: "${IMAGE_REGISTRY:=}"
-: "${CHART_REGISTRY:=}"
-: "${CHART_REPOSITORY:=}"
-: "${IMAGE_REPOSITORY:=}"
+: "${IMAGE_HOST:=}"
+: "${IMAGE_STABLE:=}"
+: "${IMAGE_DEV:=}"
+: "${CHART_HOST:=}"
+: "${CHART_STABLE:=}"
+: "${CHART_DEV:=}"
 : "${DEV_SUFFIX:=}"
 
 refuse() {
@@ -81,10 +82,10 @@ fi
 # These three are interpolated straight into a registry reference below. Empty
 # yields `host//dev` or an empty tag, which the registry rejects with a parse
 # error rather than anything that points at the missing input.
-if [[ -z "${CHART_REPOSITORY}" && -z "${NEW_IMAGE_INPUT}" ]]; then
+if [[ -z "${CHART_STABLE}" && -z "${NEW_IMAGE_INPUT}" ]]; then
   MISSING+=("chart-repository")
 fi
-if [[ -z "${IMAGE_REPOSITORY}" && -z "${NEW_IMAGE_INPUT}" ]]; then
+if [[ -z "${IMAGE_STABLE}" && -z "${NEW_IMAGE_INPUT}" ]]; then
   MISSING+=("image-repository")
 fi
 if [[ -z "${CHART_VERSION}" && -z "${NEW_IMAGE_INPUT}" ]]; then
@@ -149,26 +150,37 @@ fi
 
 TARGET_VERSION="${CHART_VERSION}"
 
-# Docker Hub has no nested repositories, so `<repo>/dev` is not a valid image
-# target and the push side rewrites the separator. Charts have an additional
-# Docker Hub constraint: Helm appends the chart name to the OCI target, so
-# candidate and release charts must use the same namespace-root repository and
-# are distinguished by their versions.
-IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
-CHART_DEV_SUFFIX="${DEV_SUFFIX}"
-case "${IMAGE_REGISTRY}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
-    ;;
-esac
-case "${CHART_REGISTRY}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    CHART_DEV_SUFFIX=""
-    ;;
-esac
+# The candidate repository to read: the selected destination's dev path, or the stable
+# path plus the dev-repository-suffix input when the caller overrides it. Docker Hub has
+# no nested repositories: an image suffix uses `-` there, and charts keep candidates in
+# the release repository.
+dev_repository() {
+  local KIND="$1" HOST="$2" STABLE="$3" DEV="$4"
+  if [[ -z "${DEV_SUFFIX}" ]]; then
+    printf '%s\n' "${DEV}"
+    return 0
+  fi
+  case "${HOST}" in
+    docker.io|index.docker.io|registry-1.docker.io)
+      if [[ "${KIND}" == "chart" ]]; then
+        printf '%s\n' "${STABLE}"
+      else
+        printf '%s\n' "${STABLE}${DEV_SUFFIX//\//-}"
+      fi
+      return 0
+      ;;
+  esac
+  printf '%s\n' "${STABLE}${DEV_SUFFIX}"
+}
 
-CHART_REPO_URL="${CHART_REGISTRY}/${CHART_REPOSITORY}${CHART_DEV_SUFFIX}"
-NEW_IMAGE="${NEW_IMAGE_INPUT:-${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}${IMAGE_DEV_SUFFIX}:${TARGET_VERSION}}"
+CHART_REPO_URL=""
+if [[ -n "${CHART_STABLE}" ]]; then
+  CHART_REPO_URL="${CHART_HOST}/$(dev_repository chart "${CHART_HOST}" "${CHART_STABLE}" "${CHART_DEV}")"
+fi
+NEW_IMAGE="${NEW_IMAGE_INPUT}"
+if [[ -z "${NEW_IMAGE}" ]]; then
+  NEW_IMAGE="${IMAGE_HOST}/$(dev_repository image "${IMAGE_HOST}" "${IMAGE_STABLE}" "${IMAGE_DEV}"):${TARGET_VERSION}"
+fi
 
 {
   echo "gitops_branch=${GITOPS_BRANCH}"

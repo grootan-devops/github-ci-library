@@ -93,7 +93,6 @@ on:
 env:
   PROJECT_PATH: ${{ inputs.project-path }}
   DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
-  REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
   IMAGE_INFO_FILE_NAME: IMAGE_INFO.md
 
 permissions:
@@ -160,33 +159,26 @@ jobs:
           done < /etc/hosts
           docker exec "${CONTAINER}" cat /etc/hosts
 
-      - name: Resolve Login Registry
-        id: login-registry
+      - name: Prepare Registries
+        id: registry
         env:
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-        run: |
-          set -euo pipefail
-          # docker/login-action stores the credential under the key it is GIVEN;
-          # BuildKit resolves Docker Hub as https://index.docker.io/v1/.
-          case "${REGISTRY_HOST}" in
-            docker.io|index.docker.io|registry-1.docker.io) VALUE="" ;;
-            *) VALUE="${REGISTRY_HOST}" ;;
-          esac
-          echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
-
-      - name: Authenticate To Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
-        with:
-          registry: ${{ steps.login-registry.outputs.value }}
-          username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
 
       - name: Assemble Base Image Build Arguments
         id: args
         env:
           EXTRA_BUILD_ARGS: ${{ inputs.build-args }}
           VERSION: ${{ inputs.image-tag }}
-          REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          # The registry that serves the grootantech base images: BASE_IMAGE_REGISTRY, else
+          # IMAGE_REGISTRY (a pull-through mirror), else Docker Hub where they are published.
+          REGISTRY: ${{ vars.BASE_IMAGE_REGISTRY || vars.IMAGE_REGISTRY || 'docker.io' }}
           MICRO_ROOT_BASE_IMAGE: grootantech/micro-root:1.2.0
           NGINX_MICRO_BASE_IMAGE: grootantech/micro-nginx:1.2.1
           PYTHON_312_MICRO_BASE_IMAGE: grootantech/micro-python-3-12:1.2.1
@@ -218,7 +210,7 @@ jobs:
           file: ${{ inputs.project-path }}/${{ vars.DOCKERFILE || 'Dockerfile' }}
           target: ${{ inputs.target }}
           push: true
-          tags: ${{ vars.IMAGE_REGISTRY }}/${{ inputs.image-repository }}:${{ inputs.image-tag }}
+          tags: ${{ steps.registry.outputs.image-registry }}/${{ inputs.image-repository }}:${{ inputs.image-tag }}
           build-args: ${{ steps.args.outputs.args }}
           provenance: false
           labels: |
@@ -233,6 +225,7 @@ jobs:
         env:
           DIGEST: ${{ steps.push.outputs.digest }}
           REPO: ${{ inputs.image-repository }}
+          REGISTRY_HOST: ${{ steps.registry.outputs.image-registry }}
         run: |
           set -euo pipefail
           REF="${REGISTRY_HOST}/${REPO}@${DIGEST}"
@@ -271,6 +264,50 @@ jobs:
           PUSH_OUTCOME: ${{ steps.push.outcome }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/docker/build-failure-summary.sh"
 
+  copy:
+    name: Copy To Other Registries
+    needs: build
+    # Several destinations are a list of refs in vars.IMAGE_REPOSITORY.
+    if: ${{ !cancelled() && !inputs.is-release && needs.build.result == 'success' && (contains(vars.IMAGE_REPOSITORY, ' ') || contains(vars.IMAGE_REPOSITORY, ',')) }}
+    runs-on: ${{ vars.CI_RUNNER || 'ubuntu-26.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    container:
+      image: grootantech/toolkit:2.0.1
+    steps:
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Prepare Registries
+        id: registry
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
+
+      - name: Copy The Candidate
+        env:
+          PUSHED_REPOSITORY: ${{ inputs.image-repository }}
+          PRIMARY_REPOSITORY: ${{ steps.registry.outputs.image-repository }}
+          TAG: ${{ inputs.image-tag }}
+        run: |
+          set -euo pipefail
+          WHICH=dev
+          [[ "${PUSHED_REPOSITORY}" == "${PRIMARY_REPOSITORY}" ]] && WHICH=stable
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/mirror.sh" image "${WHICH}" "${TAG}"
+
   test:
     name: Smoke Test
     needs: build
@@ -286,25 +323,25 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
-      - name: Resolve Login Registry
-        id: login-registry
-        env:
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-        run: |
-          set -euo pipefail
-          # Empty registry = Docker Hub's canonical key; see the build job.
-          case "${REGISTRY_HOST}" in
-            docker.io|index.docker.io|registry-1.docker.io) VALUE="" ;;
-            *) VALUE="${REGISTRY_HOST}" ;;
-          esac
-          echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
-
-      - name: Authenticate To Registry
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v3
+      - name: Checkout CI Library
+        uses: actions/checkout@v7
         with:
-          registry: ${{ steps.login-registry.outputs.value }}
-          username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          password: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .ci-library
+          token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
+
+      - name: Prepare Registries
+        id: registry
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
 
       - name: Run Smoke Test Inside The Image
         id: smoke
@@ -386,15 +423,36 @@ jobs:
           SCAN_RESULT: ${{ inputs.scan-result }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/docker/verify-scanned.sh"
 
+      - name: Prepare Registries
+        id: registry
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
+
       - name: Promote Candidate Image To Production
         env:
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          REGISTRY_HOST: ${{ steps.registry.outputs.image-registry }}
           TAG: ${{ inputs.release-tag }}
           CANDIDATE_TAG: ${{ inputs.candidate-tag }}
           DEV_REPOSITORY: ${{ inputs.image-dev-repository }}
           PROD_REPOSITORY: ${{ inputs.image-repository }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/docker/promote-image.sh"
+
+      - name: Copy The Release To The Other Registries
+        env:
+          TAG: ${{ inputs.release-tag }}
+        run: |
+          set -euo pipefail
+          MAJOR="$(grep -Eo '^[0-9]+' <<<"${TAG}" || true)"
+          MINOR="$(grep -Eo '^[0-9]+\.[0-9]+' <<<"${TAG}" || true)"
+          # shellcheck disable=SC2086 # an empty MAJOR / MINOR drops out
+          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/mirror.sh" image stable "${TAG}" latest ${MAJOR} ${MINOR}
 
       - name: Upload Image Info
         if: ${{ !cancelled() }}
@@ -409,6 +467,7 @@ jobs:
         env:
           TAG: ${{ inputs.release-tag }}
           DEV_REPOSITORY: ${{ inputs.image-dev-repository }}
+          REGISTRY_HOST: ${{ steps.registry.outputs.image-registry }}
         run: |
           set -euo pipefail
           {

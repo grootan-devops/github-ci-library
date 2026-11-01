@@ -13,6 +13,7 @@ library with `@1.0.0`.
 - [chart](chart.md)
 - [docker](docker.md)
 - [buildah](buildah.md)
+- [multi-registry](multi-registry.md)
 - [language-library](language-library.md)
 - [audit](audit.md)
 - [gitops](gitops.md)

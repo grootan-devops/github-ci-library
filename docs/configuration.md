@@ -9,14 +9,20 @@ is why callers pass so few inputs.
 Set these under **Settings → Secrets and variables → Actions**, at organisation level
 wherever possible.
 
-### Required variables
+### Registry variables
+
+Without them, images go to `ghcr.io/<owner>/<repo>` and charts to
+`oci://ghcr.io/<owner>/<repo>/helm`, with `GITHUB_TOKEN`. See [Registries](#registries) for
+several registries.
 
 | Variable | Description |
 | --- | --- |
-| `IMAGE_REGISTRY` | Container image registry host, e.g. `registry.domain.local`. Required when Docker or Buildah publishing is enabled. |
-| `IMAGE_REPOSITORY` | Container image repository path, e.g. `myapp/order-backend`. Required when image publishing is enabled. |
-| `CHART_REGISTRY` | Helm chart OCI registry host, e.g. `registry.domain.local`. Required when chart publishing is enabled. |
-| `CHART_REPOSITORY` | Helm chart repository path, e.g. `helm` or a Docker Hub namespace root. Required when chart publishing is enabled. |
+| `IMAGE_REGISTRY` | Container image registry host, e.g. `registry.domain.local`. Buildah builds always need it. |
+| `IMAGE_REPOSITORY` | Container image repository path, e.g. `myapp/order-backend`, or one or more full refs (`host/path`), primary first. |
+| `CHART_REGISTRY` | Helm chart OCI registry host, e.g. `registry.domain.local`. |
+| `CHART_REPOSITORY` | Helm chart repository path, e.g. `helm` or a Docker Hub namespace root, or one or more full refs. |
+| `DEPLOY_IMAGE_REPOSITORY` / `DEPLOY_CHART_REPOSITORY` | The destination deploys and scans read, as a full ref. Default: the primary. |
+| `BASE_IMAGE_REGISTRY` | Registry serving the `grootantech` base and scanner images. Default: `IMAGE_REGISTRY`, else `docker.io`. |
 
 > [!IMPORTANT]
 > Build and base image coordinates carry **no library defaults**. A container variable that
@@ -53,7 +59,7 @@ wherever possible.
 | `CHART_REPOSITORY` | — | Chart repository path in `CHART_REGISTRY`. For Docker Hub, set this to the namespace root (for example `grootantech`), because Helm appends the chart name. |
 | `DOCKERFILE` | `Dockerfile` | Dockerfile path for linting and building. |
 | `MASTER_BRANCH_REGEX` | `^(.*/)?master$` | **Additional** protected branches treated as release branches. The repository's own default branch always is, whatever it is called — leave this alone unless you release from a second branch such as `release/master`. |
-| `IMAGE_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate images: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override. |
+| `IMAGE_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate images: `-dev` on Docker Hub and `/dev` on other registries. Set an explicit value to override, or a per-registry `dev` in `REGISTRY_CONFIG`. |
 | `CHART_DEV_REPOSITORY_SUFFIX` | automatic | Appended for candidate charts as `/dev` on registries with nested paths. Docker Hub ignores this suffix and uses the same namespace-root repository for candidate and release versions. |
 | `RELEASE_VERSION_SUFFIX` | — | Suffix appended to the version, e.g. `backend` → `1.5.0-backend`. |
 | `CHANGELOG_FILE_NAME` | `./CHANGELOG.md` | Changelog path. |
@@ -108,8 +114,9 @@ A single-project repository omits it; it defaults to the repository root.
 
 | Secret | Required | Description |
 | --- | :--: | --- |
-| `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` | When image publishing is enabled | Authenticate to `IMAGE_REGISTRY` for image builds, scans and pushes. |
-| `CHART_REGISTRY_USERNAME` / `CHART_REGISTRY_PASSWORD` | When chart publishing is enabled | Authenticate to `CHART_REGISTRY` for chart dependency resolution, checks and OCI pushes. |
+| `IMAGE_REGISTRY_USERNAME` / `IMAGE_REGISTRY_PASSWORD` | For `IMAGE_REGISTRY`, unless `REGISTRY_CONFIG` covers it | Authenticate to `IMAGE_REGISTRY` for image builds, scans and pushes. |
+| `CHART_REGISTRY_USERNAME` / `CHART_REGISTRY_PASSWORD` | For `CHART_REGISTRY`, unless `REGISTRY_CONFIG` covers it | Authenticate to `CHART_REGISTRY` for chart dependency resolution, checks and OCI pushes. |
+| `REGISTRY_CONFIG` | For several registries | Per-registry credentials and options, YAML or JSON. See [Registries](#registries). |
 | `CI_LIBRARY_TOKEN` | | Only when this library lives in a repository `GITHUB_TOKEN` cannot read. |
 | `TRIVY_TOKEN` | | Authenticate to a shared Trivy server. |
 | `SONARQUBE_TOKEN` | | SonarQube analysis. |
@@ -124,6 +131,102 @@ A single-project repository omits it; it defaults to the repository root.
 > organisation secrets** — if a repository is granted access to more, only the first 100
 > alphabetically are visible. Keep the enabled library's variable and secret inventory
 > within those limits. Verify current limits in the GitHub documentation.
+
+## Registries
+
+Images and Helm charts are published to one or more OCI registries. `init.yml` checks, before
+anything runs, that every destination resolves and has credentials.
+
+### Defaults
+
+With nothing configured, everything goes to GitHub Container Registry with `GITHUB_TOKEN`
+(the calling job needs `packages: write`):
+
+| Artifact | Release | Candidate |
+| --- | --- | --- |
+| Image | `ghcr.io/<owner>/<repo>` | `ghcr.io/<owner>/<repo>/dev` |
+| Chart | `oci://ghcr.io/<owner>/<repo>/helm` | `oci://ghcr.io/<owner>/<repo>/helm/dev` |
+
+### One registry
+
+```yaml
+# Organisation or repository variables
+IMAGE_REGISTRY: registry.example.com
+IMAGE_REPOSITORY: company/payment-service
+IMAGE_DEV_REPOSITORY_SUFFIX: /dev
+CHART_REGISTRY: registry.example.com
+CHART_REPOSITORY: company/payment-service/charts
+CHART_DEV_REPOSITORY_SUFFIX: /dev
+# Secrets: IMAGE_REGISTRY_USERNAME, IMAGE_REGISTRY_PASSWORD,
+#          CHART_REGISTRY_USERNAME, CHART_REGISTRY_PASSWORD
+```
+
+### Several registries
+
+List full refs, primary first, separated by spaces or commas, and put the credentials in the
+`REGISTRY_CONFIG` secret:
+
+```yaml
+# Repository variables
+IMAGE_REPOSITORY: "ghcr.io/company/payment-service quay.io/company/payment-service docker.io/company/payment-service"
+CHART_REPOSITORY: "ghcr.io/company/payment-service/helm docker.io/company"
+```
+
+```yaml
+# REGISTRY_CONFIG: an organisation secret, overridable per repository; YAML or JSON
+quay.io:   { username: "company+ci", password: "..." }
+docker.io: { username: "company-ci", password: "...", dev: "-dev" }
+# ghcr.io: { dev: "/rc" }   # options only: keeps GITHUB_TOKEN
+```
+
+- **GitHub Container Registry** needs no entry: `GITHUB_TOKEN` is always added for `ghcr.io`.
+  Listing it first makes it the primary; later, a copy. An entry with credentials replaces
+  the token, which is needed to push to another owner's packages.
+- **`dev`** sets the candidate suffix for that registry. Without it the
+  `*_DEV_REPOSITORY_SUFFIX` default applies.
+- **Same host, different account.** Credentials are kept per host, so a repository that needs
+  its own account on a shared host sets its own `REGISTRY_CONFIG` secret.
+- **Chart dependencies** on any listed host authenticate from the same entries.
+  `CHART_DEPENDENCY_REGISTRY` with its username/password pair still works for a host that is
+  not a destination.
+- **Buildah** builds publish to one registry: `buildah.yml` keeps `IMAGE_REGISTRY` and its
+  username/password pair.
+
+### Credentials
+
+Every job that talks to a registry runs `scripts/registry/auth.sh` first. It writes one
+Docker `config.json` and points docker, buildx, crane, Trivy and helm at it (`DOCKER_CONFIG`,
+`REGISTRY_AUTH_FILE`, `HELM_REGISTRY_CONFIG`). For the same host a later source wins:
+
+1. `GITHUB_TOKEN` for `ghcr.io`;
+2. the `IMAGE_`, `CHART_` and `CHART_DEPENDENCY_REGISTRY_USERNAME` / `_PASSWORD` pairs;
+3. `REGISTRY_CONFIG`.
+
+Docker Hub entries are written for `docker.io`, `index.docker.io`, `registry-1.docker.io`
+and `https://index.docker.io/v1/`. Secrets are never echoed, and `REGISTRY_CONFIG` itself stays
+in that step: later steps get its options without the credentials.
+
+### Publishing and copies
+
+- **Candidates** are pushed to the primary's candidate repository, then copied by digest to
+  every other destination's candidate repository (`docker.yml` · `copy`, `chart.yml` ·
+  `push`).
+- **Releases** are promoted on the primary as before, then copied by digest to every other
+  destination, with the `latest`, major and minor tags for images.
+- **Collision checks** (`check.yml`'s image tag and chart version guards) look in every
+  destination, and the chart dependency guard rejects every destination's candidate path.
+- Copies are checked by digest and skipped when the destination already holds it, so a rerun
+  is safe. A failed destination is named, after every destination has been tried.
+- `init.yml`'s registry and repository outputs name the primary.
+
+### Which registry is read
+
+Deploys (`deploy-argocd-gitops.yml`, `deploy-komodo-gitops.yml`), their validation and image
+scans read the primary, unless `DEPLOY_IMAGE_REPOSITORY` / `DEPLOY_CHART_REPOSITORY` name
+another destination. The deploy workflows also take them as the `deploy-image-repository` /
+`deploy-chart-repository` inputs, so each environment's call can pull from its own registry.
+A value that is not a destination fails with the list of valid ones. Every destination holds
+the same digest, so any of them is safe to deploy from.
 
 ## DevOps Reference & Platform Defaults
 
@@ -151,9 +254,9 @@ Configure once at the GitHub organisation level to propagate to every repository
 
 ### Helm chart publishing & authentication
 
-Charts publish over **OCI** to `oci://${CHART_REGISTRY}/${CHART_REPOSITORY}`.
-`CHART_REGISTRY` is required for publishing and must be a hostname, optionally with a port,
-not an HTTP URL. There is no package-registry fallback or HTTP publishing option.
+Charts publish over **OCI** to `oci://${CHART_REGISTRY}/${CHART_REPOSITORY}` (or each full ref
+in `CHART_REPOSITORY`). `CHART_REGISTRY` must be a hostname, optionally with a port, not an
+HTTP URL. There is no package-registry fallback or HTTP publishing option.
 Authentication and lookup errors fail the job; only confirmed absence means a version is available.
 
 For Docker Hub, set `CHART_REGISTRY=registry-1.docker.io` and `CHART_REPOSITORY` to the
@@ -162,9 +265,9 @@ Docker Hub namespace root, for example `grootantech`. Helm appends the chart nam
 Candidate and release versions use that same chart repository; candidate version suffixes
 keep them distinct.
 
-- **Auth**: `helm registry login` with `CHART_REGISTRY_USERNAME` /
-  `CHART_REGISTRY_PASSWORD`. Image credentials are independent and are only needed when the
-  repository publishes images.
+- **Auth**: the shared credentials file (see [Credentials](#credentials)), from
+  `CHART_REGISTRY_USERNAME` / `CHART_REGISTRY_PASSWORD` or `REGISTRY_CONFIG`. Image credentials
+  are independent and are only needed when the repository publishes images.
 - **Dev vs production**: on registries with nested paths, candidates publish to
   `${CHART_REPOSITORY}${CHART_DEV_REPOSITORY_SUFFIX}`. On Docker Hub, candidates and releases
   publish to `${CHART_REPOSITORY}` and are distinguished by their chart versions. At release,
@@ -189,8 +292,8 @@ can resolve without credentials. These settings do not replace required publishi
 
 - **Target**: `${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}${IMAGE_DEV_REPOSITORY_SUFFIX}:${TAG}`
   for candidates, `${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}` for releases.
-- **Auth**: `docker/login-action` for the build job, `crane auth login` for the containerised
-  promote and check jobs.
+- **Auth**: the shared credentials file (see [Credentials](#credentials)) for `docker.yml`,
+  checks, scans and deploys; `buildah.yml` logs in to `IMAGE_REGISTRY` itself.
 - **Dev vs production**: `docker.yml` · `promote` uses `crane mutate --tag` to copy the
   manifest **layerlessly** from the dev path to the production path, rewriting only the
   version label, then tags `${TAG}`, `latest`, `${MAJOR}` and `${MINOR}`. Rewriting the label

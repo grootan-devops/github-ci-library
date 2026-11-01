@@ -21,7 +21,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Production image repository, from init.yml. Used when no image-ref is given."
+        description: "Production image repository, from init.yml. Without image-ref, the image is read from the registry settings: DEPLOY_IMAGE_REPOSITORY when set, else the primary destination."
       target-version:
         required: false
         type: string
@@ -69,8 +69,6 @@ env:
   IMAGE_REF: ${{ inputs.image-ref }}
   IMAGE_REPOSITORY: ${{ inputs.image-repository }}
   TARGET_VERSION: ${{ inputs.target-version }}
-  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-  IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
   SKIP_CVE_SCAN: ${{ vars.SKIP_CVE_SCAN || 'false' }}
   TRIVY_TIMEOUT: ${{ vars.TRIVY_TIMEOUT || '60m' }}
   TRIVY_IGNORE_CONFIG_FILE: ${{ vars.TRIVY_IGNORE_CONFIG_FILE || 'ignored-cves.yml' }}
@@ -163,49 +161,39 @@ jobs:
           name: ${{ inputs.sbom-artifact }}
           path: ${{ inputs.project-path }}
 
-      - name: Authenticate To Registry
-        if: ${{ inputs.scan-type == 'image' }}
+      # Image scans read the image from DEPLOY_IMAGE_REPOSITORY when it is set, else the
+      # primary destination; chart scans need the dependency credentials.
+      - name: Prepare Registries
+        if: ${{ inputs.scan-type == 'image' || (inputs.scan-type == 'config' && inputs.config-type == 'chart') }}
+        id: registry
         env:
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          mkdir -p ~/.docker
-          AUTH="$(printf '%s:%s' "${REGISTRY_USERNAME}" "${REGISTRY_PASSWORD}" | base64 -w0)"
-
-          # Docker Hub is reached under several hostnames; write every key so the
-          # credential is found whichever one the client resolved.
-          case "${IMAGE_REGISTRY}" in
-            docker.io|index.docker.io|registry-1.docker.io)
-              jq -n --arg AUTH "${AUTH}" '{auths: {
-                "https://index.docker.io/v1/": {auth: $AUTH},
-                "registry-1.docker.io": {auth: $AUTH},
-                "index.docker.io": {auth: $AUTH},
-                "docker.io": {auth: $AUTH}
-              }}' > ~/.docker/config.json
-              ;;
-            *)
-              jq -n --arg REG "${IMAGE_REGISTRY}" --arg AUTH "${AUTH}" \
-                '{auths: {($REG): {auth: $AUTH}}}' > ~/.docker/config.json
-              ;;
-          esac
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
+          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
+          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
+          DEPLOY_IMAGE_REPOSITORY: ${{ vars.DEPLOY_IMAGE_REPOSITORY }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh" deploy
 
       - name: Render Chart For Config Scan
         if: ${{ inputs.scan-type == 'config' && inputs.config-type == 'chart' }}
         env:
           HELM_TEST_VALUES: ${{ inputs.helm-values }}
           SCAN_PATH_INPUT: ${{ inputs.scan-path }}
-          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
-          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
-          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
-          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
-          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
-          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
         run: |
           set -euo pipefail
           SCAN_PATH="${SCAN_PATH_INPUT:-${CHART_DIR}}"
 
-          bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
           helm dependency update "${SCAN_PATH}/"
 
           if [[ -z "${HELM_TEST_VALUES}" ]]; then
@@ -241,6 +229,9 @@ jobs:
           TRIVY_TOKEN: ${{ secrets.TRIVY_TOKEN }}
           TRIVY_JUNIT_TEMPLATE_FILE: ${{ github.workspace }}/.ci-library/templates/trivy-junit.tpl
           FAIL_ON_WARNINGS: ${{ inputs.fail-on-warnings }}
+          IMAGE_REGISTRY: ${{ steps.registry.outputs.image-registry }}
+          IMAGE_REPOSITORY: ${{ steps.registry.outputs.image-repository }}
+          IMAGE_DEV_REPOSITORY: ${{ steps.registry.outputs.image-dev-repository }}
         run: |
           set -uo pipefail
           RESULT=0
