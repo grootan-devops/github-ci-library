@@ -18,7 +18,7 @@
 #   DEV_REPOSITORY        candidate repository to promote from (same as the
 #                         production repository on Docker Hub; default: none)
 #   PROD_REPOSITORY       production repository to push to
-#   CHART_REGISTRY        OCI registry host
+#   CHART_REGISTRY        OCI registry host (auth.sh's chart-registry output)
 #   CHART_DIR             working-tree chart directory (default: ./chart)
 #   CHART_INFO_FILE_NAME  file the published details are written to
 #                         (default: CHART_INFO.md)
@@ -67,7 +67,6 @@ if [[ ${PULLED} -eq 1 ]]; then
 elif [[ -f "${CHART_DIR}/Chart.yaml" ]]; then
   echo "::warning title=Chart promote::No candidate found — packaging from the working tree instead. These bytes were not scanned as a candidate."
   PROMOTED_FROM="working tree"
-  chart_dependency_login
   helm dependency update "${CHART_DIR}/"
   helm package "${CHART_DIR}" --version "${TAG}" --app-version "${TAG}"
 else

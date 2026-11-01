@@ -19,29 +19,25 @@
 # Exit codes: 0 promoted, 1 no candidate matched or the registry refused the
 # retag. Both failures leave the production tag unchanged.
 #
+# Needs a job prepared by scripts/registry/auth.sh, whose credentials file crane reads.
+#
 # Env:
-#   REGISTRY_USERNAME  registry credential for crane
-#   REGISTRY_PASSWORD  registry credential for crane
+#   REGISTRY_HOST      the primary image registry host
 #   TAG                production tag to release as
 #   CANDIDATE_TAG      exact candidate tag to promote; empty means search, and
 #                      a tag that is set but absent fails the promotion
 #   DEV_REPOSITORY     candidate repository, without the registry host
 #   PROD_REPOSITORY    production repository, without the registry host
 #
-# Runner-provided: REGISTRY_HOST and IMAGE_INFO_FILE_NAME (workflow-level env),
-# GITHUB_STEP_SUMMARY.
+# Runner-provided: IMAGE_INFO_FILE_NAME (workflow-level env), GITHUB_STEP_SUMMARY.
 set -euo pipefail
 
-: "${REGISTRY_USERNAME?REGISTRY_USERNAME must be set}"
-: "${REGISTRY_PASSWORD?REGISTRY_PASSWORD must be set}"
 : "${TAG?TAG must be set}"
 : "${CANDIDATE_TAG?CANDIDATE_TAG must be set}"
 : "${DEV_REPOSITORY?DEV_REPOSITORY must be set}"
 : "${PROD_REPOSITORY?PROD_REPOSITORY must be set}"
 : "${REGISTRY_HOST?REGISTRY_HOST must be set}"
 : "${IMAGE_INFO_FILE_NAME?IMAGE_INFO_FILE_NAME must be set}"
-
-crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
 
 DEV_IMAGE="${REGISTRY_HOST}/${DEV_REPOSITORY}"
 PROD_IMAGE="${REGISTRY_HOST}/${PROD_REPOSITORY}"

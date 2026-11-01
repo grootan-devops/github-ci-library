@@ -19,7 +19,7 @@
 #   CHART_REPOSITORY      repository to push to, under CHART_REGISTRY
 #   CHART_DEV_REPOSITORY  candidate repository to mirror into (same as the
 #                         production repository on Docker Hub)
-#   CHART_REGISTRY        OCI registry host
+#   CHART_REGISTRY        OCI registry host (auth.sh's chart-registry output)
 #   CHART_INFO_FILE_NAME  file the published details are written to
 #                         (default: CHART_INFO.md)
 #   GITHUB_STEP_SUMMARY   GitHub-provided; appended to

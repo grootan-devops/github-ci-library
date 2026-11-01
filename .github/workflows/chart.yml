@@ -80,7 +80,6 @@ on:
 env:
   PROJECT_PATH: ${{ inputs.project-path }}
   CHART_DIR: ${{ inputs.chart-dir }}
-  CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
   CHART_INFO_FILE_NAME: CHART_INFO.md
 
 permissions:
@@ -137,14 +136,20 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
-      - name: Authenticate To Chart Registry
+      - name: Prepare Registries
+        id: registry
         env:
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
           CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
           CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
 
       - name: Update Chart Dependencies
         id: deps
@@ -221,14 +226,20 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
-      - name: Authenticate Chart Dependencies
+      - name: Prepare Registries
+        id: registry
         env:
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
           CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
           CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
 
       - name: Update Mock Chart Dependencies
         env:
@@ -296,14 +307,20 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
-      - name: Authenticate To Chart Registry
+      - name: Prepare Registries
+        id: registry
         env:
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
           CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
           CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh" dependencies
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
 
       - name: Package Chart
         id: package
@@ -380,11 +397,20 @@ jobs:
           name: chart-package
           path: ${{ inputs.project-path }}
 
-      - name: Authenticate To Chart Registry
+      - name: Prepare Registries
+        id: registry
         env:
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh"
+          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
+          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
+          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
 
       - name: Push Chart
         env:
@@ -392,7 +418,29 @@ jobs:
           CHART_VERSION: ${{ inputs.chart-version }}
           CHART_REPOSITORY: ${{ inputs.chart-repository }}
           CHART_DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
+          CHART_REGISTRY: ${{ steps.registry.outputs.chart-registry }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/push.sh"
+
+      - name: Copy To The Other Registries
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+          CHART_VERSION: ${{ inputs.chart-version }}
+          PUSHED_REPOSITORY: ${{ inputs.chart-repository }}
+          PRIMARY_REPOSITORY: ${{ steps.registry.outputs.chart-repository }}
+          PRIMARY_DEV_REPOSITORY: ${{ steps.registry.outputs.chart-dev-repository }}
+        run: |
+          set -euo pipefail
+          MIRROR="${GITHUB_WORKSPACE}/.ci-library/scripts/registry/mirror.sh"
+          if [[ "${PUSHED_REPOSITORY}" != "${PRIMARY_REPOSITORY}" ]]; then
+            bash "${MIRROR}" chart dev "${CHART_VERSION}"
+            exit 0
+          fi
+          bash "${MIRROR}" chart stable "${CHART_VERSION}"
+          # A stable push also went to the dev repository; that copy is a convenience.
+          if [[ "${PRIMARY_DEV_REPOSITORY}" != "${PRIMARY_REPOSITORY}" ]]; then
+            bash "${MIRROR}" chart dev "${CHART_VERSION}" ||
+              echo "::warning title=Chart copy::The dev repository copies of ${CHART_VERSION} are incomplete; the stable copies are published."
+          fi
 
       - name: Upload Chart Info
         if: ${{ !cancelled() }}
@@ -428,11 +476,20 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
-      - name: Authenticate To Chart Registry
+      - name: Prepare Registries
+        id: registry
         env:
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
           CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
           CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
-        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/registry.sh"
+          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
+          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
+          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
 
       - name: Promote Candidate Chart To Production
         env:
@@ -441,10 +498,14 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.candidate-version }}
           DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
           PROD_REPOSITORY: ${{ inputs.chart-repository }}
-          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
-          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
-          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
+          CHART_REGISTRY: ${{ steps.registry.outputs.chart-registry }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/promote.sh"
+
+      - name: Copy The Release To The Other Registries
+        env:
+          CHART_NAME: ${{ inputs.chart-name }}
+          TAG: ${{ inputs.release-tag }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/mirror.sh" chart stable "${TAG}"
 
       - name: Upload Chart Info
         if: ${{ !cancelled() }}

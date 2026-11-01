@@ -1,8 +1,8 @@
 # chart
 
 Helm chart packaging and publishing over **OCI**, the registry protocol both platforms
-share. GitHub requires `CHART_REGISTRY` for publishing; there is no package-registry fallback.
-See [registry configuration](../configuration.md#helm-chart-publishing--authentication).
+share. Without configuration charts go to `oci://ghcr.io/<owner>/<repo>/helm`; there is no
+package-registry fallback. See [Registries](../configuration.md#registries).
 
 ```mermaid
 flowchart LR
@@ -18,8 +18,8 @@ flowchart LR
 | `chart.yml` · `lint` | `helm lint --strict`, with optional inline value overrides. |
 | `chart.yml` · `unittest` | **Optional, opt-in** (`run-unittest: true`, default `false`). `mock-chart` accepts one or more space-separated mock consumer chart directories (default `tests`); each gets a dependency update and runs `helm unittest --strict` against its own `tests/*_test.yaml` suite glob, preventing suites from being cross-run against other charts. Individual JUnit reports are uploaded together. For repositories that *ship* a chart others depend on; requires the `unittest` Helm plugin in the job image. |
 | `chart.yml` · `build` | `helm package --version --app-version`. Uploads `chart-package`. |
-| `chart.yml` · `push` | `helm push` to the OCI repository when `publish-candidate: true` (default). Set it to `false` for PR verification when the candidate OCI repository is not provisioned; release promotion remains separate. Writes `CHART_INFO.md` when it runs. On Docker Hub, candidate and release versions use the same namespace-root repository. |
-| `chart.yml` · `promote` | Release-mode only. Pulls the exact candidate, repackages at the release tag, and pushes to production. On Docker Hub, the source and destination repository are intentionally the same. |
+| `chart.yml` · `push` | `helm push` to the OCI repository when `publish-candidate: true` (default). Set it to `false` for PR verification when the candidate OCI repository is not provisioned; release promotion remains separate. Writes `CHART_INFO.md` when it runs, then copies the chart by digest to the other registries. On Docker Hub, candidate and release versions use the same namespace-root repository. |
+| `chart.yml` · `promote` | Release-mode only. Pulls the exact candidate, repackages at the release tag, and pushes to production, then copies it to the other registries. On Docker Hub, the source and destination repository are intentionally the same. |
 | `scan.yml` (`scan-type: config`, `config-type: chart`) | Renders templates, then runs a Trivy misconfiguration scan. |
 | `check.yml` · `chart-existence` / `chart-dependency` | Version collision and development-dependency guards. |
 

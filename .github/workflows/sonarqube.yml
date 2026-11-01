@@ -30,7 +30,8 @@ jobs:
     permissions:
       contents: read
     container:
-      image: ${{ vars.IMAGE_REGISTRY }}/${{ vars.SONAR_SCANNER_IMAGE }}
+      # BASE_IMAGE_REGISTRY, else IMAGE_REGISTRY (a pull-through mirror), else Docker Hub.
+      image: ${{ vars.BASE_IMAGE_REGISTRY || vars.IMAGE_REGISTRY || 'docker.io' }}/${{ vars.SONAR_SCANNER_IMAGE }}
     env:
       SONAR_USER_HOME: ${{ github.workspace }}/.sonar
       SONAR_SCANNER_OPTS: -XX:MaxRAMPercentage=90.0 -XX:InitialRAMPercentage=90.0

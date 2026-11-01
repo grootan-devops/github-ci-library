@@ -1,50 +1,66 @@
 #!/usr/bin/env bash
-# Guard: the release image tag must not already exist in the production repository.
+# Guard: the release image tag must not already exist in any production repository.
+#
+# Needs a job prepared by scripts/registry/auth.sh: the destinations and credentials
+# come from the registry settings it exported.
 #
 # Env:
-#   IMAGE_REGISTRY             container image registry host
-#   IMAGE_REGISTRY_USERNAME    registry username
-#   IMAGE_REGISTRY_PASSWORD    registry password or token
-#   IMAGE_REPOSITORY           production image repository
 #   IMAGE_TAG                  image tag being guarded
 set -euo pipefail
 
 : "${IMAGE_TAG:?IMAGE_TAG is required}"
-: "${IMAGE_REPOSITORY:?IMAGE_REPOSITORY is required}"
-: "${IMAGE_REGISTRY:?IMAGE_REGISTRY is required}"
 
 if [[ ! "${IMAGE_TAG}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "::notice::Image tag '${IMAGE_TAG}' is a candidate build. Skipping the collision check."
   exit 0
 fi
 
-if [[ -n "${IMAGE_REGISTRY_USERNAME:-}" && -n "${IMAGE_REGISTRY_PASSWORD:-}" ]]; then
-  # Capture crane's words: a bad credential and an unreachable registry both exit 1.
-  if ! LOGIN_OUTPUT="$(crane auth login "${IMAGE_REGISTRY}" --username "${IMAGE_REGISTRY_USERNAME}" --password "${IMAGE_REGISTRY_PASSWORD}" 2>&1)"; then
-    echo "::error title=Image::Could not authenticate to ${IMAGE_REGISTRY}."
-    echo "${LOGIN_OUTPUT}" >&2
-    {
-      echo "### 🐳 Image tag"
-      echo ""
-      echo "❌ Could not log in to \`${IMAGE_REGISTRY}\` as \`${IMAGE_REGISTRY_USERNAME}\`, so \`${IMAGE_TAG}\` cannot be confirmed available. crane reported:"
-      echo ""
-      echo '```'
-      tail -n 20 <<< "${LOGIN_OUTPUT}"
-      echo '```'
-      echo ""
-      echo "Check \`secrets.IMAGE_REGISTRY_USERNAME\` / \`secrets.IMAGE_REGISTRY_PASSWORD\` and that the caller passes \`secrets: inherit\`."
-      echo ""
-    } >> "${GITHUB_STEP_SUMMARY}"
-    exit 1
-  fi
-fi
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+TARGETS=$(registry_targets image) || exit 1
 
-TARGET="${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}:${IMAGE_TAG}"
-if crane manifest "${TARGET}" >/dev/null 2>&1; then
-  echo "::error title=Image::'${TARGET}' already exists in the production repository. Bump the application version."
-  { echo "### 🐳 Image tag"; echo; echo "❌ \`${TARGET}\` is already taken by a published image. Bump the application version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+TAKEN=()
+FREE=()
+while IFS=$'\t' read -r HOST STABLE _; do
+  TARGET="${HOST}/${STABLE}:${IMAGE_TAG}"
+  if registry_exists "${TARGET}"; then
+    TAKEN+=("${TARGET}")
+  else
+    RESULT=$?
+    if [[ "${RESULT}" -ne 1 ]]; then
+      {
+        echo "### 🐳 Image tag"
+        echo ""
+        echo "❌ \`${HOST}\` could not be asked about \`${TARGET}\`, so \`${IMAGE_TAG}\` cannot be confirmed available. Check the registry credentials (\`REGISTRY_CONFIG\` or \`IMAGE_REGISTRY_USERNAME\` / \`IMAGE_REGISTRY_PASSWORD\`) and that the caller passes \`secrets: inherit\`."
+        echo ""
+      } >> "${GITHUB_STEP_SUMMARY}"
+      exit 1
+    fi
+    FREE+=("${TARGET}")
+  fi
+done <<<"${TARGETS}"
+
+if [[ "${#TAKEN[@]}" -gt 0 ]]; then
+  echo "::error title=Image::${TAKEN[*]} already exists. Bump the application version."
+  {
+    echo "### 🐳 Image tag"
+    echo ""
+    for TARGET in "${TAKEN[@]}"; do
+      echo "- ❌ \`${TARGET}\` is already taken by a published image."
+    done
+    echo ""
+    echo "Bump the application version."
+    echo ""
+  } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
 
-echo "Nothing is published at '${TARGET}' yet; the release may claim it."
-{ echo "### 🐳 Image tag"; echo; echo "✅ Nothing is published at \`${TARGET}\` — free to publish."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+echo "Nothing is published at ${FREE[*]} yet; the release may claim it."
+{
+  echo "### 🐳 Image tag"
+  echo ""
+  for TARGET in "${FREE[@]}"; do
+    echo "- ✅ Nothing is published at \`${TARGET}\` — free to publish."
+  done
+  echo ""
+} >> "${GITHUB_STEP_SUMMARY}"

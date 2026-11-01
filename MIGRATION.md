@@ -7,6 +7,26 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.10.0
+
+### Required
+
+- None. Projects configured with `IMAGE_REGISTRY` / `IMAGE_REPOSITORY` / `CHART_REGISTRY` /
+  `CHART_REPOSITORY` and their username/password secrets publish exactly where they did.
+
+### Recommended
+
+- To publish to several registries, list full refs in `IMAGE_REPOSITORY` /
+  `CHART_REPOSITORY` and add the `REGISTRY_CONFIG` secret, as in
+  [Registries](docs/configuration.md#registries).
+- A deploy call that passed `dev-repository-suffix: ""` to read candidates from the release
+  repository sets `dev: ""` for that registry in `REGISTRY_CONFIG` instead: an empty input now
+  means the configured suffix.
+
+### Verify
+
+- `init.yml`'s summary shows the same image and chart targets as before the upgrade.
+
 ## 1.9.0
 
 ### Required

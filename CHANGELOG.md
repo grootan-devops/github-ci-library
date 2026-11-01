@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-11-01
+
+### Added
+
+- Publishing to several registries. `IMAGE_REPOSITORY` and `CHART_REPOSITORY` take one or more full refs (`host/path`), primary first, and the `REGISTRY_CONFIG` secret holds per-registry credentials and options (`dev`, the candidate suffix). Candidates and releases go to the primary as before, then are copied by digest to the other registries: a new `docker.yml` · `copy` job for candidates, and a copy step after `docker.yml` · `promote`, `chart.yml` · `push` and `chart.yml` · `promote`. See [Registries](docs/configuration.md#registries) and [the example](docs/examples/multi-registry.md).
+- `DEPLOY_IMAGE_REPOSITORY` / `DEPLOY_CHART_REPOSITORY`, and the `deploy-image-repository` / `deploy-chart-repository` inputs of both deploy workflows, choose which destination deploys, deploy validation and image scans read. The default is the primary.
+- With no registry configured, images and charts go to GitHub Container Registry (`ghcr.io/<owner>/<repo>`, charts under `/helm`) with `GITHUB_TOKEN`.
+- `BASE_IMAGE_REGISTRY`: the registry serving the base and SonarQube scanner images. The default is `IMAGE_REGISTRY`, else `docker.io`.
+
+### Changed
+
+- Every registry job writes one Docker `config.json` with `scripts/registry/auth.sh`, and docker, buildx, crane, Trivy and helm read it. It replaces `docker/login-action`, `crane auth login`, `helm registry login` and the hand-written Trivy credentials. `buildah.yml` is unchanged: it publishes to one registry.
+- `init.yml` checks that every destination resolves and has credentials, and names the host that lacks them. Its registry and repository outputs name the primary; with the existing single-registry variables they are unchanged.
+- `check.yml`'s image tag and chart version guards look in every destination; the chart dependency guard rejects every destination's candidate path. The `image-repository` and `chart-repository` inputs are no longer read.
+- The deploy workflows' `dev-repository-suffix` input defaults to the suffix configured for the deployed registry instead of `/dev`; a value still overrides it. `deploy-komodo-gitops.yml` no longer requires the `IMAGE_REGISTRY_USERNAME` / `_PASSWORD` secrets.
+
 ## [1.9.0] - 2026-11-01
 
 ### Changed
