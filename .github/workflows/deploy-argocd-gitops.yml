@@ -26,17 +26,27 @@ on:
         required: false
         type: string
         default: ""
-        description: "Base Helm chart repository path. Charts use the development suffix on registries that support it; Docker Hub uses the same namespace-root repository for candidate and release versions."
+        description: "Base Helm chart repository, used when vars.CHART_REPOSITORY is unset. Charts are read from its candidate repository; on Docker Hub that is the release repository itself."
       image-repository:
         required: false
         type: string
         default: ""
-        description: "Base container image repository path. Images are always read from <image-repository>/dev."
+        description: "Base container image repository, used when vars.IMAGE_REPOSITORY is unset. Images are read from its candidate repository (<repository>/dev by default)."
       dev-repository-suffix:
         required: false
         type: string
-        default: "/dev"
-        description: "Appended verbatim to a repository path for development artifacts, e.g. \"/dev\" gives <repository>/dev. Set to \"\" to publish candidates and releases to the same repository."
+        default: ""
+        description: "Overrides the candidate suffix of the deployed repository, e.g. \"/dev\" gives <repository>/dev. Default: the suffix configured for that registry (IMAGE_/CHART_DEV_REPOSITORY_SUFFIX or REGISTRY_CONFIG `dev`, `/dev` when unset)."
+      deploy-image-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Which image destination to deploy from, as a full ref (host/path) from the registry settings. Default: vars.DEPLOY_IMAGE_REPOSITORY, else the primary destination."
+      deploy-chart-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Which chart destination to deploy from, as a full ref (host/path) from the registry settings. Default: vars.DEPLOY_CHART_REPOSITORY, else the primary destination."
       gitops-repo:
         required: true
         type: string
@@ -112,6 +122,9 @@ on:
       CHART_REGISTRY_PASSWORD:
         required: false
         description: "Chart registry password or token used to verify the Helm chart."
+      REGISTRY_CONFIG:
+        required: false
+        description: "Registry settings and credentials for several registries (see docs/configuration.md#registries)."
       ARGOCD_AUTH_TOKEN:
         required: false
         description: "ArgoCD API token used to sync the application (defaults to secrets.ARGOCD_AUTH_TOKEN)."
@@ -123,16 +136,8 @@ on:
         description: "Token used to check out this CI library. Falls back to GITHUB_TOKEN."
 
 env:
-  IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-  IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-  IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-  CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
-  CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
-  CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
   CHART_NAME: ${{ inputs.chart-name }}
   CHART_VERSION: ${{ inputs.chart-version }}
-  CHART_REPOSITORY: ${{ inputs.chart-repository }}
-  IMAGE_REPOSITORY: ${{ inputs.image-repository }}
   ENVIRONMENT: ${{ inputs.environment }}
   GITOPS_REPO: ${{ inputs.gitops-repo }}
   GITOPS_BRANCH: ${{ inputs.gitops-branch }}
@@ -160,6 +165,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      packages: read
     defaults:
       run:
         shell: bash
@@ -183,8 +189,34 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
+      - name: Prepare Registries
+        id: registry
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY || inputs.image-repository }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY || inputs.chart-repository }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+          DEPLOY_IMAGE_REPOSITORY: ${{ inputs.deploy-image-repository || vars.DEPLOY_IMAGE_REPOSITORY }}
+          DEPLOY_CHART_REPOSITORY: ${{ inputs.deploy-chart-repository || vars.DEPLOY_CHART_REPOSITORY }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh" deploy
+
       - name: Resolve Deployment Target
         id: resolve
+        env:
+          IMAGE_HOST: ${{ steps.registry.outputs.image-registry }}
+          IMAGE_STABLE: ${{ steps.registry.outputs.image-repository }}
+          IMAGE_DEV: ${{ steps.registry.outputs.image-dev-repository }}
+          CHART_HOST: ${{ steps.registry.outputs.chart-registry }}
+          CHART_STABLE: ${{ steps.registry.outputs.chart-repository }}
+          CHART_DEV: ${{ steps.registry.outputs.chart-dev-repository }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/resolve-target.sh"
 
       - name: Validate Chart Exists In Registry
@@ -195,15 +227,11 @@ jobs:
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/argocd/validate-chart.sh"
 
       - name: Validate Image Exists In Registry
-        if: steps.resolve.outputs.new_image != '' && env.IMAGE_REGISTRY_USERNAME != '' && env.IMAGE_REGISTRY_PASSWORD != ''
+        if: steps.resolve.outputs.new_image != ''
         env:
-          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          TARGET: ${{ steps.resolve.outputs.new_image }}
         run: |
           set -euo pipefail
-          crane auth login "${IMAGE_REGISTRY}" --username "${IMAGE_REGISTRY_USERNAME}" --password "${IMAGE_REGISTRY_PASSWORD}"
-          TARGET="${{ steps.resolve.outputs.new_image }}"
           if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
             echo "${MANIFEST_OUTPUT}" >&2
             echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."

@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Guard: the chart version being released must not already be published.
 #
+# Every chart destination is checked. Needs a job prepared by scripts/registry/auth.sh:
+# the destinations and credentials come from the registry settings it exported.
+#
 # Env:
-#   CHART_REGISTRY             OCI registry host
-#   CHART_REGISTRY_USERNAME    registry username
-#   CHART_REGISTRY_PASSWORD    registry password or token
 #   CHART_NAME                 Helm chart name
-#   CHART_REPOSITORY           production chart repository
 #   CHART_VERSION              chart version being guarded
 set -euo pipefail
 
@@ -31,21 +30,43 @@ fi
 
 # shellcheck source=scripts/chart/registry.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../chart/registry.sh"
-chart_registry_login
-: "${CHART_REPOSITORY:?Set CHART_REPOSITORY to the OCI namespace/path}"
-TARGET="oci://${CHART_REGISTRY}/${CHART_REPOSITORY}/${CHART_NAME}"
-if chart_oci_lookup "${TARGET}" "${CHART_VERSION}" >/dev/null; then
-  EXISTS=true
-else
-  RESULT=$?
-  [[ "${RESULT}" -eq 1 ]] || exit "${RESULT}"
-  EXISTS=false
-fi
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+TARGETS=$(registry_targets chart) || exit 1
 
-if [[ "${EXISTS}" == "true" ]]; then
-  echo "::error title=Chart::Version '${CHART_VERSION}' already exists at ${TARGET}. Bump the chart version."
-  { echo "### ⎈ Chart version"; echo; echo "❌ \`${TARGET}:${CHART_VERSION}\` is already taken by a published chart. Bump the chart version."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+TAKEN=()
+FREE=()
+while IFS=$'\t' read -r HOST STABLE _; do
+  TARGET="oci://${HOST}/${STABLE}/${CHART_NAME}"
+  if chart_oci_lookup "${TARGET}" "${CHART_VERSION}" >/dev/null; then
+    TAKEN+=("${TARGET}:${CHART_VERSION}")
+  else
+    RESULT=$?
+    [[ "${RESULT}" -eq 1 ]] || exit "${RESULT}"
+    FREE+=("${TARGET}:${CHART_VERSION}")
+  fi
+done <<<"${TARGETS}"
+
+if [[ "${#TAKEN[@]}" -gt 0 ]]; then
+  echo "::error title=Chart::Version '${CHART_VERSION}' already exists at ${TAKEN[*]}. Bump the chart version."
+  {
+    echo "### ⎈ Chart version"
+    echo ""
+    for TARGET in "${TAKEN[@]}"; do
+      echo "- ❌ \`${TARGET}\` is already taken by a published chart."
+    done
+    echo ""
+    echo "Bump the chart version."
+    echo ""
+  } >> "${GITHUB_STEP_SUMMARY}"
   exit 1
 fi
-echo "Chart version '${CHART_VERSION}' is unpublished at ${TARGET}; the release may push it."
-{ echo "### ⎈ Chart version"; echo; echo "✅ \`${TARGET}:${CHART_VERSION}\` is unpublished — free to push."; echo; } >> "${GITHUB_STEP_SUMMARY}"
+echo "Chart version '${CHART_VERSION}' is unpublished at ${FREE[*]}; the release may push it."
+{
+  echo "### ⎈ Chart version"
+  echo ""
+  for TARGET in "${FREE[@]}"; do
+    echo "- ✅ \`${TARGET}\` is unpublished — free to push."
+  done
+  echo ""
+} >> "${GITHUB_STEP_SUMMARY}"

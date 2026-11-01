@@ -21,7 +21,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Production chart repository, from init.yml."
+        description: "Unused: the guards check every destination in vars.CHART_REPOSITORY. Kept so existing callers stay valid."
       image-tag:
         required: false
         type: string
@@ -31,7 +31,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Production image repository, from init.yml."
+        description: "Unused: the guards check every destination in vars.IMAGE_REPOSITORY. Kept so existing callers stay valid."
       project-path:
         required: false
         type: string
@@ -126,6 +126,25 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
+      # The image and chart guards check every destination in the registry settings.
+      - name: Prepare Registries
+        if: ${{ contains(fromJSON('["image-tag-check.sh", "chart-version-check.sh", "chart-dependency-check.sh"]'), matrix.script) }}
+        id: registry
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
+          CHART_REPOSITORY: ${{ vars.CHART_REPOSITORY }}
+          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX }}
+          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
+          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh"
+
       - name: Run Guard
         env:
           SCRIPT: ${{ matrix.script }}
@@ -137,17 +156,8 @@ jobs:
           CHART_DIR: ${{ inputs.chart-dir }}
           CHART_NAME: ${{ inputs.chart-name }}
           CHART_VERSION: ${{ inputs.chart-version }}
-          CHART_REPOSITORY: ${{ inputs.chart-repository }}
-          CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
           ALLOW_UNSTABLE_LIBRARY_REFS: ${{ inputs.allow-unstable-library-refs }}
           IMAGE_TAG: ${{ inputs.image-tag }}
-          IMAGE_REPOSITORY: ${{ inputs.image-repository }}
-          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
-          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-          CHART_REGISTRY: ${{ vars.CHART_REGISTRY }}
-          CHART_REGISTRY_USERNAME: ${{ secrets.CHART_REGISTRY_USERNAME }}
-          CHART_REGISTRY_PASSWORD: ${{ secrets.CHART_REGISTRY_PASSWORD }}
           CHANGELOG_FILE_NAME: ${{ vars.CHANGELOG_FILE_NAME || './CHANGELOG.md' }}
           MIGRATION_FILE_NAME: ${{ vars.MIGRATION_FILE_NAME || './MIGRATION.md' }}
           RELEASE_CHANGELOG_FILE_NAME: RELEASE_CHANGELOG.md

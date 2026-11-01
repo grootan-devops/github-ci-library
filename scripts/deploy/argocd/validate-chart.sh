@@ -8,29 +8,24 @@
 # something that does not resolve, and the environment is stuck until someone
 # reverts the commit by hand. `helm show chart` here is cheap; that is not.
 #
-# Exit codes: 0 the chart resolves, 1 credentials are missing or it does not.
+# Exit codes: 0 the chart resolves, 1 it does not.
+#
+# Credentials come from the file scripts/registry/auth.sh wrote (HELM_REGISTRY_CONFIG).
 #
 # Env:
-#   CHART_REGISTRY        chart registry hostname to log in to
-#   CHART_REGISTRY_USERNAME chart registry username (mandatory)
-#   CHART_REGISTRY_PASSWORD chart registry password or token (mandatory)
 #   CHART_REPO_URL     resolved chart repository, without the oci:// scheme
 #   CHART_NAME         Helm chart name
 #   TARGET_VERSION     chart version that must exist
 set -euo pipefail
 
-: "${CHART_REGISTRY:=}"
-: "${CHART_REGISTRY_USERNAME:=}"
-: "${CHART_REGISTRY_PASSWORD:=}"
 : "${CHART_REPO_URL:=}"
 : "${CHART_NAME:=}"
 : "${TARGET_VERSION:=}"
 
-if [[ -z "${CHART_REGISTRY}" || -z "${CHART_REGISTRY_USERNAME}" || -z "${CHART_REGISTRY_PASSWORD}" ]]; then
-  echo "::error::CHART_REGISTRY / CHART_REGISTRY_USERNAME / CHART_REGISTRY_PASSWORD are required to verify the chart before deploying."
+if [[ -z "${CHART_REPO_URL}" ]]; then
+  echo "::error::No chart repository was resolved: set vars.CHART_REPOSITORY or the chart-repository input."
   exit 1
 fi
-printf '%s' "${CHART_REGISTRY_PASSWORD}" | helm registry login "${CHART_REGISTRY}" --username "${CHART_REGISTRY_USERNAME}" --password-stdin
 
 TARGET="oci://${CHART_REPO_URL}/${CHART_NAME}"
 VERSION="${TARGET_VERSION}"

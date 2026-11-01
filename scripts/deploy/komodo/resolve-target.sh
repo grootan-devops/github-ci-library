@@ -25,10 +25,9 @@
 #   KOMODO_KEY      Komodo API key
 #   KOMODO_SECRET   Komodo API secret
 #   IMAGE_TAG       container image tag to deploy
-#   IMAGE_REPO      base container image repository
-#   REGISTRY_HOST   container registry host (default: empty)
-#   DEV_SUFFIX      appended to IMAGE_REPO for development artifacts
-#                   (default: empty)
+#   IMAGE_HOST, IMAGE_STABLE, IMAGE_DEV  the selected image destination: host, release
+#                   and candidate repository (scripts/registry/auth.sh deploy)
+#   DEV_SUFFIX      overrides the candidate suffix (default: the configured one)
 #
 # Runner-provided: GITHUB_OUTPUT, GITHUB_STEP_SUMMARY.
 #
@@ -44,8 +43,9 @@ set -euo pipefail
 : "${KOMODO_KEY:=}"
 : "${KOMODO_SECRET:=}"
 : "${IMAGE_TAG:=}"
-: "${IMAGE_REPO:=}"
-: "${REGISTRY_HOST:=}"
+: "${IMAGE_HOST:=}"
+: "${IMAGE_STABLE:=}"
+: "${IMAGE_DEV:=}"
 : "${DEV_SUFFIX:=}"
 
 MISSING=()
@@ -86,7 +86,7 @@ if [[ -z "${IMAGE_TAG}" ]]; then
   MISSING+=("image-tag")
 fi
 
-if [[ -z "${IMAGE_REPO}" ]]; then
+if [[ -z "${IMAGE_STABLE}" ]]; then
   MISSING+=("image-repository")
 fi
 
@@ -105,20 +105,30 @@ if [[ ${#MISSING[@]} -gt 0 ]]; then
 fi
 
 
-# Docker Hub has no nested repositories, so `<repo>/dev` is not a valid image
-# target and the push side rewrites the separator. scripts/init/resolve-version.sh
-# and scripts/scan/trivy.sh both do this; without it the deploy path looked for
-# `<repo>/dev` while the image had been pushed and scanned at `<repo>-dev`.
-# Charts are not rewritten: they live at an OCI path where nesting is legal,
-# which is why init normalises the image suffix only.
-IMAGE_DEV_SUFFIX="${DEV_SUFFIX}"
-case "${REGISTRY_HOST}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    IMAGE_DEV_SUFFIX="${DEV_SUFFIX//\//-}"
-    ;;
-esac
+# The candidate repository to read: the selected destination's dev path, or the stable
+# path plus the dev-repository-suffix input when the caller overrides it. Docker Hub has
+# no nested repositories: an image suffix uses `-` there, and charts keep candidates in
+# the release repository.
+dev_repository() {
+  local KIND="$1" HOST="$2" STABLE="$3" DEV="$4"
+  if [[ -z "${DEV_SUFFIX}" ]]; then
+    printf '%s\n' "${DEV}"
+    return 0
+  fi
+  case "${HOST}" in
+    docker.io|index.docker.io|registry-1.docker.io)
+      if [[ "${KIND}" == "chart" ]]; then
+        printf '%s\n' "${STABLE}"
+      else
+        printf '%s\n' "${STABLE}${DEV_SUFFIX//\//-}"
+      fi
+      return 0
+      ;;
+  esac
+  printf '%s\n' "${STABLE}${DEV_SUFFIX}"
+}
 
-NEW_IMAGE="${REGISTRY_HOST}/${IMAGE_REPO}${IMAGE_DEV_SUFFIX}:${IMAGE_TAG}"
+NEW_IMAGE="${IMAGE_HOST}/$(dev_repository image "${IMAGE_HOST}" "${IMAGE_STABLE}" "${IMAGE_DEV}"):${IMAGE_TAG}"
 
 {
   echo "new_image=${NEW_IMAGE}"

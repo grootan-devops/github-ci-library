@@ -39,12 +39,17 @@ on:
       dev-repository-suffix:
         required: false
         type: string
-        default: "/dev"
-        description: "Appended verbatim to a repository path for development artifacts, e.g. \"/dev\" gives <repository>/dev. Set to \"\" to publish candidates and releases to the same repository."
+        default: ""
+        description: "Overrides the candidate suffix of the deployed repository, e.g. \"/dev\" gives <repository>/dev. Default: the suffix configured for that registry (IMAGE_/CHART_DEV_REPOSITORY_SUFFIX or REGISTRY_CONFIG `dev`, `/dev` when unset)."
       image-repository:
         required: true
         type: string
-        description: "Base container image repository. Images are always read from <image-repository>/dev."
+        description: "Base container image repository, used when vars.IMAGE_REPOSITORY is unset. Images are read from its candidate repository (<repository>/dev by default)."
+      deploy-image-repository:
+        required: false
+        type: string
+        default: ""
+        description: "Which image destination to deploy from, as a full ref (host/path) from the registry settings. Default: vars.DEPLOY_IMAGE_REPOSITORY, else the primary destination."
       build-env:
         required: false
         default: ""
@@ -53,11 +58,14 @@ on:
 
     secrets:
       IMAGE_REGISTRY_USERNAME:
-        required: true
+        required: false
         description: "Registry username used to verify the image."
       IMAGE_REGISTRY_PASSWORD:
-        required: true
+        required: false
         description: "Registry password or token used to verify the image."
+      REGISTRY_CONFIG:
+        required: false
+        description: "Registry settings and credentials for several registries (see docs/configuration.md#registries)."
       KOMODO_API_KEY:
         required: false
         description: "Komodo API key used to trigger the stack redeploy (defaults to secrets.KOMODO_API_KEY)."
@@ -83,6 +91,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      packages: read
     defaults:
       run:
         shell: bash
@@ -99,6 +108,19 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
+      - name: Prepare Registries
+        id: registry
+        env:
+          IMAGE_REGISTRY: ${{ vars.IMAGE_REGISTRY }}
+          IMAGE_REPOSITORY: ${{ vars.IMAGE_REPOSITORY || inputs.image-repository }}
+          IMAGE_DEV_REPOSITORY_SUFFIX: ${{ vars.IMAGE_DEV_REPOSITORY_SUFFIX }}
+          IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+          IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+          DEPLOY_IMAGE_REPOSITORY: ${{ inputs.deploy-image-repository || vars.DEPLOY_IMAGE_REPOSITORY }}
+          REGISTRY_CONFIG: ${{ secrets.REGISTRY_CONFIG }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/registry/auth.sh" deploy
+
       - name: Resolve Deployment Target
         id: resolve
         env:
@@ -110,21 +132,18 @@ jobs:
           STACK_NAME: ${{ inputs.komodo-stack-name }}
           KOMODO_KEY: ${{ secrets.KOMODO_API_KEY || '' }}
           KOMODO_SECRET: ${{ secrets.KOMODO_API_SECRET || '' }}
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
           IMAGE_TAG: ${{ inputs.image-tag }}
-          IMAGE_REPO: ${{ inputs.image-repository }}
+          IMAGE_HOST: ${{ steps.registry.outputs.image-registry }}
+          IMAGE_STABLE: ${{ steps.registry.outputs.image-repository }}
+          IMAGE_DEV: ${{ steps.registry.outputs.image-dev-repository }}
           DEV_SUFFIX: ${{ inputs.dev-repository-suffix }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/deploy/komodo/resolve-target.sh"
 
       - name: Validate Image Exists In Registry
         env:
-          REGISTRY_HOST: ${{ vars.IMAGE_REGISTRY }}
-          REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
           TARGET: ${{ steps.resolve.outputs.new_image }}
         run: |
           set -euo pipefail
-          crane auth login "${REGISTRY_HOST}" --username "${REGISTRY_USERNAME}" --password "${REGISTRY_PASSWORD}"
           if ! MANIFEST_OUTPUT="$(crane manifest "${TARGET}" 2>&1)"; then
             echo "${MANIFEST_OUTPUT}" >&2
             echo "::error::Container image '${TARGET}' does not exist. Refusing to commit a GitOps change that cannot resolve."

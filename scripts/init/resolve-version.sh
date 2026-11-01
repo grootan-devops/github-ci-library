@@ -24,8 +24,9 @@
 #   CHART_REGISTRY_HOST           vars.CHART_REGISTRY (default: empty)
 #   IMAGE_REPOSITORY_INPUT        vars.IMAGE_REPOSITORY (default: empty)
 #   IMAGE_DEV_REPOSITORY_SUFFIX   candidate image repository suffix (default: empty, then /dev)
+#   REGISTRY_CONFIG               per-registry settings, e.g. `dev` (default: empty)
 #   CHART_REPOSITORY_INPUT        vars.CHART_REPOSITORY (default: empty)
-#   CHART_DEV_REPOSITORY_SUFFIX   candidate chart repository suffix (default: empty)
+#   CHART_DEV_REPOSITORY_SUFFIX   candidate chart repository suffix (default: empty, then /dev)
 #   RELEASE_VERSION_SUFFIX        suffix appended to the release tag (default: empty)
 #   MASTER_BRANCH_REGEX           protected branches treated as release branches
 #                                 (default: empty; the workflow passes ^(.*/)?master$)
@@ -225,35 +226,34 @@ else
   IS_RELEASE="false"
 fi
 
-IMAGE_REPO="${IMAGE_REPOSITORY_INPUT}"
-IMAGE_DEV_SUFFIX="${IMAGE_DEV_REPOSITORY_SUFFIX:-/dev}"
-# Docker Hub has no nested repositories, so `<repo>/dev` is not a valid target.
-case "${IMAGE_REGISTRY_HOST}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    NORMALISED_DEV_SUFFIX="${IMAGE_DEV_SUFFIX//\//-}"
-    if [[ "${NORMALISED_DEV_SUFFIX}" != "${IMAGE_DEV_SUFFIX}" ]]; then
-      echo "::notice title=Dev repository::Docker Hub does not support nested repositories. Using '${NORMALISED_DEV_SUFFIX}' instead of '${IMAGE_DEV_SUFFIX}' for development images."
+# The primary destination of each kind, from either registry style (scripts/registry/lib.sh):
+# its host, release repository and candidate repository. The other destinations get
+# copies after the push. A kind this repository does not publish may stay unresolved.
+# shellcheck source=scripts/registry/lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../registry/lib.sh"
+resolve_primary() {
+  local KIND="$1" IGNORED="$2"
+  SELECTED_HOST=""
+  SELECTED_STABLE=""
+  SELECTED_DEV=""
+  if ! registry_select "${KIND}" "" 2>"${RUNNER_TEMP:-/tmp}/registry-select.err"; then
+    if [[ "${IGNORED}" != "true" ]]; then
+      cat "${RUNNER_TEMP:-/tmp}/registry-select.err" >&2
+      exit 1
     fi
-    IMAGE_DEV_SUFFIX="${NORMALISED_DEV_SUFFIX}"
-    ;;
-esac
-IMAGE_DEV_REPO="${IMAGE_REPO}${IMAGE_DEV_SUFFIX}"
-CHART_REPO="${CHART_REPOSITORY_INPUT}"
-CHART_DEV_SUFFIX="${CHART_DEV_REPOSITORY_SUFFIX:-/dev}"
-# Docker Hub's Helm OCI layout is different from its image layout: the push
-# target is the namespace root and Helm appends the chart name itself. There
-# is therefore no separate chart development repository on Docker Hub. The
-# candidate version suffix already separates candidate artifacts from stable
-# releases in the shared chart repository.
-case "${CHART_REGISTRY_HOST}" in
-  docker.io|index.docker.io|registry-1.docker.io)
-    if [[ -n "${CHART_DEV_SUFFIX}" ]]; then
-      echo "::notice title=Dev chart repository::Docker Hub stores candidate and release Helm charts in the same namespace-root repository; the chart version distinguishes them. Ignoring chart development suffix '${CHART_DEV_SUFFIX}'."
-    fi
-    CHART_DEV_SUFFIX=""
-    ;;
-esac
-CHART_DEV_REPO="${CHART_REPO}${CHART_DEV_SUFFIX}"
+    SELECTED_HOST=""
+  fi
+}
+IMAGE_REGISTRY="${IMAGE_REGISTRY_HOST}" IMAGE_REPOSITORY="${IMAGE_REPOSITORY_INPUT}" \
+  resolve_primary image "${IGNORE_DOCKER}"
+IMAGE_REGISTRY_HOST="${SELECTED_HOST}"
+IMAGE_REPO="${SELECTED_STABLE}"
+IMAGE_DEV_REPO="${SELECTED_DEV}"
+CHART_REGISTRY="${CHART_REGISTRY_HOST}" CHART_REPOSITORY="${CHART_REPOSITORY_INPUT}" \
+  resolve_primary chart "${IGNORE_CHART}"
+CHART_REGISTRY_HOST="${SELECTED_HOST}"
+CHART_REPO="${SELECTED_STABLE}"
+CHART_DEV_REPO="${SELECTED_DEV}"
 
 if [[ "${IS_RELEASE}" == "true" ]]; then
   IMAGE_PUSH_REPOSITORY="${IMAGE_REPO}"

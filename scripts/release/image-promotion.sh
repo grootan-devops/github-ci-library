@@ -160,6 +160,11 @@ promote_candidate_image() {
   fi
 
   move_floating_aliases "${PROD_IMAGE}" || return 1
+  # The aliases this release took, for the copy to the other registries: a
+  # mirror never takes an alias the primary kept on a higher release.
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    echo "aliases=${ALIASES_MOVED[*]}" >> "${GITHUB_OUTPUT}"
+  fi
 
   {
     echo "### 🐳 Container Image"
