@@ -97,7 +97,7 @@ A single-project repository omits it; it defaults to the repository root.
 | --- | --- | --- |
 | `TRIVY_HOST` | — | Shared Trivy server. **Unset means every scan downloads the ~1.2 GB database.** |
 | `TRIVY_TIMEOUT` | `60m` | Scan timeout. |
-| `TRIVY_IGNORE_CONFIG_FILE` | `ignored-cves.yml` | Suppression configuration path. |
+| `TRIVY_IGNORE_CONFIG_FILE` | `ignored-cves.yml` | Suppression configuration path, relative to `project-path`. A monorepo child without its own file uses the repository root's; entries of that shared list the child does not contain are not reported as stale. |
 | `TRIVY_IGNORE_CVES` | `KSV-0011 KSV-0014 KSV-0015 KSV-0016 KSV-0018 KSV-0110 KSV-0113 KSV-0125` | Space-separated misconfiguration IDs suppressed platform-wide (set by the platform at deploy time, not by the chart). |
 | `TRIVY_IGNORED_LICENSE_CLASSIFICATIONS` | `notice,permissive,unencumbered` | Licence classes that never warn. |
 | `SKIP_CVE_SCAN` | `false` | Emergency global scan bypass. |

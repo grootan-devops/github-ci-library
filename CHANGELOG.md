@@ -52,6 +52,11 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `actions/checkout@v7`, `actions/upload-artifact@v7`, `actions/download-artifact@v8` and
     `actions/cache@v6` already track their latest releases.
 
+- A monorepo child scanned from its `project-path` without an `ignored-cves.yml` of its own
+  uses the repository root's instead of scanning with no suppressions. Entries of that
+  shared list the child does not contain are not stale there, so they no longer fail its
+  scan; a child's own list, and a single project, are checked exactly as before.
+
 ### Added
 
 - `init.yml` input `upstream-workflow`: the workflow file whose successful pull request run

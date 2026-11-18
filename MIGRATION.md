@@ -44,6 +44,9 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
   where they were; the summary lists the aliases it kept.
 - With several Terraform roots, the release notes carry one Terraform scan summary per root
   and `trivy_scan_report.tar.gz` holds each root's report.
+- A monorepo child without its own `ignored-cves.yml` now applies the repository root's: a
+  finding suppressed there no longer fails the child's scan, and the log says the root list
+  was used. Give the child its own file to keep the suppressions separate.
 
 ## 1.9.1
 
