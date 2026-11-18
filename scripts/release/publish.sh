@@ -78,6 +78,23 @@ if [[ "${PRERELEASE}" == "true" ]]; then
   ARGS+=(--prerelease)
 fi
 
+# GitHub marks every newly published release "Latest", so a hotfix on an older
+# line would take the badge from a higher release, the same rollback the image
+# aliases are protected from. Only a release no published release outranks may
+# take it. An unreadable release list leaves GitHub's default.
+CORE="$(grep -Eo '^v?[0-9]+\.[0-9]+\.[0-9]+' <<< "${TAG}" | sed 's/^v//' || true)"
+if [[ -n "${CORE}" && "${DRAFT}" != "true" && "${PRERELEASE}" != "true" ]]; then
+  if PUBLISHED_TAGS="$(gh release list --repo "${GITHUB_REPOSITORY}" --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName')"; then
+    HIGHEST="$(printf '%s\n%s\n' "${PUBLISHED_TAGS}" "${CORE}" | grep -Eo '^v?[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//' | sort -V | tail -n1)"
+    if [[ "${HIGHEST}" != "${CORE}" ]]; then
+      echo "::notice title=Release::${HIGHEST} is higher than ${TAG}, so ${TAG} is published without taking the \"Latest\" badge."
+      ARGS+=(--latest=false)
+    fi
+  else
+    echo "::warning title=Release::Could not list the published releases, so GitHub decides which release is \"Latest\"."
+  fi
+fi
+
 shopt -s nullglob
 ASSETS=()
 for ASSET in payload/_release_assets/*; do

@@ -15,6 +15,7 @@ No migration is required.
 
 - Re-running a release workflow for a version that is already published succeeds, and its
   log says each asset is already attached with the same sha256.
+- A hotfix release on an older line leaves GitHub's "Latest" badge on the higher release.
 
 ## 1.9.2
 

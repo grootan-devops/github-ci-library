@@ -16,6 +16,11 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   step failed, always failed. An asset already attached with the same sha256 is now left
   alone and a missing one is added; a different one still replaces the old one on a mutable
   release, and fails the job on an immutable release instead of being half-replaced.
+- A hotfix release on an older line no longer takes GitHub's "Latest" badge from a higher
+  release. GitHub marks every newly published release "Latest", so releasing 1.1.2 after
+  1.2.1 showed 1.1.2 as the latest version; `release.yml` · `publish` now publishes a release
+  that a higher published release outranks with `--latest=false`, matching the image's
+  `latest` alias.
 - Release archives (`trivy_scan_report.tar.gz`, the test report and directory
   `additional-artifacts`) are packed deterministically, so the same reports give the same
   bytes on every run and a re-run's assets match the published ones.
