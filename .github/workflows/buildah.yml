@@ -142,7 +142,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
       # buildah needs to mount the container filesystem it is assembling.
       options: --privileged
     defaults:
@@ -274,7 +274,7 @@ jobs:
           echo "value=${VALUE}" >> "${GITHUB_OUTPUT}"
 
       - name: Authenticate To Registry
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
         with:
           registry: ${{ steps.login-registry.outputs.value }}
           username: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
@@ -344,7 +344,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}

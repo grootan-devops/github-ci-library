@@ -32,6 +32,26 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   summary (`TF_CVE-<root>.md`, titled with the root); the release bundles every report and
   lists every summary. A single root at the repository root keeps its names.
 
+### Changed
+
+- Updated the build container and the public images and actions the workflows use to their
+  latest releases. The `micro-root`, `nginx`, `python-3-12`, `node-24` and `java-25` base
+  images are already on their latest tags (1.2.0, 1.2.1, 1.2.1, 1.2.1, 1.3.1).
+  - [`grootantech/toolkit`](https://github.com/grootan-devops/toolkit) from `2.0.1` to `2.1.0`
+    in every `container:` and as `TOOLKIT_BUILD_IMAGE`: Node.js 26.13.0, npm 12.2.2,
+    Terraform 1.17.1, OpenTofu 1.13.9, Trivy 0.76.2, uv 0.13.7, Biome 2.6.6, yq 4.54.2,
+    buildx 0.38.2 and betterleaks 1.10.0.
+  - [`moby/buildkit`](https://github.com/moby/buildkit) from `v0.34.1` to `v0.35.0`, the
+    `docker.yml` BuildKit driver.
+  - [`docker/login-action`](https://github.com/docker/login-action) from `v3` to `v4`
+    (`8aa5831`), [`docker/setup-buildx-action`](https://github.com/docker/setup-buildx-action)
+    from `v3` to `v4` (`f87e599`) and
+    [`docker/build-push-action`](https://github.com/docker/build-push-action) from `v6` to `v7`
+    (`c3c9e26`). All three move from Node.js 20, which GitHub now warns about, to Node.js 24;
+    the inputs and outputs the workflows use are unchanged.
+  - `actions/checkout@v7`, `actions/upload-artifact@v7`, `actions/download-artifact@v8` and
+    `actions/cache@v6` already track their latest releases.
+
 ### Added
 
 - `init.yml` input `upstream-workflow`: the workflow file whose successful pull request run

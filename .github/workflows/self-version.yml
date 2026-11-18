@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     outputs:
       tag: ${{ steps.read.outputs.TAG }}
     steps:

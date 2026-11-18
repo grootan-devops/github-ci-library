@@ -26,6 +26,9 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
 
 ### Recommended
 
+- Run the pull request pipeline once on this release before pinning it everywhere: the toolkit
+  moves to 2.1.0 (Trivy 0.76.2, Terraform 1.17.1, OpenTofu 1.13.9, Node.js 26.13.0, Biome
+  2.6.6), which can report new findings or lint warnings.
 - Run several Terraform roots as a `strategy.matrix` of `terraform.yml` and `scan.yml` calls
   over `project-path`
   ([example](docs/examples/terraform.md#several-terraform-roots)), and drop any job of your own
@@ -33,6 +36,8 @@ Newer sections are split into **Required** (the upgrade breaks or misbehaves wit
 
 ### Verify
 
+- A self-hosted runner (`vars.CI_RUNNER`) is Actions Runner v2.327.1 or later, which the
+  Node.js 24 Docker actions require, as `actions/checkout@v7` already did.
 - The released image's digest equals the scanned candidate's (`IMAGE_INFO.md` shows one
   digest), and its `org.opencontainers.image.version` label carries the candidate version.
 - A hotfix release on an older line leaves `latest` and the higher `MAJOR` / `MINOR` tags
