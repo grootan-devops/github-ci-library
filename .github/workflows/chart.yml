@@ -33,7 +33,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Exact candidate version to promote, from init.yml."
+        description: "Exact candidate version to promote, from init.yml's candidate-chart-version. Required when is-release is true: empty or missing refuses the promotion."
       chart-dev-repository:
         required: false
         type: string
@@ -95,7 +95,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -121,7 +121,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -205,7 +205,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -280,7 +280,7 @@ jobs:
     permissions:
       contents: read
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -361,7 +361,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -412,7 +412,7 @@ jobs:
       contents: read
       packages: write
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -441,9 +441,6 @@ jobs:
           CANDIDATE_VERSION: ${{ inputs.candidate-version }}
           DEV_REPOSITORY: ${{ inputs.chart-dev-repository }}
           PROD_REPOSITORY: ${{ inputs.chart-repository }}
-          CHART_DEPENDENCY_REGISTRY: ${{ vars.CHART_DEPENDENCY_REGISTRY }}
-          CHART_DEPENDENCY_REGISTRY_USERNAME: ${{ secrets.CHART_DEPENDENCY_REGISTRY_USERNAME }}
-          CHART_DEPENDENCY_REGISTRY_PASSWORD: ${{ secrets.CHART_DEPENDENCY_REGISTRY_PASSWORD }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/promote.sh"
 
       - name: Upload Chart Info

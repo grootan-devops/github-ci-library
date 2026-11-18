@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Merge a run's downloaded artifacts into one release body and one asset directory.
 #
+# Several Terraform roots scanned in one run each bring their own
+# `terraform-<root>_trivy_scan_report.*` and `TF_CVE-<root>.md` (scan.yml names
+# them), so every root lands in the bundle and in the notes.
+#
 # The release is assembled from whatever the candidate run happened to produce,
 # and any piece of it may legitimately be absent: a repository with no chart
 # produces no CHART_INFO.md, a run with the CVE scan skipped produces no
@@ -62,10 +66,13 @@ for FILE in CHART_INFO.md CHART_CVE.md; do
     cat "${FILE}" >> "${CHART_README}"
   fi
 done
-# Single-element on purpose: kept in the same loop shape as the two above, and
-# as the inline block it came from, so a second TF_* file is a one-word change.
-# shellcheck disable=SC2043
-for FILE in TF_CVE.md; do
+# A project whose Terraform roots scan as a matrix gets one TF_CVE-<root>.md
+# per root (scan.yml names them), each titled with its root, in root order
+# after the repository root's own TF_CVE.md.
+shopt -s nullglob
+TF_SUMMARIES=( TF_CVE.md TF_CVE-*.md )
+shopt -u nullglob
+for FILE in "${TF_SUMMARIES[@]}"; do
   if [[ -f "${FILE}" ]]; then
     cat "${FILE}" >> "${TF_README}"
   fi

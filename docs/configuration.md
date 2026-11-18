@@ -34,7 +34,7 @@ wherever possible.
 > [!IMPORTANT]
 > **The build container and the Docker base images are pinned in the library, not
 > configurable.** Every `container:` block names
-> `grootantech/toolkit:2.0.1` literally, and `docker.yml` hardcodes the
+> `grootantech/toolkit:2.1.0` literally, and `docker.yml` hardcodes the
 > `micro-root`, `nginx`, `python-3-12`, `node-24` and `java-25` bases and the BuildKit
 > driver. Setting `TOOLKIT_BUILD_IMAGE`, `BUILDKIT_IMAGE` or any `*_MICRO_BASE_IMAGE`
 > organisation variable has **no effect** — those rows were removed from this table because
@@ -58,7 +58,7 @@ wherever possible.
 | `RELEASE_VERSION_SUFFIX` | — | Suffix appended to the version, e.g. `backend` → `1.5.0-backend`. |
 | `CHANGELOG_FILE_NAME` | `./CHANGELOG.md` | Changelog path. |
 | `MIGRATION_FILE_NAME` | `./MIGRATION.md` | Migration guide path. |
-| `UPSTREAM_WORKFLOW` | `pr.yml` | Workflow file whose successful run produced the candidate artifacts. |
+| `UPSTREAM_WORKFLOW` | `pr.yml` | Workflow file whose successful run produced the candidate artifacts. `init.yml`'s `upstream-workflow` input overrides it per caller, which a monorepo child with its own workflow file needs. |
 | `HADOLINT_IGNORE` | — | Comma-separated extra hadolint rules to ignore. |
 
 **Monorepo children** are the reason `project-path` exists. Pass it to every workflow that
@@ -97,7 +97,7 @@ A single-project repository omits it; it defaults to the repository root.
 | --- | --- | --- |
 | `TRIVY_HOST` | — | Shared Trivy server. **Unset means every scan downloads the ~1.2 GB database.** |
 | `TRIVY_TIMEOUT` | `60m` | Scan timeout. |
-| `TRIVY_IGNORE_CONFIG_FILE` | `ignored-cves.yml` | Suppression configuration path. |
+| `TRIVY_IGNORE_CONFIG_FILE` | `ignored-cves.yml` | Suppression configuration path, relative to `project-path`. A monorepo child without its own file uses the repository root's; entries of that shared list the child does not contain are not reported as stale. |
 | `TRIVY_IGNORE_CVES` | `KSV-0011 KSV-0014 KSV-0015 KSV-0016 KSV-0018 KSV-0110 KSV-0113 KSV-0125` | Space-separated misconfiguration IDs suppressed platform-wide (set by the platform at deploy time, not by the chart). |
 | `TRIVY_IGNORED_LICENSE_CLASSIFICATIONS` | `notice,permissive,unencumbered` | Licence classes that never warn. |
 | `SKIP_CVE_SCAN` | `false` | Emergency global scan bypass. |
@@ -191,11 +191,13 @@ can resolve without credentials. These settings do not replace required publishi
   for candidates, `${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}:${TAG}` for releases.
 - **Auth**: `docker/login-action` for the build job, `crane auth login` for the containerised
   promote and check jobs.
-- **Dev vs production**: `docker.yml` · `promote` uses `crane mutate --tag` to copy the
-  manifest **layerlessly** from the dev path to the production path, rewriting only the
-  version label, then tags `${TAG}`, `latest`, `${MAJOR}` and `${MINOR}`. Rewriting the label
-  gives the released image its own digest; `IMAGE_INFO.md` records both it and the scanned
-  candidate's.
+- **Dev vs production**: `docker.yml` · `promote` uses `crane copy` to copy the exact
+  candidate named by `candidate-tag` **layerlessly** from the dev path to `${TAG}`, so the
+  released digest is the scanned candidate's (the `org.opencontainers.image.version` label
+  keeps the candidate version). An empty or missing candidate refuses the release; nothing is
+  searched for. An existing `${TAG}` with the same digest is a re-run and is skipped; any
+  other digest refuses. `latest`, `${MAJOR}` and `${MINOR}` move only when no higher release
+  is published in their range, so a hotfix on an older line never rolls them back.
 - **Digest pinning**: `docker.yml` and `buildah.yml` output `image-ref-digest`
   (`registry/repo@sha256:...`). Feed it to `scan.yml` as `image-ref` so the scan cannot
   resolve a different tag than the one that was built.

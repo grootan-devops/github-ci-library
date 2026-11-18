@@ -28,6 +28,11 @@ on:
         type: string
         default: "auto"
         description: "auto | true | false. auto detects whether the Dockerfile exists."
+      upstream-workflow:
+        required: false
+        type: string
+        default: ""
+        description: "Workflow file whose successful pull request run built the candidate, e.g. pr-admin-ui.yml. A monorepo child with its own workflow file sets this. Default: vars.UPSTREAM_WORKFLOW, then pr.yml."
 
     outputs:
       tag:
@@ -132,7 +137,7 @@ jobs:
       pull-requests: read
 
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
 
     env:
       PROJECT_PATH: ${{ inputs.project-path }}
@@ -151,7 +156,7 @@ jobs:
       CHART_DEV_REPOSITORY_SUFFIX: ${{ vars.CHART_DEV_REPOSITORY_SUFFIX || '/dev' }}
       RELEASE_VERSION_SUFFIX: ${{ vars.RELEASE_VERSION_SUFFIX }}
       MASTER_BRANCH_REGEX: ${{ vars.MASTER_BRANCH_REGEX || '^(.*/)?master$' }}
-      UPSTREAM_WORKFLOW: ${{ vars.UPSTREAM_WORKFLOW || 'pr.yml' }}
+      UPSTREAM_WORKFLOW: ${{ inputs.upstream-workflow || vars.UPSTREAM_WORKFLOW || 'pr.yml' }}
       IGNORE_CHART_INPUT: ${{ inputs.ignore-chart }}
       IGNORE_DOCKER_INPUT: ${{ inputs.ignore-docker }}
       INPUT_TAG: ${{ inputs.tag }}

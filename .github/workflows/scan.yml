@@ -93,7 +93,7 @@ jobs:
       contents: read
       checks: write
     container:
-      image: grootantech/toolkit:2.0.1
+      image: grootantech/toolkit:2.1.0
     defaults:
       run:
         working-directory: ${{ inputs.project-path }}
@@ -219,6 +219,7 @@ jobs:
           echo "IAC_SCAN_PATH=${SCAN_PATH}" >> "${GITHUB_ENV}"
 
       - name: Resolve Scan Path & Report Name
+        id: report
         env:
           SCAN_PATH_INPUT: ${{ inputs.scan-path }}
         run: |
@@ -229,6 +230,26 @@ jobs:
             license) PREFIX="license" ;;
             config)  PREFIX="${CONFIG_TYPE}" ;;
           esac
+
+          # Several projects or Terraform roots can scan in one run (a matrix of
+          # this workflow). Artifact names are unique per run, so each one is
+          # suffixed with its project-path; the repository root keeps the bare name.
+          ROOT="${PROJECT_PATH#./}"
+          ROOT="${ROOT%/}"
+          SLUG=""
+          if [[ -n "${ROOT}" && "${ROOT}" != "." ]]; then
+            SLUG="$(printf '%s' "${ROOT}" | tr -c 'A-Za-z0-9._-' '-')"
+          fi
+          echo "slug=${SLUG}" >> "${GITHUB_OUTPUT}"
+          echo "artifact-suffix=${SLUG:+-${SLUG}}" >> "${GITHUB_OUTPUT}"
+
+          # Every Terraform root of a project reaches the same release, so its
+          # report and summary carry the root in their names instead of
+          # overwriting one another there.
+          if [[ "${SCAN_TYPE}" == "config" && "${CONFIG_TYPE}" == "terraform" && -n "${SLUG}" ]]; then
+            PREFIX="terraform-${SLUG}"
+            echo "TF_CVE_INFO_FILE_NAME=TF_CVE-${SLUG}.md" >> "${GITHUB_ENV}"
+          fi
           echo "TRIVY_SCAN_REPORT_NAME=${PREFIX}_trivy_scan_report" >> "${GITHUB_ENV}"
 
           if [[ "${SCAN_TYPE}" == "config" && "${CONFIG_TYPE}" == "terraform" ]]; then
@@ -260,11 +281,24 @@ jobs:
             *) exit "${RESULT}" ;;
           esac
 
+      - name: Name The Terraform Root In Its Summary
+        if: ${{ !cancelled() && inputs.scan-type == 'config' && inputs.config-type == 'terraform' && steps.report.outputs.slug != '' }}
+        env:
+          SLUG: ${{ steps.report.outputs.slug }}
+        run: |
+          set -euo pipefail
+          FILE="TF_CVE-${SLUG}.md"
+          if [[ -f "${FILE}" ]]; then
+            # shellcheck disable=SC2016 # backticks are markdown, not command substitution
+            { IFS= read -r FIRST; printf '%s · root `%s`\n' "${FIRST}" "${PROJECT_PATH}"; cat; } < "${FILE}" > "${FILE}.tmp"
+            mv "${FILE}.tmp" "${FILE}"
+          fi
+
       - name: Upload Scan Reports
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: scan-${{ inputs.scan-type }}${{ inputs.config-type && format('-{0}', inputs.config-type) || '' }}-reports
+          name: scan-${{ inputs.scan-type }}${{ inputs.config-type && format('-{0}', inputs.config-type) || '' }}-reports${{ steps.report.outputs.artifact-suffix }}
           path: |
             ${{ inputs.project-path }}/*_trivy_scan_report.json
             ${{ inputs.project-path }}/*_trivy_scan_report.md
@@ -272,6 +306,7 @@ jobs:
             ${{ inputs.project-path }}/IMAGE_CVE.md
             ${{ inputs.project-path }}/CHART_CVE.md
             ${{ inputs.project-path }}/TF_CVE.md
+            ${{ inputs.project-path }}/TF_CVE-*.md
             ${{ inputs.project-path }}/LICENSE_CVE.md
             ${{ inputs.project-path }}/SBOM_CVE.md
           if-no-files-found: ignore

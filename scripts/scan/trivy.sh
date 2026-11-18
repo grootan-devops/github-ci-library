@@ -12,6 +12,8 @@ set -uo pipefail
 
 : "${SKIP_CVE_SCAN:=false}"
 : "${TRIVY_IGNORE_CONFIG_FILE:=ignored-cves.yml}"
+# Repository root a monorepo child falls back to for its ignore list.
+: "${TRIVY_IGNORE_ROOT:=${GITHUB_WORKSPACE:-}}"
 : "${TRIVY_TIMEOUT:=60m}"
 : "${TRIVY_IGNORE_CVES:=}"
 : "${TRIVY_IGNORED_LICENSE_CLASSIFICATIONS:=notice,permissive,unencumbered}"
@@ -38,6 +40,9 @@ esac
 
 declare -A IGNORED_ITEM_REASONS
 EXIT_CODE=0
+# The ignore list actually read, and whether it is the repository root's.
+IGNORE_LIST_FILE="${TRIVY_IGNORE_CONFIG_FILE}"
+IGNORE_LIST_INHERITED=false
 REASONS=()
 MISSING_REASONS=()
 INVALID_REASONS=()
@@ -279,15 +284,26 @@ execute_trivy_scan() {
   log_info "Trivy scan completed successfully"
 }
 load_ignored_items() {
-  local CONFIG_PATH
+  local CONFIG_PATH ROOT_LIST
   CONFIG_PATH=$(get_ignore_config_path)
 
-  if [[ ! -f "${TRIVY_IGNORE_CONFIG_FILE}" ]]; then
+  # A monorepo child (scanned from its project-path) without a list of its own
+  # inherits the repository root's, so suppressions agreed for the repository
+  # apply to every service in it.
+  if [[ ! -f "${IGNORE_LIST_FILE}" && "${TRIVY_IGNORE_CONFIG_FILE}" != /* && -n "${TRIVY_IGNORE_ROOT}" ]]; then
+    ROOT_LIST="${TRIVY_IGNORE_ROOT%/}/${TRIVY_IGNORE_CONFIG_FILE}"
+    if [[ -f "${ROOT_LIST}" && "$(cd "${TRIVY_IGNORE_ROOT}" && pwd -P)" != "$(pwd -P)" ]]; then
+      IGNORE_LIST_FILE="${ROOT_LIST}"
+      IGNORE_LIST_INHERITED=true
+      log_info "No ${TRIVY_IGNORE_CONFIG_FILE} in this project; using the repository root's."
+    fi
+  fi
+  if [[ ! -f "${IGNORE_LIST_FILE}" ]]; then
     log_warn "Ignore file not found: ${TRIVY_IGNORE_CONFIG_FILE}"
     touch "${IGNORED_ITEMS_FILE}"
     return
   fi
-  log_info "Loading ignored items from: ${CONFIG_PATH}"
+  log_info "Loading ignored items from: ${IGNORE_LIST_FILE} (${CONFIG_PATH})"
   while IFS= read -r LINE; do
     local ITEM_NAME ITEM_PKG ITEM_REASON KEY
     ITEM_NAME=$(jq -r 'fromjson | .id' <<< "${LINE}")
@@ -309,7 +325,7 @@ load_ignored_items() {
         fi
       fi
     fi
-  done < <(yq -o=json ".${CONFIG_PATH}[] | @json" "${TRIVY_IGNORE_CONFIG_FILE}")
+  done < <(yq -o=json ".${CONFIG_PATH}[] | @json" "${IGNORE_LIST_FILE}")
   sort -u "${IGNORED_ITEMS_FILE}" -o "${IGNORED_ITEMS_FILE}"
   log_info "Loaded $(wc -l < "${IGNORED_ITEMS_FILE}") ignored items"
 }
@@ -361,6 +377,16 @@ categorize_items() {
   done < <(comm -12 "${SOURCE_FILE}" "${IGNORED_ITEMS_FILE}")
 }
 
+# An entry of the repository root's list that this project does not contain is
+# not stale: the shared list also covers the repository's other projects. Only a
+# project's own list fails on entries it no longer needs.
+drop_inherited_absent_entries() {
+  if [[ "${IGNORE_LIST_INHERITED}" == "true" && ${#FINAL_FIXED_IGNORED[@]} -gt 0 ]]; then
+    log_info "${#FINAL_FIXED_IGNORED[@]} entries of the repository root's ${TRIVY_IGNORE_CONFIG_FILE} do not occur in this project; a shared list is not checked for stale entries."
+    FINAL_FIXED_IGNORED=()
+  fi
+}
+
 categorize_cve_items() {
   log_info "Categorizing CVE items..."
   categorize_items "${ALL_FIXABLE_FILE}" "FINAL_FIXABLE" "FINAL_FIXABLE_IGNORED"
@@ -371,6 +397,7 @@ categorize_cve_items() {
       FINAL_FIXED_IGNORED+=("${ITEM}")
     fi
   done < <(comm -23 "${IGNORED_ITEMS_FILE}" "${ALL_FOUND_FILE}")
+  drop_inherited_absent_entries
   log_info "Categorized: ${#FINAL_FIXABLE[@]} fixable, ${#FINAL_FIXABLE_IGNORED[@]} ignored, ${#FINAL_UNFIXABLE[@]} unfixable, ${#FINAL_FIXED_IGNORED[@]} stale"
 }
 
@@ -413,6 +440,7 @@ categorize_license_items() {
       fi
     fi
   done < "${IGNORED_ITEMS_FILE}"
+  drop_inherited_absent_entries
   log_info "Categorized licenses across all categories"
 }
 generate_report_header() {
@@ -752,7 +780,7 @@ check_missing_reasons() {
   print_separator
   echo "MISSING REASONS ERROR"
   print_separator
-  echo "The following ignored items are missing a 'reason' field in ${TRIVY_IGNORE_CONFIG_FILE}:"
+  echo "The following ignored items are missing a 'reason' field in ${IGNORE_LIST_FILE}:"
   echo ""
   for ITEM in "${MISSING_REASONS[@]}"; do
     echo "  - ${ITEM}"
@@ -775,7 +803,7 @@ check_invalid_reasons() {
   print_separator
   echo "INVALID REASONS ERROR"
   print_separator
-  echo "The following ignored items have invalid/placeholder 'reason' fields in ${TRIVY_IGNORE_CONFIG_FILE}:"
+  echo "The following ignored items have invalid/placeholder 'reason' fields in ${IGNORE_LIST_FILE}:"
   echo ""
   for ENTRY in "${INVALID_REASONS[@]}"; do
     local ITEM="${ENTRY%%:::*}"
@@ -937,7 +965,7 @@ print_final_summary() {
 
 auto_generate_detected_findings() {
   local SCAN_JSON="./${TRIVY_SCAN_REPORT_NAME}.json"
-  local IGNORE_FILE="./${TRIVY_IGNORE_CONFIG_FILE}"
+  local IGNORE_FILE="${IGNORE_LIST_FILE}"
   local OUTPUT="/tmp/generated-${TRIVY_IGNORE_CONFIG_FILE}"
   local EXISTING_IGNORED=""
   local NEW_FIXABLE=""

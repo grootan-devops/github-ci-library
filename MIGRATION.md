@@ -7,6 +7,47 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.9.2
+
+### Required
+
+- **A release promotes only an exact, named candidate.** A caller of `docker.yml`,
+  `buildah.yml` or `chart.yml` with `is-release: true` passes `candidate-tag` /
+  `candidate-version` from `init.yml`'s `candidate-image-tag` / `candidate-chart-version`, as
+  the examples do. Without it, or when the candidate is missing, the promotion fails instead of
+  promoting the newest matching candidate.
+- **A monorepo child with its own workflow file passes `upstream-workflow`** to `init.yml` in
+  its release workflow (for example `upstream-workflow: pr-admin-ui.yml`). Before, it found no
+  candidate run and promotion guessed; now it is refused.
+- **A direct push to the release branch no longer publishes an image or chart.** Merge through
+  a pull request whose run succeeded. A project without an image or chart still releases.
+- **`chart.yml` with `publish-candidate: false` can no longer release a chart**: the working
+  tree is never packaged. Publish the candidate on the pull request.
+
+### Recommended
+
+- Run the pull request pipeline once on this release before pinning it everywhere: the toolkit
+  moves to 2.1.0 (Trivy 0.76.2, Terraform 1.17.1, OpenTofu 1.13.9, Node.js 26.13.0, Biome
+  2.6.6), which can report new findings or lint warnings.
+- Run several Terraform roots as a `strategy.matrix` of `terraform.yml` and `scan.yml` calls
+  over `project-path`
+  ([example](docs/examples/terraform.md#several-terraform-roots)), and drop any job of your own
+  that copied each root's reports for the release.
+
+### Verify
+
+- A self-hosted runner (`vars.CI_RUNNER`) is Actions Runner v2.327.1 or later, which the
+  Node.js 24 Docker actions require, as `actions/checkout@v7` already did.
+- The released image's digest equals the scanned candidate's (`IMAGE_INFO.md` shows one
+  digest), and its `org.opencontainers.image.version` label carries the candidate version.
+- A hotfix release on an older line leaves `latest` and the higher `MAJOR` / `MINOR` tags
+  where they were; the summary lists the aliases it kept.
+- With several Terraform roots, the release notes carry one Terraform scan summary per root
+  and `trivy_scan_report.tar.gz` holds each root's report.
+- A monorepo child without its own `ignored-cves.yml` now applies the repository root's: a
+  finding suppressed there no longer fails the child's scan, and the log says the root list
+  was used. Give the child its own file to keep the suppressions separate.
+
 ## 1.9.1
 
 No migration is required. This release only updates dependencies.
