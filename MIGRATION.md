@@ -7,6 +7,15 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.9.3
+
+No migration is required.
+
+### Verify
+
+- Re-running a release workflow for a version that is already published succeeds, and its
+  log says each asset is already attached with the same sha256.
+
 ## 1.9.2
 
 ### Required

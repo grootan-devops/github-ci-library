@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.3] - 2026-11-18
+
+### Fixed
+
+- Re-running a release no longer fails on a repository with immutable releases. `release.yml`
+  · `publish` re-uploaded every asset with `--clobber`, which deletes the published asset
+  first, and GitHub refuses that on an immutable release ("Cannot delete asset from an
+  immutable release"), so a release that had already gone out, or one re-run after a later
+  step failed, always failed. An asset already attached with the same sha256 is now left
+  alone and a missing one is added; a different one still replaces the old one on a mutable
+  release, and fails the job on an immutable release instead of being half-replaced.
+- Release archives (`trivy_scan_report.tar.gz`, the test report and directory
+  `additional-artifacts`) are packed deterministically, so the same reports give the same
+  bytes on every run and a re-run's assets match the published ones.
+
 ## [1.9.2] - 2026-11-18
 
 ### Fixed

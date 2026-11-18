@@ -101,6 +101,15 @@ if [[ ! -s "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}" ]]; then
   echo "Release ${TAG}" > "${CONSOLIDATED_RELEASE_CHANGELOG_FILE_NAME}"
 fi
 
+# Deterministic archive: the same files always give the same bytes (sorted
+# names, fixed mtime and owner, no gzip timestamp), so a re-run's asset has the
+# digest of the one already published and publish.sh can leave it alone.
+pack() {
+  local OUT="$1"
+  shift
+  tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -cf - "$@" | gzip -n > "${OUT}"
+}
+
 stage() {
   if [[ -f "${1}" ]]; then
     cp "${1}" _release_assets/
@@ -112,7 +121,7 @@ shopt -s nullglob
 TRIVY_REPORTS=( ./*_trivy_scan_report.* )
 shopt -u nullglob
 if [[ ${#TRIVY_REPORTS[@]} -gt 0 ]]; then
-  tar -czf "${TRIVY_SCAN_REPORT_FILE_NAME}" "${TRIVY_REPORTS[@]}"
+  pack "${TRIVY_SCAN_REPORT_FILE_NAME}" "${TRIVY_REPORTS[@]}"
   stage "${TRIVY_SCAN_REPORT_FILE_NAME}"
 fi
 
@@ -128,7 +137,7 @@ done
 shopt -u nullglob
 
 if [[ -d "${TEST_REPORT_DIR}" ]]; then
-  tar -czf "${TEST_REPORT_DIR}.tar.gz" "${TEST_REPORT_DIR}"
+  pack "${TEST_REPORT_DIR}.tar.gz" "${TEST_REPORT_DIR}"
   stage "${TEST_REPORT_DIR}.tar.gz"
 fi
 
@@ -140,7 +149,7 @@ for ITEM in ${ADDITIONAL_RELEASE_ARTIFACT}; do
     stage "${ITEM}"
   elif [[ -d "${ITEM}" ]]; then
     TAR_FILE="$(basename "${ITEM}").tar.gz"
-    tar -czf "${TAR_FILE}" -C "$(dirname "${ITEM}")" "$(basename "${ITEM}")"
+    pack "${TAR_FILE}" -C "$(dirname "${ITEM}")" "$(basename "${ITEM}")"
     stage "${TAR_FILE}"
   else
     echo "::warning title=Release::Additional artifact '${ITEM}' does not exist."
