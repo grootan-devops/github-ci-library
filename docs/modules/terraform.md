@@ -25,7 +25,10 @@ teardown; it provisions real infrastructure, so call it from its own workflow wi
 [Terraform example](../examples/terraform.md) does.
 
 Calling the workflow opts the repository in: no job checks for a `main.tf`, so `project-path`
-points at the Terraform root.
+points at the Terraform root. A repository with several roots calls `terraform.yml` and the
+`scan.yml` config scan as a `strategy.matrix` over `project-path`
+([example](../examples/terraform.md#several-terraform-roots)): each root's artifacts are named
+after it, and the release bundles every root's scan report and lists every root's scan summary.
 
 ## Consuming a module — no packaging step
 

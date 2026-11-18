@@ -6,9 +6,11 @@
 # number, its head commit and the successful upstream run that carries the
 # artifacts, and each of the three is resolved from whichever source is
 # available -- the commit/pulls association, a merge commit's second parent, a
-# squash commit subject, then the pull request itself. None of it is fatal:
-# a commit pushed straight to the branch has no candidate run, and promotion
-# then falls back to resolving the artifact by tag.
+# squash commit subject, then the pull request itself. None of it is fatal
+# here: a commit pushed straight to the branch has no candidate run, so the
+# candidate outputs stay empty and docker/buildah/chart promotion refuses the
+# release rather than guess. A project that publishes no image or chart still
+# releases, with notes only.
 #
 # `gh` is NOT installed in the toolkit container, only on the runner host, so
 # every lookup talks to the REST API with curl and jq. Do not switch it back.
@@ -19,7 +21,9 @@
 #
 # Env:
 #   GH_TOKEN             token for the REST API (default: empty, lookups then 401)
-#   UPSTREAM_WORKFLOW    workflow file that builds candidates, e.g. pr.yml (default: empty)
+#   UPSTREAM_WORKFLOW    workflow file that builds candidates, e.g. pr.yml; init.yml
+#                        sets it from upstream-workflow, vars.UPSTREAM_WORKFLOW, pr.yml
+#                        (default: empty)
 #   BASE_IMAGE_TAG       resolved image tag without a suffix (default: empty)
 #   BASE_CHART_VERSION   resolved chart version without a suffix (default: empty)
 #   IGNORE_DOCKER        "true" when this run publishes no image (default: empty)
@@ -114,7 +118,7 @@ if [[ -n "${MERGED_PR_NUMBER}" && -z "${UPSTREAM_HEAD_SHA}" ]]; then
   if [[ -n "${UPSTREAM_HEAD_SHA}" ]]; then
     echo "Resolved head commit ${UPSTREAM_HEAD_SHA} from PR #${MERGED_PR_NUMBER}."
   else
-    echo "::warning title=Provenance::Could not read PR #${MERGED_PR_NUMBER} to find its head commit, so no candidate run can be located and the release will carry notes only. The API reported: $(tr '\n' ' ' < "${API_ERR}" | cut -c1-300)"
+    echo "::warning title=Provenance::Could not read PR #${MERGED_PR_NUMBER} to find its head commit, so no candidate run can be located: an image or chart promotion will be refused, and a project without them releases with notes only. The API reported: $(tr '\n' ' ' < "${API_ERR}" | cut -c1-300)"
   fi
 fi
 
@@ -125,7 +129,7 @@ if [[ -n "${UPSTREAM_HEAD_SHA}" ]]; then
   if [[ -n "${UPSTREAM_RUN_ID}" ]]; then
     echo "Upstream run ${UPSTREAM_RUN_ID} (${UPSTREAM_WORKFLOW}) will supply candidate artifacts."
   else
-    echo "::warning title=Provenance::No successful '${UPSTREAM_WORKFLOW}' run found for ${UPSTREAM_HEAD_SHA}. Pre-release artifacts will not be attached to the release."
+    echo "::warning title=Provenance::No successful '${UPSTREAM_WORKFLOW}' run found for ${UPSTREAM_HEAD_SHA}, so no candidate is named: an image or chart promotion will be refused and no pre-release artifacts will be attached. A monorepo child passes its own workflow file as init.yml's upstream-workflow."
   fi
 fi
 
@@ -137,9 +141,9 @@ if [[ -z "${MERGED_PR_NUMBER}" ]]; then
   # commit that LOOKS like a merge and still did not resolve is a problem.
   SUBJECT="$(git log -1 --pretty=%s 2>/dev/null || true)"
   if [[ -n "${UPSTREAM_HEAD_SHA}" || "${SUBJECT}" =~ \(#[0-9]+\)|^Merge\  ]]; then
-    echo "::warning title=Provenance::Could not resolve the merged pull request for ${GITHUB_SHA}, though the commit looks like a merge. Promotion falls back to the newest matching tag."
+    echo "::warning title=Provenance::Could not resolve the merged pull request for ${GITHUB_SHA}, though the commit looks like a merge. No candidate is named, so an image or chart promotion will be refused."
   else
-    echo "::notice title=Provenance::${GITHUB_SHA} was pushed directly, not merged from a pull request, so there is no candidate run. Promotion resolves the image by tag and the release carries notes only."
+    echo "::notice title=Provenance::${GITHUB_SHA} was pushed directly, not merged from a pull request, so there is no candidate run. An image or chart promotion will be refused; a project without them releases with notes only."
   fi
 fi
 

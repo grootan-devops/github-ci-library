@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.2] - 2026-11-18
+
+### Fixed
+
+- A release promotes only the exact candidate its merged pull request built and scanned.
+  `docker.yml`, `buildah.yml` and `chart.yml` · `promote` no longer search when
+  `candidate-tag` / `candidate-version` is empty or missing: the newest `<tag>-<run>.<n>` they
+  picked could be another pull request's build, scanned or not. `buildah.yml` also searched
+  when the named candidate was missing, with a prefix loose enough to match unrelated tags, and
+  `chart.yml` fell back to packaging the working tree, which was never scanned. A direct push,
+  a pull request whose run did not succeed, or a caller that does not pass the candidate now
+  fails the promotion with the production tag unchanged.
+- The released image keeps the scanned digest. `crane copy` replaces `crane mutate --label`,
+  which rewrote the version label and gave the release a digest no scan had seen.
+- A published release is never overwritten. An image tag that already holds the candidate's
+  digest, or a chart version with the same content, is a re-run and is skipped, so a release
+  that failed after the image step can be re-run; any other content fails the promotion.
+- `latest`, `MAJOR` and `MINOR` move only when no higher release is published in their range,
+  so a hotfix on an older line no longer rolls them back.
+- Several Terraform roots scanned in one run as a matrix reach the release. Every root's
+  `scan.yml` uploaded an artifact of the same name, so the second root's upload was rejected,
+  and every root wrote the same report and `TF_CVE.md`, so the release kept one. Each root now
+  has its own artifact (`scan-config-terraform-reports-<root>`,
+  `terraform-test-artifacts-<root>`), report (`terraform-<root>_trivy_scan_report.*`) and
+  summary (`TF_CVE-<root>.md`, titled with the root); the release bundles every report and
+  lists every summary. A single root at the repository root keeps its names.
+
+### Added
+
+- `init.yml` input `upstream-workflow`: the workflow file whose successful pull request run
+  built the candidate, overriding `vars.UPSTREAM_WORKFLOW` per caller. A monorepo child with
+  its own workflow file needs it to find its candidate.
+
 ## [1.9.1] - 2026-11-02
 
 ### Changed

@@ -65,9 +65,11 @@ flowchart LR
 | `notify` | Microsoft Teams Adaptive Card | `release.yml` · `notify`, `notify.yml` |
 
 > [!NOTE]
-> There is no `trigger` phase. GitHub cannot call a reusable workflow from a matrix, so the
-> GitLab monorepo child-pipeline pattern has no counterpart here. A repository that needs
-> per-project pipelines gets one workflow file per project.
+> There is no `trigger` phase: the GitLab monorepo child-pipeline pattern has no counterpart
+> here. A repository that needs per-project pipelines gets one workflow file per project, and
+> each project's release passes its own pull request workflow to `init.yml` as
+> `upstream-workflow`. Several Terraform roots of one project run as a `strategy.matrix` of
+> reusable-workflow calls instead ([example](examples/terraform.md#several-terraform-roots)).
 
 ### Job responsibilities
 
@@ -325,8 +327,8 @@ rather than the first.
 ```mermaid
 flowchart TD
     INIT["init.yml · initialize<br/>• resolves the merged PR<br/>• finds its successful run<br/>• computes the exact candidate tag"]
-    INIT --> IP["docker.yml · promote<br/>crane mutate --tag (by digest)<br/>+ latest · MAJOR · MINOR aliases"]
-    INIT --> CP["chart.yml · promote<br/>helm pull candidate → repackage at TAG → helm push"]
+    INIT --> IP["docker.yml · promote<br/>crane copy (digest kept)<br/>+ latest · MAJOR · MINOR, highest release only"]
+    INIT --> CP["chart.yml · promote<br/>helm pull exact candidate → repackage at TAG → helm push"]
     IP --> RC["release.yml · collect<br/>gh run download &lt;upstream-run-id&gt;"]
     CP --> RC
     RC --> RP["release.yml · publish<br/>git tag + GitHub Release + assets"]

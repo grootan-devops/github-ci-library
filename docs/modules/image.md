@@ -8,18 +8,18 @@ flowchart LR
     IB["docker.yml · build<br/>buildx build --push"]
     IB --> IT["docker.yml · test<br/>smoke test in the image"]
     IB --> IS["scan.yml<br/>scan-type: image"]
-    IP["docker.yml · promote<br/>crane mutate --tag"]
+    IP["docker.yml · promote<br/>crane copy"]
     BB["buildah.yml · build<br/>buildah commit + push"]
     BB --> BT["buildah.yml · test<br/>smoke test in the image"]
     BB --> IS
-    BP["buildah.yml · promote<br/>crane mutate --tag"]
+    BP["buildah.yml · promote<br/>crane copy"]
 ```
 
 | Workflow · Job | Description |
 | --- | --- |
 | `docker.yml` · `build` | Buildx build and push, with every organisation base image injected as a build argument and registry layer cache. Outputs `image-ref-digest`. |
 | `docker.yml` · `test` | Optional smoke test executed **inside** the built image. Off by default. |
-| `docker.yml` · `promote` | Release-mode only. Refuses unless the caller passes a successful `scan-result`. Resolves the candidate and copies it by digest with `crane mutate --tag`, then tags `latest`, `MAJOR`, `MINOR`. |
+| `docker.yml` · `promote` | Release-mode only. Refuses unless the caller passes a successful `scan-result`. Copies the exact `candidate-tag` with `crane copy`, so the released digest is the scanned one, and never searches: an empty or missing candidate refuses the release. A production tag that already holds that digest is a re-run and is skipped; any other digest refuses. `latest`, `MAJOR` and `MINOR` move only when no higher release is published in their range. |
 | `buildah.yml` · `build` | Dockerfile-free minimal image assembly from a base image: `microdnf install`, package-manager purge, documentation/systemd/PAM strip, `USER 10001`. |
 | `buildah.yml` · `test` | Same optional smoke test as `docker.yml` · `test`, run against the Buildah image's `image-ref-digest`. Off by default. |
 | `buildah.yml` · `promote` | Same digest-preserving promotion as `docker.yml`. |

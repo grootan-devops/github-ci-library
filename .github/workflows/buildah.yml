@@ -85,7 +85,7 @@ on:
         required: false
         type: string
         default: ""
-        description: "Exact candidate tag to promote, from init.yml."
+        description: "Exact candidate tag to promote, from init.yml's candidate-image-tag. Required when is-release is true: empty or missing refuses the promotion."
       image-dev-repository:
         required: false
         type: string
@@ -394,6 +394,6 @@ jobs:
           {
             echo "### 🐳 Container Image"
             echo ""
-            echo "❌ \`${TAG}\` was not promoted. Either nothing in \`${REGISTRY_HOST}/${DEV_REPOSITORY}\` matched it or the registry refused the retag; the production tag is unchanged."
+            echo "❌ \`${TAG}\` was not promoted. No exact candidate was named or found in \`${REGISTRY_HOST}/${DEV_REPOSITORY}\`, the production tag already holds a different image, or the registry refused the copy. See the summary above."
             echo ""
           } >> "${GITHUB_STEP_SUMMARY}"

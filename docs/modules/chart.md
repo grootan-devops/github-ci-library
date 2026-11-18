@@ -9,7 +9,7 @@ flowchart LR
     D["docs<br/>helm-docs drift check"]
     L["lint<br/>helm lint --strict"] --> B["build<br/>helm package"]
     B --> P["push<br/>helm push oci://"]
-    PR["promote<br/>pull candidate → repackage → push"]
+    PR["promote<br/>pull exact candidate → repackage → push"]
 ```
 
 | Workflow · Job | Description |
@@ -19,7 +19,7 @@ flowchart LR
 | `chart.yml` · `unittest` | **Optional, opt-in** (`run-unittest: true`, default `false`). `mock-chart` accepts one or more space-separated mock consumer chart directories (default `tests`); each gets a dependency update and runs `helm unittest --strict` against its own `tests/*_test.yaml` suite glob, preventing suites from being cross-run against other charts. Individual JUnit reports are uploaded together. For repositories that *ship* a chart others depend on; requires the `unittest` Helm plugin in the job image. |
 | `chart.yml` · `build` | `helm package --version --app-version`. Uploads `chart-package`. |
 | `chart.yml` · `push` | `helm push` to the OCI repository when `publish-candidate: true` (default). Set it to `false` for PR verification when the candidate OCI repository is not provisioned; release promotion remains separate. Writes `CHART_INFO.md` when it runs. On Docker Hub, candidate and release versions use the same namespace-root repository. |
-| `chart.yml` · `promote` | Release-mode only. Pulls the exact candidate, repackages at the release tag, and pushes to production. On Docker Hub, the source and destination repository are intentionally the same. |
+| `chart.yml` · `promote` | Release-mode only. Pulls the exact `candidate-version`, repackages at the release tag, and pushes to production. An empty or missing candidate refuses the release (no search, no working-tree packaging); an existing production version is skipped when its content matches and refused otherwise. On Docker Hub, the source and destination repository are intentionally the same. |
 | `scan.yml` (`scan-type: config`, `config-type: chart`) | Renders templates, then runs a Trivy misconfiguration scan. |
 | `check.yml` · `chart-existence` / `chart-dependency` | Version collision and development-dependency guards. |
 

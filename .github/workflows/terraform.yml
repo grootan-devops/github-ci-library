@@ -256,6 +256,19 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
+      - name: Name The Test Artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          # One artifact per root: several roots can run this workflow as a matrix in one run.
+          ROOT="${PROJECT_PATH#./}"
+          ROOT="${ROOT%/}"
+          if [[ -n "${ROOT}" && "${ROOT}" != "." ]]; then
+            echo "name=terraform-test-artifacts-$(printf '%s' "${ROOT}" | tr -c 'A-Za-z0-9._-' '-')" >> "${GITHUB_OUTPUT}"
+          else
+            echo "name=terraform-test-artifacts" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Run Module Test Suite
         env:
           TF_TEST_TIMEOUT: ${{ inputs.test-timeout }}
@@ -268,7 +281,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: terraform-test-artifacts
+          name: ${{ steps.artifact.outputs.name || 'terraform-test-artifacts' }}
           path: |
             ${{ inputs.project-path }}/tests/tf_test.log
             ${{ inputs.project-path }}/test_output.tf
@@ -301,10 +314,23 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v7
 
+      - name: Name The Test Artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          # One artifact per root: several roots can run this workflow as a matrix in one run.
+          ROOT="${PROJECT_PATH#./}"
+          ROOT="${ROOT%/}"
+          if [[ -n "${ROOT}" && "${ROOT}" != "." ]]; then
+            echo "name=terraform-test-artifacts-$(printf '%s' "${ROOT}" | tr -c 'A-Za-z0-9._-' '-')" >> "${GITHUB_OUTPUT}"
+          else
+            echo "name=terraform-test-artifacts" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Download Test State
         uses: actions/download-artifact@v8
         with:
-          name: terraform-test-artifacts
+          name: ${{ steps.artifact.outputs.name }}
           path: ${{ inputs.project-path }}
 
       - name: Destroy Test Infrastructure

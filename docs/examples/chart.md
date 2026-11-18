@@ -159,7 +159,10 @@ jobs:
 
 `chart.yml` · `promote` pulls the exact candidate named by `candidate-version`, repackages
 it at the release tag and pushes it to production — the released bytes are the scanned
-bytes. It has no `scan-result` input: unlike `docker.yml` / `buildah.yml`, nothing inside it
+bytes. An empty or missing candidate refuses the release: nothing is searched for and the
+working tree is never packaged, so a release needs the pull request's candidate
+(`publish-candidate`). A production version that already holds the same content is a re-run
+and is skipped; different content refuses. It has no `scan-result` input: unlike `docker.yml` / `buildah.yml`, nothing inside it
 checks that a scan happened, so the only way to require one on a release is to put a scan
 job in the caller and name it in `chart`'s `needs:`. The examples here do not — they take
 the **GitLab parity** shape and rely on the pull request's scan.
