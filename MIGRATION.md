@@ -7,6 +7,15 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.9.4
+
+No migration is required.
+
+### Verify
+
+- A repository without `vars.SONAR_SCANNER_IMAGE` runs the SonarQube job in
+  `sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0`.
+
 ## 1.9.3
 
 No migration is required.

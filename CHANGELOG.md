@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.4] - 2026-11-19
+
+### Fixed
+
+- `sonarqube.yml` no longer fails to start without `vars.SONAR_SCANNER_IMAGE`. It pulled
+  `<IMAGE_REGISTRY>/<SONAR_SCANNER_IMAGE>`, so an unset variable gave `docker pull /`
+  ("invalid reference format"). It now defaults to
+  `sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0`, the GitLab library's pin, and runs it as
+  root so the job can write the workspace. A set `SONAR_SCANNER_IMAGE` is used as before.
+
 ## [1.9.3] - 2026-11-18
 
 ### Fixed
