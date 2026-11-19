@@ -28,13 +28,13 @@ wherever possible.
 
 | Variable | Used by | Description |
 | --- | --- | --- |
-| `SONAR_SCANNER_IMAGE` | `sonarqube` | SonarSource scanner container |
 | `MICRO_ROOT_BASE_IMAGE` | `buildah` | Golang / scratch base, injected as a build arg |
 
 > [!IMPORTANT]
 > **The build container and the Docker base images are pinned in the library, not
 > configurable.** Every `container:` block names
-> `grootantech/toolkit:2.1.0` literally, and `docker.yml` hardcodes the
+> `grootantech/toolkit:2.1.0` literally (`sonarqube.yml`:
+> `sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0`), and `docker.yml` hardcodes the
 > `micro-root`, `nginx`, `python-3-12`, `node-24` and `java-25` bases and the BuildKit
 > driver. Setting `TOOLKIT_BUILD_IMAGE`, `BUILDKIT_IMAGE` or any `*_MICRO_BASE_IMAGE`
 > organisation variable has **no effect** — those rows were removed from this table because
@@ -138,8 +138,8 @@ Configure once at the GitHub organisation level to propagate to every repository
   `secrets.CHART_REGISTRY_USERNAME`, and `secrets.CHART_REGISTRY_PASSWORD` when a repository
   publishes Helm charts. A repository that publishes both artifact types must configure both
   sets; chart-only repositories must not need image variables.
-- **Build containers** — `vars.SONAR_SCANNER_IMAGE`. The toolkit build container is pinned
-  in the library, not set here.
+- **Build containers** — none. The toolkit and SonarQube scanner containers are pinned in the
+  library.
 - **Base images** — `vars.MICRO_ROOT_BASE_IMAGE`, read by `buildah.yml` only. The other
   `*_MICRO_BASE_IMAGE` values are pinned in `docker.yml`.
 - **Security & quality** — `vars.SONAR_URL`, `vars.SONAR_EXTERNAL_URL`,
