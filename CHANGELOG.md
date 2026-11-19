@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.4] - 2026-11-19
+
+### Fixed
+
+- `sonarqube.yml` runs in `sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0`, pinned like the
+  toolkit. It pulled `<IMAGE_REGISTRY>/<SONAR_SCANNER_IMAGE>`, which was `/` without the
+  variable.
+
+### Removed
+
+- `vars.SONAR_SCANNER_IMAGE`.
+
 ## [1.9.3] - 2026-11-18
 
 ### Fixed
