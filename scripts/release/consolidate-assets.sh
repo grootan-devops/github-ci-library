@@ -129,8 +129,11 @@ stage installed_pkgs.txt
 stage sbom.cdx.json
 stage "${RELEASE_CHANGELOG_FILE_NAME}"
 
+# Only the released chart package (chart.yml · promote uploads <chart>-<TAG>.tgz).
+# The candidate run also brings its own <chart>-<TAG>-<run>.<n>.tgz, which is
+# not what was released and is not attached.
 shopt -s nullglob
-for CHART_TGZ in ./*.tgz; do
+for CHART_TGZ in ./*-"${TAG}".tgz; do
   cp "${CHART_TGZ}" _release_assets/
   echo "  + ${CHART_TGZ}"
 done

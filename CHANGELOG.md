@@ -21,6 +21,15 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   1.2.1 showed 1.1.2 as the latest version; `release.yml` · `publish` now publishes a release
   that a higher published release outranks with `--latest=false`, matching the image's
   `latest` alias.
+- The release notes describe the released image and chart, not the candidate. Both the pull
+  request run and the release run upload `image-info` and `chart-info`, and `release.yml`
+  downloaded the candidate run's last, so the notes showed the dev tag
+  (`<repo>-dev:<tag>-<run>.<n>`) instead of the released tag, its aliases and the promoted
+  chart version. This run's artifacts are now downloaded last and win.
+- The release attaches the released chart package. It attached the candidate's
+  `<chart>-<tag>-<run>.<n>.tgz`; `chart.yml` · `promote` now uploads `<chart>-<tag>.tgz`, which
+  is the only package attached. On a re-run it hands on the bytes already published, so an
+  immutable release accepts it.
 - Release archives (`trivy_scan_report.tar.gz`, the test report and directory
   `additional-artifacts`) are packed deterministically, so the same reports give the same
   bytes on every run and a re-run's assets match the published ones.
