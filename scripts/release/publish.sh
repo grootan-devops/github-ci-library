@@ -12,7 +12,13 @@
 # `gh` has no git remote to infer the target from.
 #
 # Re-running the workflow for a tag that already has a release updates it rather
-# than failing, because a release is often re-cut after a notes-only fix.
+# than failing, because a release is often re-cut after a notes-only fix, or
+# re-run after a later step failed. An asset the release already carries with
+# the same sha256 is left alone. One that differs is replaced on a mutable
+# release, but refused on an immutable one: GitHub cannot change its assets, and
+# a different file under a published version is exactly what immutability is
+# there to stop. consolidate-assets.sh packs archives deterministically so a
+# re-run's assets match.
 #
 # Exit codes: 0 on success, otherwise `gh`'s own exit code, so a caller that
 # inspects the step outcome sees what gh reported.
@@ -72,6 +78,23 @@ if [[ "${PRERELEASE}" == "true" ]]; then
   ARGS+=(--prerelease)
 fi
 
+# GitHub marks every newly published release "Latest", so a hotfix on an older
+# line would take the badge from a higher release, the same rollback the image
+# aliases are protected from. Only a release no published release outranks may
+# take it. An unreadable release list leaves GitHub's default.
+CORE="$(grep -Eo '^v?[0-9]+\.[0-9]+\.[0-9]+' <<< "${TAG}" | sed 's/^v//' || true)"
+if [[ -n "${CORE}" && "${DRAFT}" != "true" && "${PRERELEASE}" != "true" ]]; then
+  if PUBLISHED_TAGS="$(gh release list --repo "${GITHUB_REPOSITORY}" --exclude-drafts --exclude-pre-releases --limit 1000 --json tagName --jq '.[].tagName')"; then
+    HIGHEST="$(printf '%s\n%s\n' "${PUBLISHED_TAGS}" "${CORE}" | grep -Eo '^v?[0-9]+\.[0-9]+\.[0-9]+' | sed 's/^v//' | sort -V | tail -n1)"
+    if [[ "${HIGHEST}" != "${CORE}" ]]; then
+      echo "::notice title=Release::${HIGHEST} is higher than ${TAG}, so ${TAG} is published without taking the \"Latest\" badge."
+      ARGS+=(--latest=false)
+    fi
+  else
+    echo "::warning title=Release::Could not list the published releases, so GitHub decides which release is \"Latest\"."
+  fi
+fi
+
 shopt -s nullglob
 ASSETS=()
 for ASSET in payload/_release_assets/*; do
@@ -82,13 +105,14 @@ for ASSET in payload/_release_assets/*; do
 done
 shopt -u nullglob
 
-# Edit the release, then upload assets only when there are any. Exit status is
-# the edit's code when the edit fails, 0 when there is nothing to upload and
-# otherwise the upload's code -- the same contract as the `edit && { empty ||
-# upload }` chain this replaces. Runs with errexit off, so the edit failing
-# reaches the explicit check rather than killing the subshell.
+# Edit the release, then upload only the assets it does not already carry with
+# the same sha256. Exit status is the edit's code when the edit fails, 1 when an
+# immutable release already holds a different asset, otherwise the upload's code
+# (0 when nothing needed uploading). Runs with errexit off, so a failure reaches
+# the explicit checks rather than killing the subshell.
 edit_existing_release() {
-  local EDIT_RESULT
+  local EDIT_RESULT RELEASE_JSON IMMUTABLE ASSET NAME LOCAL_DIGEST PUBLISHED RESULT=0
+  local NEW=() REPLACE=() REFUSED=()
   gh release edit "${TAG}" "${ARGS[@]}"
   EDIT_RESULT=$?
   if [[ "${EDIT_RESULT}" -ne 0 ]]; then
@@ -97,7 +121,35 @@ edit_existing_release() {
   if [[ ${#ASSETS[@]} -eq 0 ]]; then
     return 0
   fi
-  gh release upload "${TAG}" "${ASSETS[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+  if ! RELEASE_JSON="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"; then
+    return 1
+  fi
+  IMMUTABLE="$(jq -r '.immutable // false' <<< "${RELEASE_JSON}")"
+  for ASSET in "${ASSETS[@]}"; do
+    NAME="$(basename "${ASSET}")"
+    LOCAL_DIGEST="sha256:$(sha256sum "${ASSET}" | cut -d' ' -f1)"
+    PUBLISHED="$(jq -r --arg n "${NAME}" '.assets[] | select(.name == $n) | .digest // "unknown"' <<< "${RELEASE_JSON}")"
+    if [[ -z "${PUBLISHED}" ]]; then
+      NEW+=("${ASSET}")
+    elif [[ "${PUBLISHED}" == "${LOCAL_DIGEST}" ]]; then
+      echo "${NAME} is already attached with the same sha256; leaving it."
+    elif [[ "${IMMUTABLE}" == "true" ]]; then
+      REFUSED+=("${NAME}")
+    else
+      REPLACE+=("${ASSET}")
+    fi
+  done
+  if [[ ${#REFUSED[@]} -gt 0 ]]; then
+    echo "'${TAG}' is an immutable release and already carries a different ${REFUSED[*]}. Its assets cannot change; publish a new version instead."
+    RESULT=1
+  fi
+  if [[ ${#NEW[@]} -gt 0 ]]; then
+    gh release upload "${TAG}" "${NEW[@]}" --repo "${GITHUB_REPOSITORY}" || RESULT=$?
+  fi
+  if [[ ${#REPLACE[@]} -gt 0 ]]; then
+    gh release upload "${TAG}" "${REPLACE[@]}" --repo "${GITHUB_REPOSITORY}" --clobber || RESULT=$?
+  fi
+  return "${RESULT}"
 }
 
 # Re-running an existing release updates it rather than failing.

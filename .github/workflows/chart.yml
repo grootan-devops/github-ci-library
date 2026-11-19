@@ -443,6 +443,14 @@ jobs:
           PROD_REPOSITORY: ${{ inputs.chart-repository }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/chart/promote.sh"
 
+      - name: Upload Released Chart Package
+        uses: actions/upload-artifact@v7
+        with:
+          name: chart-release-package
+          path: ${{ inputs.project-path }}/${{ inputs.chart-name }}-${{ inputs.release-tag }}.tgz
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload Chart Info
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7

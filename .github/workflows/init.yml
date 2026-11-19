@@ -230,6 +230,23 @@ jobs:
           IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
         run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/provenance.sh"
 
+      # Before any production write: a release whose image or chart candidate is
+      # unnamed or missing stops here, so no promote job publishes half of it.
+      - name: Release Preflight
+        if: ${{ steps.version.outputs.IS_RELEASE == 'true' }}
+        env:
+          TAG: ${{ steps.version.outputs.TAG }}
+          IGNORE_DOCKER: ${{ steps.version.outputs.IGNORE_DOCKER }}
+          IGNORE_CHART: ${{ steps.version.outputs.IGNORE_CHART }}
+          CANDIDATE_IMAGE_TAG: ${{ steps.provenance.outputs.CANDIDATE_IMAGE_TAG }}
+          CANDIDATE_CHART_VERSION: ${{ steps.provenance.outputs.CANDIDATE_CHART_VERSION }}
+          IMAGE_REGISTRY: ${{ steps.version.outputs.IMAGE_REGISTRY }}
+          IMAGE_DEV_REPOSITORY: ${{ steps.version.outputs.IMAGE_DEV_REPOSITORY }}
+          CHART_REGISTRY: ${{ steps.version.outputs.CHART_REGISTRY }}
+          CHART_DEV_REPOSITORY: ${{ steps.version.outputs.CHART_DEV_REPOSITORY }}
+          CHART_NAME: ${{ steps.version.outputs.CHART_NAME }}
+        run: bash "${GITHUB_WORKSPACE}/.ci-library/scripts/init/preflight.sh"
+
       - name: Publish Initialization Summary
         if: ${{ always() && steps.version.outcome == 'success' }}
         env:

@@ -8,8 +8,8 @@ flowchart LR
 
 | Workflow · Job | Description |
 | --- | --- |
-| `release.yml` · `collect` | Downloads this run's artifacts and, via `gh run download`, the candidate run's. Consolidates `RELEASE_CHANGELOG.md`, `RELEASE_MIGRATION.md`, image/chart/Terraform info and scan reports into the release body; stages downloadable assets separately. |
-| `release.yml` · `publish` | Creates the git tag and the GitHub Release with all staged assets. |
+| `release.yml` · `collect` | Downloads the candidate run's artifacts, then this run's, so the promote jobs' image and chart details win over the candidate's. Consolidates `RELEASE_CHANGELOG.md`, `RELEASE_MIGRATION.md`, image/chart/Terraform info and scan reports into the release body; stages downloadable assets separately. |
+| `release.yml` · `publish` | Creates the git tag and the GitHub Release with all staged assets. A release that a higher published release outranks (a hotfix on an older line) is published without the "Latest" badge. Re-running it for an existing release updates the notes and leaves every asset that is already attached with the same sha256; archives are packed deterministically so a re-run's assets match. A different asset replaces the old one on a mutable release and fails the job on an immutable release, whose assets GitHub does not let change. |
 | `release.yml` · `notify` | Microsoft Teams Adaptive Card with the rendered release notes and links. |
 | `notify.yml` | The same card, standalone. |
 

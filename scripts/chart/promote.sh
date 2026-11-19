@@ -102,6 +102,15 @@ if chart_oci_lookup "${PROD_REF}" "${TAG}" >/dev/null; then
   fi
   echo "${CHART_NAME}:${TAG} is already published with this content; skipping the push."
   PUBLISHED="already published with the same content (re-run)"
+  # helm package stamps the time into the archive, so this run's package is not
+  # byte-identical to the one published. Hand on the published bytes instead: the
+  # release asset then matches the one a first run attached, which an immutable
+  # release requires.
+  rm -f "${PACKAGE}"
+  if ! helm pull "${PROD_REF}" --version "${TAG}" --destination . >/dev/null 2>&1 || [[ ! -f "${PACKAGE}" ]]; then
+    refuse "${PROD_REF}:${TAG} could not be pulled as a package." \
+      "\`${PROD_REF}\` version \`${TAG}\` is published with the same content, but its package could not be pulled to attach to the release."
+  fi
 else
   RESULT=$?
   [[ "${RESULT}" -eq 1 ]] || exit "${RESULT}"

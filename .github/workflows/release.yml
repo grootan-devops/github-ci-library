@@ -78,13 +78,6 @@ jobs:
           path: .ci-library
           token: ${{ secrets.CI_LIBRARY_TOKEN || github.token }}
 
-      - name: Download This Run's Artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          path: ${{ inputs.project-path }}/_artifacts
-          merge-multiple: true
-
       - name: Download Candidate Run's Artifacts
         if: ${{ inputs.upstream-run-id != '' }}
         continue-on-error: true
@@ -107,6 +100,16 @@ jobs:
           else
             echo "::warning title=Release::Candidate run ${UPSTREAM_RUN_ID} yielded no artifacts, so the release will carry only this run's. Check that the run succeeded and its artifacts have not expired."
           fi
+
+      # After the candidate run's, so this run's files win where both runs upload
+      # one of the same name: the promote jobs' IMAGE_INFO.md / CHART_INFO.md name the
+      # released tag and aliases, the candidate's name the dev build.
+      - name: Download This Run's Artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          path: ${{ inputs.project-path }}/_artifacts
+          merge-multiple: true
 
       - name: Consolidate Release Notes & Assets
         env:

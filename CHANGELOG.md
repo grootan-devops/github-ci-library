@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.3] - 2026-11-18
+
+### Fixed
+
+- Re-running a release no longer fails on a repository with immutable releases. `release.yml`
+  · `publish` re-uploaded every asset with `--clobber`, which deletes the published asset
+  first, and GitHub refuses that on an immutable release ("Cannot delete asset from an
+  immutable release"), so a release that had already gone out, or one re-run after a later
+  step failed, always failed. An asset already attached with the same sha256 is now left
+  alone and a missing one is added; a different one still replaces the old one on a mutable
+  release, and fails the job on an immutable release instead of being half-replaced.
+- A hotfix release on an older line no longer takes GitHub's "Latest" badge from a higher
+  release. GitHub marks every newly published release "Latest", so releasing 1.1.2 after
+  1.2.1 showed 1.1.2 as the latest version; `release.yml` · `publish` now publishes a release
+  that a higher published release outranks with `--latest=false`, matching the image's
+  `latest` alias.
+- A release no longer half-publishes. `docker.yml` · `promote` ran before `chart.yml` ·
+  `promote`, and each only checked its own candidate, so a release whose chart candidate was
+  missing published the image and moved `latest` before the chart was refused, and left no
+  GitHub Release. `init.yml` now runs a release preflight after resolving the candidates:
+  when an image or chart it would promote has no named candidate, or the candidate is not in
+  its registry, the release fails there and nothing is written. A project that publishes no
+  image or chart releases as before.
+- The release notes describe the released image and chart, not the candidate. Both the pull
+  request run and the release run upload `image-info` and `chart-info`, and `release.yml`
+  downloaded the candidate run's last, so the notes showed the dev tag
+  (`<repo>-dev:<tag>-<run>.<n>`) instead of the released tag, its aliases and the promoted
+  chart version. This run's artifacts are now downloaded last and win.
+- The release attaches the released chart package. It attached the candidate's
+  `<chart>-<tag>-<run>.<n>.tgz`; `chart.yml` · `promote` now uploads `<chart>-<tag>.tgz`, which
+  is the only package attached. On a re-run it hands on the bytes already published, so an
+  immutable release accepts it.
+- Release archives (`trivy_scan_report.tar.gz`, the test report and directory
+  `additional-artifacts`) are packed deterministically, so the same reports give the same
+  bytes on every run and a re-run's assets match the published ones.
+
 ## [1.9.2] - 2026-11-18
 
 ### Fixed

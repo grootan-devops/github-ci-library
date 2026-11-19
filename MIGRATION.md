@@ -7,6 +7,22 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
+## 1.9.3
+
+No migration is required.
+
+### Verify
+
+- Re-running a release workflow for a version that is already published succeeds, and its
+  log says each asset is already attached with the same sha256.
+- A hotfix release on an older line leaves GitHub's "Latest" badge on the higher release.
+- A release whose image or chart candidate is missing fails in `init` ("Release preflight"),
+  with the production tags and charts unchanged, instead of in a promote job after part of
+  it was published.
+- The release notes' Container Image section names the released tag and its aliases, the Helm
+  chart section the released chart version, and the attached chart package is
+  `<chart>-<tag>.tgz`.
+
 ## 1.9.2
 
 ### Required
