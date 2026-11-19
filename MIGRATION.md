@@ -16,6 +16,9 @@ No migration is required.
 - Re-running a release workflow for a version that is already published succeeds, and its
   log says each asset is already attached with the same sha256.
 - A hotfix release on an older line leaves GitHub's "Latest" badge on the higher release.
+- A release whose image or chart candidate is missing fails in `init` ("Release preflight"),
+  with the production tags and charts unchanged, instead of in a promote job after part of
+  it was published.
 - The release notes' Container Image section names the released tag and its aliases, the Helm
   chart section the released chart version, and the attached chart package is
   `<chart>-<tag>.tgz`.

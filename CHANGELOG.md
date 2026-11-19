@@ -21,6 +21,13 @@ this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   1.2.1 showed 1.1.2 as the latest version; `release.yml` · `publish` now publishes a release
   that a higher published release outranks with `--latest=false`, matching the image's
   `latest` alias.
+- A release no longer half-publishes. `docker.yml` · `promote` ran before `chart.yml` ·
+  `promote`, and each only checked its own candidate, so a release whose chart candidate was
+  missing published the image and moved `latest` before the chart was refused, and left no
+  GitHub Release. `init.yml` now runs a release preflight after resolving the candidates:
+  when an image or chart it would promote has no named candidate, or the candidate is not in
+  its registry, the release fails there and nothing is written. A project that publishes no
+  image or chart releases as before.
 - The release notes describe the released image and chart, not the candidate. Both the pull
   request run and the release run upload `image-info` and `chart-info`, and `release.yml`
   downloaded the candidate run's last, so the notes showed the dev tag
