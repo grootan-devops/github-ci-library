@@ -7,62 +7,34 @@ To upgrade, apply every section after your pinned version up to the target, olde
 Newer sections are split into **Required** (the upgrade breaks or misbehaves without it),
 **Recommended** (aligns an existing project with the current standards) and **Verify**.
 
-## 1.9.3
+## 1.10.0
 
-No migration is required.
-
-### Verify
-
-- Re-running a release workflow for a version that is already published succeeds, and its
-  log says each asset is already attached with the same sha256.
-- A hotfix release on an older line leaves GitHub's "Latest" badge on the higher release.
-- A release whose image or chart candidate is missing fails in `init` ("Release preflight"),
-  with the production tags and charts unchanged, instead of in a promote job after part of
-  it was published.
-- The release notes' Container Image section names the released tag and its aliases, the Helm
-  chart section the released chart version, and the attached chart package is
-  `<chart>-<tag>.tgz`.
-
-## 1.9.2
+Upgrade from 1.9.1; 1.9.2 and 1.9.3 are superseded.
 
 ### Required
 
-- **A release promotes only an exact, named candidate.** A caller of `docker.yml`,
-  `buildah.yml` or `chart.yml` with `is-release: true` passes `candidate-tag` /
-  `candidate-version` from `init.yml`'s `candidate-image-tag` / `candidate-chart-version`, as
-  the examples do. Without it, or when the candidate is missing, the promotion fails instead of
-  promoting the newest matching candidate.
-- **A monorepo child with its own workflow file passes `upstream-workflow`** to `init.yml` in
-  its release workflow (for example `upstream-workflow: pr-admin-ui.yml`). Before, it found no
-  candidate run and promotion guessed; now it is refused.
-- **A direct push to the release branch no longer publishes an image or chart.** Merge through
-  a pull request whose run succeeded. A project without an image or chart still releases.
-- **`chart.yml` with `publish-candidate: false` can no longer release a chart**: the working
-  tree is never packaged. Publish the candidate on the pull request.
+- Release callers of `docker.yml`, `buildah.yml` and `chart.yml` pass `candidate-tag` /
+  `candidate-version` from `init.yml`'s `candidate-image-tag` / `candidate-chart-version`.
+- A monorepo child with its own workflow file passes `upstream-workflow` to `init.yml`.
+- A direct push no longer releases an image or chart: merge through a pull request whose run
+  succeeded.
+- `chart.yml` with `publish-candidate: false` can no longer release a chart.
 
 ### Recommended
 
-- Run the pull request pipeline once on this release before pinning it everywhere: the toolkit
-  moves to 2.1.0 (Trivy 0.76.2, Terraform 1.17.1, OpenTofu 1.13.9, Node.js 26.13.0, Biome
-  2.6.6), which can report new findings or lint warnings.
-- Run several Terraform roots as a `strategy.matrix` of `terraform.yml` and `scan.yml` calls
-  over `project-path`
-  ([example](docs/examples/terraform.md#several-terraform-roots)), and drop any job of your own
-  that copied each root's reports for the release.
+- Run the pull request pipeline once first: toolkit 2.1.0 can report new findings.
+- Run several Terraform roots as a `strategy.matrix` over `project-path`
+  ([example](docs/examples/terraform.md#several-terraform-roots)).
 
 ### Verify
 
-- A self-hosted runner (`vars.CI_RUNNER`) is Actions Runner v2.327.1 or later, which the
-  Node.js 24 Docker actions require, as `actions/checkout@v7` already did.
-- The released image's digest equals the scanned candidate's (`IMAGE_INFO.md` shows one
-  digest), and its `org.opencontainers.image.version` label carries the candidate version.
-- A hotfix release on an older line leaves `latest` and the higher `MAJOR` / `MINOR` tags
-  where they were; the summary lists the aliases it kept.
-- With several Terraform roots, the release notes carry one Terraform scan summary per root
-  and `trivy_scan_report.tar.gz` holds each root's report.
-- A monorepo child without its own `ignored-cves.yml` now applies the repository root's: a
-  finding suppressed there no longer fails the child's scan, and the log says the root list
-  was used. Give the child its own file to keep the suppressions separate.
+- Self-hosted runners are Actions Runner v2.327.1 or later (Node.js 24 actions).
+- The released image digest equals the scanned candidate's.
+- A hotfix leaves `latest`, `MAJOR`, `MINOR` and the "Latest" badge on the higher release.
+- A missing candidate fails in `init` ("Release preflight") with production unchanged.
+- Re-running a published release succeeds and changes nothing.
+- Release notes name the released tag, aliases and chart version.
+- The SonarQube job runs without `vars.SONAR_SCANNER_IMAGE`.
 
 ## 1.9.1
 

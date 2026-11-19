@@ -1,0 +1,173 @@
+[
+  {
+    "type": "TextBlock",
+    "text": "Supersedes 1.9.2 and 1.9.3: upgrade from 1.9.1 straight to 1.10.0.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "Added",
+    "weight": "Bolder",
+    "spacing": "Medium",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• Release preflight in init.yml: a release whose image or chart candidate is unnamed or",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  missing fails before anything is written to production.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• init.yml input upstream-workflow: the pull request workflow that built the candidate,",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  for monorepo children with their own workflow file.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• Several Terraform roots in one run: per-root artifacts (scan-config-terraform-reports-<root>,",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  terraform-test-artifacts-<root>), reports and TF_CVE-<root>.md; the release lists every",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  root.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "Changed",
+    "weight": "Bolder",
+    "spacing": "Medium",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• Promotion is fail-closed: docker.yml, buildah.yml and chart.yml · promote take only",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  the exact candidate from the merged pull request's successful run. No newest-tag search, no",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  working-tree chart.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• crane copy replaces crane mutate: the released digest is the scanned one.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• grootantech/toolkit 2.0.1 → 2.1.0, moby/buildkit v0.34.1 → v0.35.0,",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  docker/login-action v3 → v4, docker/setup-buildx-action v3 → v4,",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  docker/build-push-action v6 → v7 (Node.js 24).",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "Fixed",
+    "weight": "Bolder",
+    "spacing": "Medium",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• A published image tag or chart version is never overwritten; the same content is a re-run",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  and is skipped.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• latest, MAJOR and MINOR, and GitHub's \"Latest\" badge, stay on the highest release; a",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  hotfix on an older line no longer takes them.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• Re-running a release works on immutable releases: assets with the same sha256 are kept,",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  archives are deterministic, a chart re-run attaches the published package.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• Release notes and the chart asset describe the release, not the candidate.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• A monorepo child without ignored-cves.yml uses the repository root's.",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "• sonarqube.yml without vars.SONAR_SCANNER_IMAGE no longer pulls /; it defaults to",
+    "spacing": "Small",
+    "wrap": true
+  },
+  {
+    "type": "TextBlock",
+    "text": "  sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0, run as root.",
+    "spacing": "Small",
+    "wrap": true
+  }
+]

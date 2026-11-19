@@ -5,99 +5,42 @@ All notable changes to this project will be documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.9.3] - 2026-11-18
+## [1.10.0] - 2026-11-19
 
-### Fixed
-
-- Re-running a release no longer fails on a repository with immutable releases. `release.yml`
-  · `publish` re-uploaded every asset with `--clobber`, which deletes the published asset
-  first, and GitHub refuses that on an immutable release ("Cannot delete asset from an
-  immutable release"), so a release that had already gone out, or one re-run after a later
-  step failed, always failed. An asset already attached with the same sha256 is now left
-  alone and a missing one is added; a different one still replaces the old one on a mutable
-  release, and fails the job on an immutable release instead of being half-replaced.
-- A hotfix release on an older line no longer takes GitHub's "Latest" badge from a higher
-  release. GitHub marks every newly published release "Latest", so releasing 1.1.2 after
-  1.2.1 showed 1.1.2 as the latest version; `release.yml` · `publish` now publishes a release
-  that a higher published release outranks with `--latest=false`, matching the image's
-  `latest` alias.
-- A release no longer half-publishes. `docker.yml` · `promote` ran before `chart.yml` ·
-  `promote`, and each only checked its own candidate, so a release whose chart candidate was
-  missing published the image and moved `latest` before the chart was refused, and left no
-  GitHub Release. `init.yml` now runs a release preflight after resolving the candidates:
-  when an image or chart it would promote has no named candidate, or the candidate is not in
-  its registry, the release fails there and nothing is written. A project that publishes no
-  image or chart releases as before.
-- The release notes describe the released image and chart, not the candidate. Both the pull
-  request run and the release run upload `image-info` and `chart-info`, and `release.yml`
-  downloaded the candidate run's last, so the notes showed the dev tag
-  (`<repo>-dev:<tag>-<run>.<n>`) instead of the released tag, its aliases and the promoted
-  chart version. This run's artifacts are now downloaded last and win.
-- The release attaches the released chart package. It attached the candidate's
-  `<chart>-<tag>-<run>.<n>.tgz`; `chart.yml` · `promote` now uploads `<chart>-<tag>.tgz`, which
-  is the only package attached. On a re-run it hands on the bytes already published, so an
-  immutable release accepts it.
-- Release archives (`trivy_scan_report.tar.gz`, the test report and directory
-  `additional-artifacts`) are packed deterministically, so the same reports give the same
-  bytes on every run and a re-run's assets match the published ones.
-
-## [1.9.2] - 2026-11-18
-
-### Fixed
-
-- A release promotes only the exact candidate its merged pull request built and scanned.
-  `docker.yml`, `buildah.yml` and `chart.yml` · `promote` no longer search when
-  `candidate-tag` / `candidate-version` is empty or missing: the newest `<tag>-<run>.<n>` they
-  picked could be another pull request's build, scanned or not. `buildah.yml` also searched
-  when the named candidate was missing, with a prefix loose enough to match unrelated tags, and
-  `chart.yml` fell back to packaging the working tree, which was never scanned. A direct push,
-  a pull request whose run did not succeed, or a caller that does not pass the candidate now
-  fails the promotion with the production tag unchanged.
-- The released image keeps the scanned digest. `crane copy` replaces `crane mutate --label`,
-  which rewrote the version label and gave the release a digest no scan had seen.
-- A published release is never overwritten. An image tag that already holds the candidate's
-  digest, or a chart version with the same content, is a re-run and is skipped, so a release
-  that failed after the image step can be re-run; any other content fails the promotion.
-- `latest`, `MAJOR` and `MINOR` move only when no higher release is published in their range,
-  so a hotfix on an older line no longer rolls them back.
-- Several Terraform roots scanned in one run as a matrix reach the release. Every root's
-  `scan.yml` uploaded an artifact of the same name, so the second root's upload was rejected,
-  and every root wrote the same report and `TF_CVE.md`, so the release kept one. Each root now
-  has its own artifact (`scan-config-terraform-reports-<root>`,
-  `terraform-test-artifacts-<root>`), report (`terraform-<root>_trivy_scan_report.*`) and
-  summary (`TF_CVE-<root>.md`, titled with the root); the release bundles every report and
-  lists every summary. A single root at the repository root keeps its names.
-
-### Changed
-
-- Updated the build container and the public images and actions the workflows use to their
-  latest releases. The `micro-root`, `nginx`, `python-3-12`, `node-24` and `java-25` base
-  images are already on their latest tags (1.2.0, 1.2.1, 1.2.1, 1.2.1, 1.3.1).
-  - [`grootantech/toolkit`](https://github.com/grootan-devops/toolkit) from `2.0.1` to `2.1.0`
-    in every `container:` and as `TOOLKIT_BUILD_IMAGE`: Node.js 26.13.0, npm 12.2.2,
-    Terraform 1.17.1, OpenTofu 1.13.9, Trivy 0.76.2, uv 0.13.7, Biome 2.6.6, yq 4.54.2,
-    buildx 0.38.2 and betterleaks 1.10.0.
-  - [`moby/buildkit`](https://github.com/moby/buildkit) from `v0.34.1` to `v0.35.0`, the
-    `docker.yml` BuildKit driver.
-  - [`docker/login-action`](https://github.com/docker/login-action) from `v3` to `v4`
-    (`8aa5831`), [`docker/setup-buildx-action`](https://github.com/docker/setup-buildx-action)
-    from `v3` to `v4` (`f87e599`) and
-    [`docker/build-push-action`](https://github.com/docker/build-push-action) from `v6` to `v7`
-    (`c3c9e26`). All three move from Node.js 20, which GitHub now warns about, to Node.js 24;
-    the inputs and outputs the workflows use are unchanged.
-  - `actions/checkout@v7`, `actions/upload-artifact@v7`, `actions/download-artifact@v8` and
-    `actions/cache@v6` already track their latest releases.
-
-- A monorepo child scanned from its `project-path` without an `ignored-cves.yml` of its own
-  uses the repository root's instead of scanning with no suppressions. Entries of that
-  shared list the child does not contain are not stale there, so they no longer fail its
-  scan; a child's own list, and a single project, are checked exactly as before.
+Supersedes 1.9.2 and 1.9.3: upgrade from 1.9.1 straight to 1.10.0.
 
 ### Added
 
-- `init.yml` input `upstream-workflow`: the workflow file whose successful pull request run
-  built the candidate, overriding `vars.UPSTREAM_WORKFLOW` per caller. A monorepo child with
-  its own workflow file needs it to find its candidate.
+- Release preflight in `init.yml`: a release whose image or chart candidate is unnamed or
+  missing fails before anything is written to production.
+- `init.yml` input `upstream-workflow`: the pull request workflow that built the candidate,
+  for monorepo children with their own workflow file.
+- Several Terraform roots in one run: per-root artifacts (`scan-config-terraform-reports-<root>`,
+  `terraform-test-artifacts-<root>`), reports and `TF_CVE-<root>.md`; the release lists every
+  root.
+
+### Changed
+
+- Promotion is fail-closed: `docker.yml`, `buildah.yml` and `chart.yml` · `promote` take only
+  the exact candidate from the merged pull request's successful run. No newest-tag search, no
+  working-tree chart.
+- `crane copy` replaces `crane mutate`: the released digest is the scanned one.
+- `grootantech/toolkit` 2.0.1 → 2.1.0, `moby/buildkit` v0.34.1 → v0.35.0,
+  `docker/login-action` v3 → v4, `docker/setup-buildx-action` v3 → v4,
+  `docker/build-push-action` v6 → v7 (Node.js 24).
+
+### Fixed
+
+- A published image tag or chart version is never overwritten; the same content is a re-run
+  and is skipped.
+- `latest`, `MAJOR` and `MINOR`, and GitHub's "Latest" badge, stay on the highest release; a
+  hotfix on an older line no longer takes them.
+- Re-running a release works on immutable releases: assets with the same sha256 are kept,
+  archives are deterministic, a chart re-run attaches the published package.
+- Release notes and the chart asset describe the release, not the candidate.
+- A monorepo child without `ignored-cves.yml` uses the repository root's.
+- `sonarqube.yml` without `vars.SONAR_SCANNER_IMAGE` no longer pulls `/`; it defaults to
+  `sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0`, run as root.
 
 ## [1.9.1] - 2026-11-02
 

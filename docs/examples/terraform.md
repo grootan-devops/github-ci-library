@@ -348,7 +348,7 @@ module "network" {
 A repository with several roots (`stacks/network`, `stacks/compute`) releases them under one
 version, so it runs `terraform.yml` and the `scan.yml` config scan once per root as a
 `strategy.matrix` of reusable-workflow calls in the same `pr.yml`, each with its own
-`project-path` and `state-name`. From 1.9.2 every root keeps its own artifacts in the run
+`project-path` and `state-name`. From 1.10.0 every root keeps its own artifacts in the run
 (`scan-config-terraform-reports-stacks-network`, `terraform-test-artifacts-stacks-network`),
 and the release needs no extra job to collect them: `trivy_scan_report.tar.gz` holds each
 root's `terraform-<root>_trivy_scan_report.*`, and the release notes carry one Terraform scan
@@ -363,7 +363,7 @@ gets the same names, bundle and notes as before.
         include:
           - { root: stacks/network, state: network }
           - { root: stacks/compute, state: compute }
-    uses: grootan-devops/github-ci-library/.github/workflows/terraform.yml@1.9.2
+    uses: grootan-devops/github-ci-library/.github/workflows/terraform.yml@1.10.0
     secrets: inherit
     with:
       project-path: ${{ matrix.root }}
@@ -378,7 +378,7 @@ gets the same names, bundle and notes as before.
     permissions:
       contents: read
       checks: write
-    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.9.2
+    uses: grootan-devops/github-ci-library/.github/workflows/scan.yml@1.10.0
     secrets: inherit
     with:
       scan-type: config

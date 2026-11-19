@@ -28,7 +28,7 @@ wherever possible.
 
 | Variable | Used by | Description |
 | --- | --- | --- |
-| `SONAR_SCANNER_IMAGE` | `sonarqube` | SonarSource scanner container |
+| `SONAR_SCANNER_IMAGE` | `sonarqube` | Scanner image, under `IMAGE_REGISTRY` when set. Default `sonarsource/sonar-scanner-cli:12.4.0.4321_8.4.0`. |
 | `MICRO_ROOT_BASE_IMAGE` | `buildah` | Golang / scratch base, injected as a build arg |
 
 > [!IMPORTANT]
@@ -138,7 +138,7 @@ Configure once at the GitHub organisation level to propagate to every repository
   `secrets.CHART_REGISTRY_USERNAME`, and `secrets.CHART_REGISTRY_PASSWORD` when a repository
   publishes Helm charts. A repository that publishes both artifact types must configure both
   sets; chart-only repositories must not need image variables.
-- **Build containers** — `vars.SONAR_SCANNER_IMAGE`. The toolkit build container is pinned
+- **Build containers** — `vars.SONAR_SCANNER_IMAGE` (optional). The toolkit build container is pinned
   in the library, not set here.
 - **Base images** — `vars.MICRO_ROOT_BASE_IMAGE`, read by `buildah.yml` only. The other
   `*_MICRO_BASE_IMAGE` values are pinned in `docker.yml`.
